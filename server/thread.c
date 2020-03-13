@@ -82,6 +82,7 @@ struct thread_wait
 {
     struct thread_wait     *next;       /* next wait structure for this thread */
     struct thread          *thread;     /* owner thread */
+    int                     capacity;   /* size of objects */
     int                     count;      /* count of objects */
     int                     flags;
     int                     abandoned;
@@ -961,6 +962,47 @@ void make_wait_abandoned( struct wait_queue_entry *entry )
     entry->wait->abandoned = 1;
 }
 
+static struct thread_wait *wait_free_pool;
+
+static struct thread_wait *thread_wait_alloc(unsigned int count)
+{
+    struct thread_wait *wait, *pool;
+    unsigned int i;
+
+    if (count > 2)
+        return mem_alloc( FIELD_OFFSET(struct thread_wait, queues[count]) );
+
+    if (!(wait = wait_free_pool))
+    {
+        unsigned int size = FIELD_OFFSET( struct thread_wait, queues[2] );
+        if (!(pool = calloc( 64, size )))
+            return NULL;
+
+        for (i = 0; i < 64; ++i)
+        {
+            wait = (struct thread_wait *)((char*)pool + size * i);
+            wait->next = wait_free_pool;
+            wait_free_pool = wait;
+        }
+    }
+
+    wait_free_pool = wait->next;
+    assert(wait);
+    return wait;
+}
+
+static void thread_wait_free(struct thread_wait *wait)
+{
+    if (wait->capacity > 2)
+    {
+        free(wait);
+        return;
+    }
+
+    wait->next = wait_free_pool;
+    wait_free_pool = wait;
+}
+
 /* finish waiting */
 static unsigned int end_wait( struct thread *thread, unsigned int status )
 {
@@ -988,7 +1030,7 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
     for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
         entry->obj->ops->remove_queue( entry->obj, entry );
     if (wait->user) remove_timeout_user( wait->user );
-    free( wait );
+    thread_wait_free( wait );
     return status;
 }
 
@@ -1000,9 +1042,10 @@ static int wait_on( const select_op_t *select_op, unsigned int count, struct obj
     struct wait_queue_entry *entry;
     unsigned int i;
 
-    if (!(wait = mem_alloc( FIELD_OFFSET(struct thread_wait, queues[count]) ))) return 0;
+    if (!(wait = thread_wait_alloc( count ))) { assert(0); return 0; }
     wait->next    = current->wait;
     wait->thread  = current;
+    wait->capacity = count;
     wait->count   = count;
     wait->flags   = flags;
     wait->select  = select_op->op;
