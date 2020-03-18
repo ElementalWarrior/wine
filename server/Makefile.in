@@ -27,6 +27,7 @@ C_SRCS = \
 	object.c \
 	process.c \
 	procfs.c \
+	prof.c \
 	ptrace.c \
 	queue.c \
 	region.c \
