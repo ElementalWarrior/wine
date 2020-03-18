@@ -109,6 +109,8 @@
 #include "winioctl.h"
 #include "ddk/wdm.h"
 
+#include "wine/prof.h"
+
 #if !defined(O_SYMLINK) && defined(O_PATH)
 # define O_SYMLINK (O_NOFOLLOW | O_PATH)
 #endif
@@ -606,6 +608,8 @@ static inline void main_loop_epoll(void)
 {
     int i, ret, timeout;
     struct epoll_event events[128];
+    static struct __wine_prof_data __prof = { "epoll_wait", 0, 0, 1000000000ull };
+    size_t wait_ns;
 
     assert( POLLIN == EPOLLIN );
     assert( POLLOUT == EPOLLOUT );
@@ -614,6 +618,7 @@ static inline void main_loop_epoll(void)
 
     if (epoll_fd == -1) return;
 
+    wait_ns = __wine_prof_start(&__prof);
     while (active_users)
     {
         timeout = get_next_timeout();
@@ -621,7 +626,9 @@ static inline void main_loop_epoll(void)
         if (!active_users) break;  /* last user removed by a timeout */
         if (epoll_fd == -1) break;  /* an error occurred with epoll */
 
+        __wine_prof_stop(&__prof, wait_ns);
         ret = epoll_wait( epoll_fd, events, ARRAY_SIZE( events ), timeout );
+        wait_ns = __wine_prof_start(&__prof);
         set_current_time();
 
         /* put the events into the pollfd array first, like poll does */
