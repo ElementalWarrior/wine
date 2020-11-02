@@ -35,6 +35,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(prof);
 WINE_DECLARE_DEBUG_CHANNEL(fprof);
 
+static int prof_tid = -1;
 static int trace_on = -1;
 static int fprof_on = -1;
 
@@ -73,6 +74,9 @@ static __cdecl __attribute__((noinline)) void prof_initialize(void)
 
     period_ticks = (getenv("WINEPROF_PERIODNS") ? atoll(getenv("WINEPROF_PERIODNS")) : (1000000000ull / 30)) * ticks_per_ns;
     spent_pctage = getenv("WINEPROF_SPENTPCT") ? atoll(getenv("WINEPROF_SPENTPCT")) : 5;
+    if (!getenv("WINEPROF_THREADID")) prof_tid = 0;
+    else if (!strcmp(getenv("WINEPROF_THREADID"), "render")) prof_tid = 1;
+    else prof_tid = atoll(getenv("WINEPROF_THREADID"));
 }
 
 struct __wine_prof_data *__cdecl __wine_prof_data_alloc(void)
@@ -87,6 +91,7 @@ size_t __cdecl __wine_prof_start( struct __wine_prof_data *data )
     if (!data || !data->name || !trace_on) return 0;
     if (__builtin_expect(trace_on == -1, 0) && !(trace_on = TRACE_ON(prof))) return 0;
     if (__builtin_expect(period_ticks == 0, 0)) prof_initialize();
+    if (prof_tid != 0 && prof_tid != GetCurrentThreadId()) return 0;
 
     start_ticks = prof_ticks();
     if (__atomic_load_n(&data->print_ticks, __ATOMIC_ACQUIRE) == 0)
@@ -100,6 +105,7 @@ void __cdecl __wine_prof_stop( struct __wine_prof_data *data, size_t start_ticks
     size_t stop_ticks, spent_ticks, total_ticks, accum_ticks, print_ticks, limit_ticks;
 
     if (!data || !data->name || !trace_on) return;
+    if (prof_tid != 0 && prof_tid != GetCurrentThreadId()) return;
 
     stop_ticks = prof_ticks();
     print_ticks = data->print_ticks;
@@ -131,6 +137,7 @@ void __cdecl __wine_prof_frame( struct __wine_prof_frame_data *data )
 {
     size_t time_ticks, i;
 
+    if (prof_tid == 1) prof_tid = GetCurrentThreadId();
     if (!data || !data->name || !fprof_on) return;
     if (__builtin_expect(fprof_on == -1, 0) && !(fprof_on = TRACE_ON(fprof))) return;
     if (__builtin_expect(period_ticks == 0, 0)) prof_initialize();
