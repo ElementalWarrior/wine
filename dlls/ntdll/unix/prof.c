@@ -33,8 +33,10 @@
 #include <time.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(prof);
+WINE_DECLARE_DEBUG_CHANNEL(fprof);
 
 static int trace_on = -1;
+static int fprof_on = -1;
 
 static size_t period_ticks;
 static size_t spent_pctage;
@@ -123,4 +125,38 @@ void __cdecl __wine_prof_stop( struct __wine_prof_data *data, size_t start_ticks
                 accum_ticks / ticks_per_ns, accum_ticks * 100u / total_ticks);
         __atomic_fetch_sub(&data->accum_ticks, accum_ticks, __ATOMIC_RELEASE);
     }
+}
+
+void __cdecl __wine_prof_frame( struct __wine_prof_frame_data *data )
+{
+    size_t time_ticks, i;
+
+    if (!data || !data->name || !fprof_on) return;
+    if (__builtin_expect(fprof_on == -1, 0) && !(fprof_on = TRACE_ON(fprof))) return;
+    if (__builtin_expect(period_ticks == 0, 0)) prof_initialize();
+
+    time_ticks = prof_ticks();
+
+    if (!data->prev_ticks)
+    {
+        data->prev_ticks = time_ticks;
+        data->print_ticks = time_ticks;
+        return;
+    }
+
+    data->time_ticks[data->time_count++] = time_ticks - data->prev_ticks;
+    data->prev_ticks = time_ticks;
+
+    if ((time_ticks - data->print_ticks) / 1000 / 1000 < 5000 &&
+        data->time_count < 1024)
+        return;
+
+    for (i = 0; i < data->time_count; ++i)
+    {
+        TRACE_(fprof)("%s: %zu %zu\n", data->name, data->print_ticks / ticks_per_ns, data->time_ticks[i] / ticks_per_ns);
+        data->print_ticks += data->time_ticks[i];
+    }
+
+    data->time_count = 0;
+    data->print_ticks = time_ticks;
 }

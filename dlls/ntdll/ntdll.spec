@@ -1624,6 +1624,7 @@
 @ cdecl -norelay __wine_prof_data_alloc()
 @ cdecl -norelay __wine_prof_start(ptr)
 @ cdecl -norelay __wine_prof_stop(ptr long)
+@ cdecl -norelay __wine_prof_frame(ptr)
 
 # Virtual memory
 @ cdecl -syscall __wine_locked_recvmsg(long ptr long)

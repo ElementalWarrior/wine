@@ -37,9 +37,19 @@ struct __wine_prof_data
     size_t limit_ns;
 };
 
+struct __wine_prof_frame_data
+{
+    const char *name;
+    size_t  print_ticks;
+    size_t  prev_ticks;
+    size_t  time_count;
+    size_t  time_ticks[1024];
+};
+
 extern struct __wine_prof_data *__cdecl __wine_prof_data_alloc(void);
 extern size_t __cdecl __wine_prof_start( struct __wine_prof_data * );
 extern void __cdecl __wine_prof_stop( struct __wine_prof_data *, size_t );
+extern void __cdecl __wine_prof_frame( struct __wine_prof_frame_data * );
 
 #define PROF_STR_I(x) #x
 #define PROF_STR(x) PROF_STR_I(x)

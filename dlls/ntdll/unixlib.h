@@ -100,6 +100,7 @@ struct unix_funcs
     struct __wine_prof_data *(CDECL *prof_data_alloc)(void);
     size_t        (CDECL *prof_start)( struct __wine_prof_data *data );
     void          (CDECL *prof_stop)( struct __wine_prof_data *data, size_t start_ns );
+    void          (CDECL *prof_frame)( struct __wine_prof_frame_data *data );
 
     /* steamclient HACK */
     void          (CDECL *steamclient_setup_trampolines)( HMODULE src_mod, HMODULE tgt_mod );

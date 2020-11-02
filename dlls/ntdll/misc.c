@@ -561,3 +561,8 @@ void __cdecl __wine_prof_stop( struct __wine_prof_data *data, size_t start_ns )
 {
     unix_funcs->prof_stop( data, start_ns );
 }
+
+void __cdecl __wine_prof_frame( struct __wine_prof_frame_data *data )
+{
+    unix_funcs->prof_frame( data );
+}
