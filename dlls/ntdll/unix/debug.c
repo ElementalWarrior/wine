@@ -42,6 +42,7 @@
 
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+WINE_DECLARE_DEBUG_CHANNEL(microsecs);
 
 struct debug_info
 {
@@ -294,7 +295,14 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
 
     if (init_done)
     {
-        if (TRACE_ON(timestamp))
+        if (TRACE_ON(microsecs))
+        {
+            LARGE_INTEGER counter, frequency, microsecs;
+            NtQueryPerformanceCounter(&counter, &frequency);
+            microsecs.QuadPart = counter.QuadPart * 1000000 / frequency.QuadPart;
+            pos += sprintf( pos, "%3u.%06u:", (unsigned int)(microsecs.QuadPart / 1000000), (unsigned int)(microsecs.QuadPart % 1000000) );
+        }
+        else if (TRACE_ON(timestamp))
         {
             ULONG ticks = NtGetTickCount();
             pos += sprintf( pos, "%3u.%03u:", ticks / 1000, ticks % 1000 );
