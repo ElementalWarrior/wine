@@ -1617,6 +1617,7 @@
 @ cdecl -norelay __wine_dbg_output(str)
 @ cdecl -norelay __wine_dbg_strdup(str)
 @ cdecl -norelay __wine_dbg_vprintf(str ptr)
+@ cdecl -norelay __wine_dbg_vsprintf(str ptr)
 
 # Virtual memory
 @ cdecl -syscall __wine_locked_recvmsg(long ptr long)

@@ -1818,6 +1818,7 @@ static struct unix_funcs unix_funcs =
     __wine_dbg_output,
     __wine_dbg_header,
     __wine_dbg_vprintf,
+    __wine_dbg_vsprintf,
     steamclient_setup_trampolines,
 };
 
