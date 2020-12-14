@@ -18,7 +18,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#pragma makedep proxy
 #pragma makedep register
+
+[
+    helpstring("LDAP Namespace Object"),
+    progid("LDAPNamespace"),
+    uuid(228d9a82-c302-11cf-9aa4-00aa004a5691),
+    threading(both)
+]
+coclass ADs { }
 
 [
     helpstring("AD System Info Object"),

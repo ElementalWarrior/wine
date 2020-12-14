@@ -61,8 +61,13 @@ static const struct
     { &GUID_WICPixelFormat16bppBGR555, PixelFormat16bppRGB555, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat24bppBGR, PixelFormat24bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppBGR, PixelFormat32bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat48bppRGB, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppBGRA, PixelFormat32bppARGB, WICBitmapPaletteTypeFixedHalftone256 },
     { &GUID_WICPixelFormat32bppPBGRA, PixelFormat32bppPARGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat32bppCMYK, PixelFormat32bppCMYK, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat32bppGrayFloat, PixelFormat32bppARGB, WICBitmapPaletteTypeFixedGray256 },
+    { &GUID_WICPixelFormat64bppCMYK, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
+    { &GUID_WICPixelFormat64bppRGBA, PixelFormat48bppRGB, WICBitmapPaletteTypeFixedHalftone256 },
     { NULL }
 };
 
@@ -1381,50 +1386,29 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromGdiDib(GDIPCONST BITMAPINFO* info,
                                                VOID *bits, GpBitmap **bitmap)
 {
     DWORD height, stride;
-    PixelFormat format;
+    HBITMAP hbm;
+    void *bmbits;
+    GpStatus status;
 
-    FIXME("(%p, %p, %p) - partially implemented\n", info, bits, bitmap);
+    TRACE("(%p, %p, %p)\n", info, bits, bitmap);
 
     if (!info || !bits || !bitmap)
         return InvalidParameter;
 
+    hbm = CreateDIBSection(0, info, DIB_RGB_COLORS, &bmbits, NULL, 0);
+    if (!hbm)
+        return InvalidParameter;
+
     height = abs(info->bmiHeader.biHeight);
     stride = ((info->bmiHeader.biWidth * info->bmiHeader.biBitCount + 31) >> 3) & ~3;
+    TRACE("height %u, stride %u, image size %u\n", height, stride, height * stride);
 
-    if(info->bmiHeader.biHeight > 0) /* bottom-up */
-    {
-        bits = (BYTE*)bits + (height - 1) * stride;
-        stride = -stride;
-    }
+    memcpy(bmbits, bits, height * stride);
 
-    switch(info->bmiHeader.biBitCount) {
-    case 1:
-        format = PixelFormat1bppIndexed;
-        break;
-    case 4:
-        format = PixelFormat4bppIndexed;
-        break;
-    case 8:
-        format = PixelFormat8bppIndexed;
-        break;
-    case 16:
-        format = PixelFormat16bppRGB555;
-        break;
-    case 24:
-        format = PixelFormat24bppRGB;
-        break;
-    case 32:
-        format = PixelFormat32bppRGB;
-        break;
-    default:
-        FIXME("don't know how to handle %d bpp\n", info->bmiHeader.biBitCount);
-        *bitmap = NULL;
-        return InvalidParameter;
-    }
+    status = GdipCreateBitmapFromHBITMAP(hbm, NULL, bitmap);
+    DeleteObject(hbm);
 
-    return GdipCreateBitmapFromScan0(info->bmiHeader.biWidth, height, stride, format,
-                                     bits, bitmap);
-
+    return status;
 }
 
 /* FIXME: no icm */
@@ -5106,6 +5090,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHBITMAP(HBITMAP hbm, HPALETTE hpal, GpBi
     GpStatus retval;
     PixelFormat format;
     BitmapData lockeddata;
+    char bmibuf[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+    BITMAPINFO *pbmi = (BITMAPINFO *)bmibuf;
 
     TRACE("%p %p %p\n", hbm, hpal, bitmap);
 
@@ -5155,8 +5141,6 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHBITMAP(HBITMAP hbm, HPALETTE hpal, GpBi
         if (retval == Ok)
         {
             HDC hdc;
-            char bmibuf[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
-            BITMAPINFO *pbmi = (BITMAPINFO *)bmibuf;
             INT src_height;
 
             hdc = CreateCompatibleDC(NULL);
@@ -5176,29 +5160,28 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHBITMAP(HBITMAP hbm, HPALETTE hpal, GpBi
             GdipBitmapUnlockBits(*bitmap, &lockeddata);
         }
 
-        if (retval == Ok && hpal)
+        /* According to the tests hpal is ignored */
+        if (retval == Ok && pbmi->bmiHeader.biBitCount <= 8)
         {
-            PALETTEENTRY entry[256];
-            ColorPalette *palette=NULL;
+            ColorPalette *palette;
             int i, num_palette_entries;
 
-            num_palette_entries = GetPaletteEntries(hpal, 0, 256, entry);
+            num_palette_entries = pbmi->bmiHeader.biClrUsed;
             if (!num_palette_entries)
-                retval = GenericError;
+                num_palette_entries = 1 << pbmi->bmiHeader.biBitCount;
 
             palette = heap_alloc_zero(sizeof(ColorPalette) + sizeof(ARGB) * (num_palette_entries-1));
             if (!palette)
                 retval = OutOfMemory;
-
-            if (retval == Ok)
+            else
             {
                 palette->Flags = 0;
                 palette->Count = num_palette_entries;
 
                 for (i=0; i<num_palette_entries; i++)
                 {
-                    palette->Entries[i] = 0xff000000 | entry[i].peRed << 16 |
-                                          entry[i].peGreen << 8 | entry[i].peBlue;
+                    palette->Entries[i] = 0xff000000 | pbmi->bmiColors[i].rgbRed << 16 |
+                                          pbmi->bmiColors[i].rgbGreen << 8 | pbmi->bmiColors[i].rgbBlue;
                 }
 
                 retval = GdipSetImagePalette(&(*bitmap)->image, palette);

@@ -7,6 +7,7 @@ SOURCES = \
 	activaut.idl \
 	activdbg.idl \
 	activscp.idl \
+	adserr.h \
 	adshlp.h \
 	advpub.h \
 	af_irda.h \
@@ -14,6 +15,7 @@ SOURCES = \
 	amsi.idl \
 	amstream.idl \
 	amvideo.idl \
+	apiset.h \
 	appcompatapi.h \
 	appmgmt.h \
 	appmodel.h \
@@ -79,7 +81,9 @@ SOURCES = \
 	cryptuiapi.h \
 	ctfutb.idl \
 	ctxtcall.idl \
+	cuda.h \
 	custcntl.h \
+	cuviddec.h \
 	cvconst.h \
 	d2d1.idl \
 	d2d1_1.idl \
@@ -200,6 +204,7 @@ SOURCES = \
 	dimm.idl \
 	dinput.h \
 	dinputd.h \
+	directmanipulation.idl \
 	dispdib.h \
 	dispex.idl \
 	dlgs.h \
@@ -492,11 +497,15 @@ SOURCES = \
 	ntddvdeo.h \
 	ntdef.h \
 	ntdsapi.h \
+	ntifs.h \
 	ntlsa.h \
 	ntquery.h \
 	ntsecapi.h \
 	ntsecpkg.h \
 	ntstatus.h \
+	nvapi.h \
+	nvcuvid.h \
+	nvencodeapi.h \
 	oaidl.idl \
 	objbase.h \
 	objectarray.idl \
@@ -619,6 +628,7 @@ SOURCES = \
 	srrestoreptapi.h \
 	sspi.h \
 	stdole2.idl \
+	stdole32.idl \
 	stgprop.h \
 	sti.h \
 	storage.h \

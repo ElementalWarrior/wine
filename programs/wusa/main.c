@@ -346,6 +346,13 @@ static void installer_cleanup(struct installer_state *state)
     }
 }
 
+static BOOL str_starts_with(const WCHAR *str, const WCHAR *prefix)
+{
+    DWORD str_len = lstrlenW(str), prefix_len = lstrlenW(prefix);
+    if (prefix_len > str_len) return FALSE;
+    return !wcsnicmp(str, prefix, prefix_len);
+}
+
 static BOOL str_ends_with(const WCHAR *str, const WCHAR *suffix)
 {
     DWORD str_len = lstrlenW(str), suffix_len = lstrlenW(suffix);
@@ -962,6 +969,20 @@ static BOOL install_msu(const WCHAR *filename, struct installer_state *state)
         }
         while (FindNextFileW(search, &data));
         FindClose(search);
+    }
+
+    /* Windows Vista MSU files do not contain an xml file - what is the correct way to get
+     * the update list? For now just install all assemblies starting with "Package_for_KB". */
+    if (list_empty(&state->updates))
+    {
+        static const WCHAR package_for_kbW[] = {'P','a','c','k','a','g','e','_','f','o','r','_','K','B',0};
+        struct assembly_entry *assembly;
+        LIST_FOR_EACH_ENTRY(assembly, &state->assemblies, struct assembly_entry, entry)
+        {
+            if (!assembly->identity.name) continue;
+            if (str_starts_with(assembly->identity.name, package_for_kbW))
+                queue_update(assembly, &state->updates);
+        }
     }
 
     /* dump package information (for debugging) */

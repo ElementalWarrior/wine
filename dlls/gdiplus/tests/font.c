@@ -141,7 +141,6 @@ static void test_createfont(void)
     expect(Ok, stat);
     stat = GdipGetFamilyName(fontfamily2, familyname, 0);
     expect(Ok, stat);
-todo_wine
     ok (fontfamily == fontfamily2, "Unexpected family instance.\n");
     ok (lstrcmpiW(Tahoma, familyname) == 0, "Expected Tahoma, got %s\n",
             wine_dbgstr_w(familyname));
@@ -1282,6 +1281,61 @@ static void test_GdipGetFontCollectionFamilyCount(void)
     ok(status == InvalidParameter, "Unexpected status %d.\n", status);
 }
 
+static void test_CloneFont(void)
+{
+    GpStatus status;
+    GpFont *font, *font2;
+    GpFontFamily *family, *family2;
+    REAL height;
+    Unit unit;
+    int style;
+
+    status = GdipCreateFontFamilyFromName(Tahoma, NULL, &family);
+    expect(Ok, status);
+
+    status = GdipCreateFont(family, 30.0f, FontStyleRegular, UnitPixel, &font);
+    expect(Ok, status);
+
+    status = GdipGetFontUnit(font, &unit);
+    expect(Ok, status);
+    ok(unit == UnitPixel, "got %u\n", unit);
+
+    status = GdipGetFontSize(font, &height);
+    expect(Ok, status);
+    ok(height == 30.0f, "got %f\n", height);
+
+    status = GdipGetFontStyle(font, &style);
+    expect(Ok, status);
+    ok(style == FontStyleRegular, "got %d\n", style);
+
+    status = GdipGetFamily(font, &family2);
+    expect(Ok, status);
+    ok(family == family2, "got %p\n", family2);
+
+    status = GdipCloneFont(font, &font2);
+    expect(Ok, status);
+
+    status = GdipGetFontUnit(font2, &unit);
+    expect(Ok, status);
+    ok(unit == UnitPixel, "got %u\n", unit);
+
+    status = GdipGetFontSize(font2, &height);
+    expect(Ok, status);
+    ok(height == 30.0f, "got %f\n", height);
+
+    status = GdipGetFontStyle(font2, &style);
+    expect(Ok, status);
+    ok(style == FontStyleRegular, "got %d\n", style);
+
+    status = GdipGetFamily(font2, &family2);
+    expect(Ok, status);
+    ok(family == family2, "got %p\n", family2);
+
+    GdipDeleteFont(font2);
+    GdipDeleteFont(font);
+    GdipDeleteFontFamily(family);
+}
+
 START_TEST(font)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -1301,6 +1355,7 @@ START_TEST(font)
 
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
+    test_CloneFont();
     test_long_name();
     test_font_transform();
     test_font_substitution();

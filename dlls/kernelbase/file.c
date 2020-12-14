@@ -432,6 +432,26 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileA( LPCSTR name, DWORD access, DWORD sh
     return CreateFileW( nameW, access, sharing, sa, creation, attributes, template );
 }
 
+static UINT get_nt_file_options( DWORD attributes )
+{
+    UINT options = 0;
+
+    if (attributes & FILE_FLAG_BACKUP_SEMANTICS)
+        options |= FILE_OPEN_FOR_BACKUP_INTENT;
+    else
+        options |= FILE_NON_DIRECTORY_FILE;
+    if (attributes & FILE_FLAG_DELETE_ON_CLOSE)
+        options |= FILE_DELETE_ON_CLOSE;
+    if (attributes & FILE_FLAG_NO_BUFFERING)
+        options |= FILE_NO_INTERMEDIATE_BUFFERING;
+    if (!(attributes & FILE_FLAG_OVERLAPPED))
+        options |= FILE_SYNCHRONOUS_IO_NONALERT;
+    if (attributes & FILE_FLAG_RANDOM_ACCESS)
+        options |= FILE_RANDOM_ACCESS;
+    if (attributes & FILE_FLAG_WRITE_THROUGH)
+        options |= FILE_WRITE_THROUGH;
+    return options;
+}
 
 /*************************************************************************
  *	CreateFileW   (kernelbase.@)
@@ -441,7 +461,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
                                              DWORD attributes, HANDLE template )
 {
     NTSTATUS status;
-    UINT options;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     IO_STATUS_BLOCK io;
@@ -543,25 +562,8 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
 
     /* now call NtCreateFile */
 
-    options = 0;
-    if (attributes & FILE_FLAG_BACKUP_SEMANTICS)
-        options |= FILE_OPEN_FOR_BACKUP_INTENT;
-    else
-        options |= FILE_NON_DIRECTORY_FILE;
     if (attributes & FILE_FLAG_DELETE_ON_CLOSE)
-    {
-        options |= FILE_DELETE_ON_CLOSE;
         access |= DELETE;
-    }
-    if (attributes & FILE_FLAG_NO_BUFFERING)
-        options |= FILE_NO_INTERMEDIATE_BUFFERING;
-    if (!(attributes & FILE_FLAG_OVERLAPPED))
-        options |= FILE_SYNCHRONOUS_IO_NONALERT;
-    if (attributes & FILE_FLAG_RANDOM_ACCESS)
-        options |= FILE_RANDOM_ACCESS;
-    if (attributes & FILE_FLAG_WRITE_THROUGH)
-        options |= FILE_WRITE_THROUGH;
-    attributes &= FILE_ATTRIBUTE_VALID_FLAGS;
 
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
@@ -582,8 +584,9 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileW( LPCWSTR filename, DWORD access, DWO
     if (sa && sa->bInheritHandle) attr.Attributes |= OBJ_INHERIT;
 
     status = NtCreateFile( &ret, access | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &attr, &io,
-                           NULL, attributes, sharing, nt_disposition[creation - CREATE_NEW],
-                           options, NULL, 0 );
+                           NULL, attributes & FILE_ATTRIBUTE_VALID_FLAGS, sharing,
+                           nt_disposition[creation - CREATE_NEW],
+                           get_nt_file_options( attributes ), NULL, 0 );
     if (status)
     {
         if (vxd_name && vxd_name[0])
@@ -795,6 +798,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     WCHAR *mask;
     BOOL has_wildcard = FALSE;
     FIND_FIRST_INFO *info = NULL;
+    UNICODE_STRING mask_str;
     UNICODE_STRING nt_name;
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
@@ -825,6 +829,8 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
         SetLastError( ERROR_PATH_NOT_FOUND );
         return INVALID_HANDLE_VALUE;
     }
+
+    RtlInitUnicodeString( &mask_str, NULL );
 
     if (!mask && (device = RtlIsDosDeviceName_U( filename )))
     {
@@ -860,8 +866,26 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     }
     else
     {
+        static const WCHAR invalidW[] = { '<', '>', '\"', 0 };
+        DWORD mask_len = lstrlenW( mask );
+
+        /* strip invalid characters from mask */
+        while (mask_len && wcschr( invalidW, mask[mask_len - 1] ))
+            mask_len--;
+
+        if (!mask_len)
+        {
+            has_wildcard = TRUE;
+            RtlInitUnicodeString( &mask_str, L"*?" );
+        }
+        else
+        {
+            has_wildcard = wcspbrk( mask, L"*?" ) != NULL;
+            RtlInitUnicodeString( &mask_str, mask );
+            mask_str.Length = mask_len * sizeof(WCHAR);
+        }
+
         nt_name.Length = (mask - nt_name.Buffer) * sizeof(WCHAR);
-        has_wildcard = wcspbrk( mask, L"*?" ) != NULL;
         size = has_wildcard ? 8192 : max_entry_size;
     }
 
@@ -922,9 +946,6 @@ HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileExW( LPCWSTR filename, FINDEX_INFO_
     }
     else
     {
-        UNICODE_STRING mask_str;
-
-        RtlInitUnicodeString( &mask_str, mask );
         status = NtQueryDirectoryFile( info->handle, 0, NULL, NULL, &io, info->data, info->data_size,
                                        FileBothDirectoryInformation, FALSE, &mask_str, TRUE );
         if (status)
@@ -2550,10 +2571,60 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileById( HANDLE handle, LPFILE_ID_DESCRIPTO
 /***********************************************************************
  *	ReOpenFile   (kernelbase.@)
  */
-HANDLE WINAPI /* DECLSPEC_HOTPATCH */ ReOpenFile( HANDLE handle, DWORD access, DWORD sharing, DWORD flags )
+HANDLE WINAPI DECLSPEC_HOTPATCH ReOpenFile( HANDLE handle, DWORD access, DWORD sharing, DWORD attributes )
 {
-    FIXME( "(%p, %d, %d, %d): stub\n", handle, access, sharing, flags );
-    return INVALID_HANDLE_VALUE;
+    SECURITY_QUALITY_OF_SERVICE qos;
+    OBJECT_NAME_INFORMATION *name;
+    OBJECT_ATTRIBUTES attr = {};
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    HANDLE file;
+    DWORD size;
+
+    TRACE("handle %p, access %#x, sharing %#x, attributes %#x.\n", handle, access, sharing, attributes);
+
+    if (attributes & 0x7ffff) /* FILE_ATTRIBUTE_* flags are invalid */
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    status = NtQueryObject( handle, ObjectNameInformation, NULL, 0, &size );
+    if (status != STATUS_INFO_LENGTH_MISMATCH && !set_ntstatus( status ))
+        return INVALID_HANDLE_VALUE;
+
+    if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return INVALID_HANDLE_VALUE;
+    }
+
+    status = NtQueryObject( handle, ObjectNameInformation, name, size, NULL );
+    if (!set_ntstatus( status ))
+        return INVALID_HANDLE_VALUE;
+
+    if (attributes & FILE_FLAG_DELETE_ON_CLOSE)
+        access |= DELETE;
+
+    attr.Length = sizeof(attr);
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = &name->Name;
+    if (attributes & SECURITY_SQOS_PRESENT)
+    {
+        qos.Length = sizeof(qos);
+        qos.ImpersonationLevel = (attributes >> 16) & 0x3;
+        qos.ContextTrackingMode = attributes & SECURITY_CONTEXT_TRACKING ? SECURITY_DYNAMIC_TRACKING : SECURITY_STATIC_TRACKING;
+        qos.EffectiveOnly = (attributes & SECURITY_EFFECTIVE_ONLY) != 0;
+        attr.SecurityQualityOfService = &qos;
+    }
+    else
+        attr.SecurityQualityOfService = NULL;
+
+    status = NtCreateFile( &file, access | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &attr, &io, NULL,
+                           0, sharing, FILE_OPEN, get_nt_file_options( attributes ), NULL, 0 );
+    if (!set_ntstatus( status ))
+        return INVALID_HANDLE_VALUE;
+    return file;
 }
 
 

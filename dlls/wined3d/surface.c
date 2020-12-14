@@ -153,6 +153,7 @@ void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_context *co
     GLenum gl_filter;
     GLenum buffer;
     RECT s, d;
+    int i;
 
     TRACE("device %p, context %p, filter %s, src_texture %p, src_sub_resource_idx %u, src_location %s, "
             "src_rect %s, dst_texture %p, dst_sub_resource_idx %u, dst_location %s, dst_rect %s.\n",
@@ -162,16 +163,16 @@ void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_context *co
 
     switch (filter)
     {
-        case WINED3D_TEXF_LINEAR:
-            gl_filter = GL_LINEAR;
+        case WINED3D_TEXF_NONE:
+        case WINED3D_TEXF_POINT:
+            gl_filter = GL_NEAREST;
             break;
 
         default:
             FIXME("Unsupported filter mode %s (%#x).\n", debug_d3dtexturefiltertype(filter), filter);
             /* fall through */
-        case WINED3D_TEXF_NONE:
-        case WINED3D_TEXF_POINT:
-            gl_filter = GL_NEAREST;
+        case WINED3D_TEXF_LINEAR:
+            gl_filter = GL_LINEAR;
             break;
     }
 
@@ -261,10 +262,8 @@ void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_context *co
     context_invalidate_state(context, STATE_FRAMEBUFFER);
 
     gl_info->gl_ops.gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE1));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE2));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE3));
+    for (i = 0; i < MAX_RENDER_TARGETS; ++i)
+        context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITE(i)));
 
     gl_info->gl_ops.gl.p_glDisable(GL_SCISSOR_TEST);
     context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SCISSORTESTENABLE));
@@ -563,6 +562,25 @@ static void convert_yuy2_r5g6b5(const BYTE *src, BYTE *dst,
     }
 }
 
+static void convert_x8r8g8b8_l8(const BYTE *src, BYTE *dst,
+        DWORD pitch_in, DWORD pitch_out, unsigned int w, unsigned int h)
+{
+    unsigned int x, y;
+
+    TRACE("Converting %ux%u pixels, pitches %u %u.\n", w, h, pitch_in, pitch_out);
+
+    for (y = 0; y < h; ++y)
+    {
+        const DWORD *src_line = (const DWORD *)(src + y * pitch_in);
+        BYTE *dst_line = (BYTE *)(dst + y * pitch_out);
+
+        for (x = 0; x < w; ++x)
+        {
+            dst_line[x] = src_line[x] & 0x000000ff;
+        }
+    }
+}
+
 struct d3dfmt_converter_desc
 {
     enum wined3d_format_id from, to;
@@ -577,6 +595,7 @@ static const struct d3dfmt_converter_desc converters[] =
     {WINED3DFMT_B8G8R8X8_UNORM, WINED3DFMT_B8G8R8A8_UNORM,  convert_a8r8g8b8_x8r8g8b8},
     {WINED3DFMT_YUY2,           WINED3DFMT_B8G8R8X8_UNORM,  convert_yuy2_x8r8g8b8},
     {WINED3DFMT_YUY2,           WINED3DFMT_B5G6R5_UNORM,    convert_yuy2_r5g6b5},
+    {WINED3DFMT_B8G8R8X8_UNORM, WINED3DFMT_L8_UNORM,        convert_x8r8g8b8_l8},
 };
 
 static inline const struct d3dfmt_converter_desc *find_converter(enum wined3d_format_id from,
@@ -1777,7 +1796,8 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
             && (src_width != dst_width || src_height != dst_height))
     {
         /* Can happen when d3d9 apps do a StretchRect() call which isn't handled in GL. */
-        FIXME("Filter %s not supported in software blit.\n", debug_d3dtexturefiltertype(filter));
+        static int once;
+        if (!once++) FIXME("Filter %s not supported in software blit.\n", debug_d3dtexturefiltertype(filter));
     }
 
     xinc = (src_width << 16) / dst_width;

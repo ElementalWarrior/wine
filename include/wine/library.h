@@ -44,9 +44,11 @@ extern "C" {
 extern const char *wine_get_build_dir(void);
 extern const char *wine_get_config_dir(void);
 extern const char *wine_get_data_dir(void);
+extern const char **wine_get_libs(void);
 extern const char *wine_get_server_dir(void);
 extern const char *wine_get_user_name(void);
 extern const char *wine_get_version(void);
+extern const void *wine_get_patches(void);
 extern const char *wine_get_build_id(void);
 extern void wine_init_argv0_path( const char *argv0 );
 extern void wine_exec_wine_binary( const char *name, char **argv, const char *env_var );
@@ -55,6 +57,7 @@ extern void wine_exec_wine_binary( const char *name, char **argv, const char *en
 
 typedef void (*load_dll_callback_t)( void *, const char * );
 
+extern int wine_dladdr( void *addr, void *info, char *error, size_t errorsize );
 extern void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize );
 extern void *wine_dlsym( void *handle, const char *symbol, char *error, size_t errorsize );
 extern int wine_dlclose( void *handle, char *error, size_t errorsize );
@@ -86,6 +89,11 @@ extern int wine_mmap_is_in_reserved_area( void *addr, size_t size );
 extern int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, void *arg),
                                           void *arg, int top_down );
 
+extern void wine_mmap_add_free_area( void *addr, size_t size );
+extern void wine_mmap_remove_free_area( void *addr, size_t size, int unmap );
+extern int wine_mmap_is_in_free_area( void *addr, size_t size );
+extern int wine_mmap_enum_free_areas( int (*enum_func)(void *base, size_t size, void *arg),
+                                          void *arg, int top_down );
 #ifdef __i386__
 
 /* LDT management */

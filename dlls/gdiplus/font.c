@@ -115,8 +115,6 @@ typedef struct
 #define MS_OS2_TAG MS_MAKE_TAG('O','S','/','2')
 #define MS_HHEA_TAG MS_MAKE_TAG('h','h','e','a')
 
-static GpStatus clone_font_family(const GpFontFamily *, GpFontFamily **);
-
 static GpFontCollection installedFontCollection = {0};
 
 /*******************************************************************************
@@ -183,13 +181,8 @@ GpStatus WINGDIPAPI GdipCreateFont(GDIPCONST GpFontFamily *fontFamily,
     (*font)->unit = unit;
     (*font)->emSize = emSize;
     (*font)->otm = otm;
-
-    stat = clone_font_family(fontFamily, &(*font)->family);
-    if (stat != Ok)
-    {
-        heap_free(*font);
-        return stat;
-    }
+    (*font)->family = (GpFontFamily *)fontFamily;
+    InterlockedIncrement(&(*font)->family->ref);
 
     TRACE("<-- %p\n", *font);
 
@@ -322,7 +315,10 @@ GpStatus WINGDIPAPI GdipGetFamily(GpFont *font, GpFontFamily **family)
     if (!(font && family))
         return InvalidParameter;
 
-    return GdipCloneFontFamily(font->family, family);
+    InterlockedIncrement(&font->family->ref);
+    *family = font->family;
+
+    return Ok;
 }
 
 static REAL get_font_size(const GpFont *font)
@@ -518,8 +514,6 @@ GpStatus WINGDIPAPI GdipGetLogFontW(GpFont *font, GpGraphics *graphics, LOGFONTW
  */
 GpStatus WINGDIPAPI GdipCloneFont(GpFont *font, GpFont **cloneFont)
 {
-    GpStatus stat;
-
     TRACE("(%p, %p)\n", font, cloneFont);
 
     if(!font || !cloneFont)
@@ -529,10 +523,10 @@ GpStatus WINGDIPAPI GdipCloneFont(GpFont *font, GpFont **cloneFont)
     if(!*cloneFont)    return OutOfMemory;
 
     **cloneFont = *font;
-    stat = GdipCloneFontFamily(font->family, &(*cloneFont)->family);
-    if (stat != Ok) heap_free(*cloneFont);
+    InterlockedIncrement(&font->family->ref);
+    (*cloneFont)->family = font->family;
 
-    return stat;
+    return Ok;
 }
 
 /*******************************************************************************
@@ -769,6 +763,7 @@ GpStatus WINGDIPAPI GdipCreateFontFamilyFromName(GDIPCONST WCHAR *name,
     ffamily->descent = fm.descent;
     ffamily->line_spacing = fm.line_spacing;
     ffamily->dpi = fm.dpi;
+    ffamily->ref = 1;
 
     *FontFamily = ffamily;
 
@@ -783,6 +778,7 @@ static GpStatus clone_font_family(const GpFontFamily *family, GpFontFamily **clo
     if (!*clone) return OutOfMemory;
 
     **clone = *family;
+    (*clone)->ref = 1;
 
     return Ok;
 }
@@ -867,11 +863,17 @@ GpStatus WINGDIPAPI GdipGetFamilyName (GDIPCONST GpFontFamily *family,
  */
 GpStatus WINGDIPAPI GdipDeleteFontFamily(GpFontFamily *FontFamily)
 {
-    if (!FontFamily)
-        return InvalidParameter;
-    TRACE("Deleting %p (%s)\n", FontFamily, debugstr_w(FontFamily->FamilyName));
+    LONG ref;
 
-    heap_free (FontFamily);
+    if (!FontFamily || !FontFamily->ref)
+        return InvalidParameter;
+
+    ref = InterlockedDecrement(&FontFamily->ref);
+    if (!ref)
+    {
+        TRACE("Deleting %p (%s)\n", FontFamily, debugstr_w(FontFamily->FamilyName));
+        heap_free(FontFamily);
+    }
 
     return Ok;
 }
