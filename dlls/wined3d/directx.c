@@ -2128,6 +2128,8 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, unsigned in
     caps->MaxActiveLights                  = vertex_caps.max_active_lights;
     caps->MaxVertexBlendMatrices           = vertex_caps.max_vertex_blend_matrices;
     caps->MaxVertexBlendMatrixIndex        = vertex_caps.max_vertex_blend_matrix_index;
+    if (caps->DeviceType == WINED3D_DEVICE_TYPE_HAL)
+        caps->MaxVertexBlendMatrixIndex = min(caps->MaxVertexBlendMatrixIndex, 8);
     caps->VertexProcessingCaps             = vertex_caps.vertex_processing_caps;
     caps->FVFCaps                          = vertex_caps.fvf_caps;
     caps->RasterCaps                      |= vertex_caps.raster_caps;
@@ -2290,8 +2292,7 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, unsigned in
     caps->ddraw_caps.ssb_color_key_caps = ckey_caps;
     caps->ddraw_caps.ssb_fx_caps = fx_caps;
 
-    caps->ddraw_caps.dds_caps = WINEDDSCAPS_FLIP
-            | WINEDDSCAPS_OFFSCREENPLAIN
+    caps->ddraw_caps.dds_caps = WINEDDSCAPS_OFFSCREENPLAIN
             | WINEDDSCAPS_PALETTE
             | WINEDDSCAPS_PRIMARYSURFACE
             | WINEDDSCAPS_TEXTURE

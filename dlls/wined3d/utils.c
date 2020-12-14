@@ -4972,7 +4972,6 @@ const char *debug_d3drenderstate(enum wined3d_render_state state)
         D3DSTATE_TO_STR(WINED3D_RS_DEBUGMONITORTOKEN);
         D3DSTATE_TO_STR(WINED3D_RS_POINTSIZE_MAX);
         D3DSTATE_TO_STR(WINED3D_RS_INDEXEDVERTEXBLENDENABLE);
-        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE);
         D3DSTATE_TO_STR(WINED3D_RS_TWEENFACTOR);
         D3DSTATE_TO_STR(WINED3D_RS_BLENDOP);
         D3DSTATE_TO_STR(WINED3D_RS_POSITIONDEGREE);
@@ -4992,9 +4991,14 @@ const char *debug_d3drenderstate(enum wined3d_render_state state)
         D3DSTATE_TO_STR(WINED3D_RS_BACK_STENCILZFAIL);
         D3DSTATE_TO_STR(WINED3D_RS_BACK_STENCILPASS);
         D3DSTATE_TO_STR(WINED3D_RS_BACK_STENCILFUNC);
+        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE);
         D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE1);
         D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE2);
         D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE3);
+        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE4);
+        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE5);
+        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE6);
+        D3DSTATE_TO_STR(WINED3D_RS_COLORWRITEENABLE7);
         D3DSTATE_TO_STR(WINED3D_RS_SRGBWRITEENABLE);
         D3DSTATE_TO_STR(WINED3D_RS_DEPTHBIAS);
         D3DSTATE_TO_STR(WINED3D_RS_WRAP8);
@@ -5150,11 +5154,9 @@ const char *debug_d3dtstype(enum wined3d_transform_state tstype)
     TSTYPE_TO_STR(WINED3D_TS_WORLD_MATRIX(3));
 #undef TSTYPE_TO_STR
     default:
-        if (tstype > 256 && tstype < 512)
-        {
-            FIXME("WINED3D_TS_WORLD_MATRIX(%u). 1..255 not currently supported.\n", tstype);
-            return ("WINED3D_TS_WORLD_MATRIX > 0");
-        }
+        if (tstype > WINED3D_TS_WORLD_MATRIX(3) && tstype < WINED3D_TS_WORLD_MATRIX(256))
+            return ("WINED3D_TS_WORLD_MATRIX > 3");
+
         FIXME("Unrecognized transform state %#x.\n", tstype);
         return "unrecognized";
     }
@@ -6572,6 +6574,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         settings->flatshading = FALSE;
 
     settings->swizzle_map = si->swizzle_map;
+    settings->vb_indices = is_indexed_vertex_blending(context, state);
 }
 
 int wined3d_ffp_vertex_program_key_compare(const void *key, const struct wine_rb_entry *entry)
