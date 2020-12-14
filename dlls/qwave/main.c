@@ -21,6 +21,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "qos2.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qwave);
@@ -38,4 +39,11 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD reason, LPVOID lpv)
         break;
     }
     return TRUE;
+}
+
+BOOL WINAPI QOSCreateHandle(QOS_VERSION *version, HANDLE *handle)
+{
+    FIXME("%p %p stub!\n", version, handle);
+    SetLastError(ERROR_SERVICE_DEPENDENCY_FAIL);
+    return FALSE;
 }

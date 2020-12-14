@@ -93,6 +93,8 @@ typedef struct _QOS_VERSION {
     USHORT MinorVersion;
 } QOS_VERSION, *PQOS_VERSION;
 
+BOOL WINAPI QOSCreateHandle(QOS_VERSION *version, HANDLE *handle);
+
 #ifdef __cplusplus
 }
 #endif
