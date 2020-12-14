@@ -355,6 +355,7 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 #endif
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
 /***********************************************************************
  * Definitions for Win32 unwind tables
@@ -2519,6 +2520,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     return STATUS_UNHANDLED_EXCEPTION;
 }
 
+NTSTATUS WINAPI __syscall_NtContinue( CONTEXT *context, BOOLEAN alert );
 
 static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
@@ -2581,7 +2583,7 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     }
 
 done:
-    return NtSetContextThread( GetCurrentThread(), context );
+    return __syscall_NtContinue( context, FALSE );
 }
 
 
@@ -3133,6 +3135,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3302,6 +3305,12 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )
 {

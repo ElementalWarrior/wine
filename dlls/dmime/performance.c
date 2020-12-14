@@ -34,7 +34,7 @@ typedef struct IDirectMusicPerformance8Impl {
     float fMasterTempo;
     long lMasterVolume;
     /* performance channels */
-    DMUSIC_PRIVATE_PCHANNEL PChannel[32];
+    DMUSIC_PRIVATE_PCHANNEL PChannel[256];
     /* IDirectMusicPerformance8Impl fields */
     IDirectMusicAudioPath *pDefaultPath;
     HANDLE hNotification;
@@ -628,6 +628,9 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_AssignPChannelBlock(IDirectMu
 	FIXME("(%p, %d, %p, %d): semi-stub\n", This, dwBlockNum, pPort, dwGroup-1);
 	if (NULL == pPort) return E_POINTER;
 
+	if (dwBlockNum > ARRAY_SIZE(This->PChannel))
+		return S_FALSE;
+
 	range = 16 * dwBlockNum;
 	j = 0;
 	for (i = range; i < range+16; i++) {
@@ -637,7 +640,6 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_AssignPChannelBlock(IDirectMu
 		This->PChannel[i].channel = j; /* FIXME: should this be assigned? */
 		j++;
 	}
-	/*if (dwGroup > 2) return S_FALSE;*/
 
 	return S_OK;
 }
