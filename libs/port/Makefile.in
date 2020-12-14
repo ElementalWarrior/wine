@@ -108,4 +108,6 @@ C_SRCS = \
 	usleep.c \
 	utf8.c \
 	wctomb.c \
-	wctype.c
+	wctype.c \
+	xattr.c
+

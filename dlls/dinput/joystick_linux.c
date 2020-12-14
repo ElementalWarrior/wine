@@ -239,6 +239,14 @@ static INT find_joystick_devices(void)
                         joydev.dev_axes_map[j] = j;
                         found_axes++;
                     }
+                    else if (axes_map[j] <= 10)
+                    {
+                        /* Axes 8 through 10 are Wheel, Gas and Brake,
+                         * remap to 0, 1 and 2
+                         */
+                        joydev.dev_axes_map[j] = axes_map[j] - 8;
+                        found_axes++;
+                    }
                     else if (axes_map[j] == 16 ||
                              axes_map[j] == 17)
                     {
@@ -807,10 +815,13 @@ static void joy_polldev(LPDIRECTINPUTDEVICE8A iface)
               jse.type,jse.number,jse.value);
         if (jse.type & JS_EVENT_BUTTON)
         {
+            int button;
             if (jse.number >= This->generic.devcaps.dwButtons) return;
 
-            inst_id = DIDFT_MAKEINSTANCE(jse.number) | DIDFT_PSHBUTTON;
-            This->generic.js.rgbButtons[jse.number] = value = jse.value ? 0x80 : 0x00;
+            button = This->generic.button_map[jse.number];
+
+            inst_id = DIDFT_MAKEINSTANCE(button) | DIDFT_PSHBUTTON;
+            This->generic.js.rgbButtons[button] = value = jse.value ? 0x80 : 0x00;
         }
         else if (jse.type & JS_EVENT_AXIS)
         {
