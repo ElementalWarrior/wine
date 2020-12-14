@@ -227,6 +227,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_NV_vertex_program2",               NV_VERTEX_PROGRAM2            },
     {"GL_NV_vertex_program2_option",        NV_VERTEX_PROGRAM2_OPTION     },
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3            },
+    {"GL_NVX_gpu_memory_info",              NVX_GPU_MEMORY_INFO           },
 };
 
 static const struct wined3d_extension_map wgl_extension_map[] =
@@ -1010,6 +1011,17 @@ static const struct wined3d_gpu_description *query_gpu_description(const struct 
 
         gpu_description = wined3d_get_gpu_description(vendor, device);
     }
+    else if (gl_info->supported[NVX_GPU_MEMORY_INFO])
+    {
+        GLint vram_kb;
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &vram_kb);
+
+        *vram_bytes = (UINT64)vram_kb * 1024;
+        TRACE("Got 0x%s as video memory from NVX_GPU_MEMORY_INFO extension.\n",
+                wine_dbgstr_longlong(*vram_bytes));
+
+        gpu_description = wined3d_get_gpu_description(vendor, device);
+    }
 
     if ((gpu_description_override = wined3d_get_user_override_gpu_description(vendor, device)))
         gpu_description = gpu_description_override;
@@ -1176,6 +1188,7 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(const struct wined3d_gl_in
         return GL_VENDOR_FGLRX;
 
     if (strstr(gl_vendor_string, "Mesa")
+            || strstr(gl_vendor_string, "Brian Paul")
             || strstr(gl_vendor_string, "X.Org")
             || strstr(gl_vendor_string, "Advanced Micro Devices, Inc.")
             || strstr(gl_vendor_string, "DRI R300 Project")
@@ -1250,8 +1263,14 @@ static enum wined3d_feature_level feature_level_from_caps(const struct wined3d_g
     shader_model = min(shader_model, max(shader_caps->hs_version, 4));
     shader_model = min(shader_model, max(shader_caps->ds_version, 4));
 
+    /*
+     * Legacy nVidia driver doesn't the the ARB_POLYGON_OFFSET_CLAMP support.
+     * There is an implied support for Depth Bias Clamping in DirectX 10 but no real documenation for either case
+     * On the same hardware, on windows, it supports DirectX 10 without the need for this extension, So
+     *  removing this check and users can deal with the fact they might have minor artifacts from time to time.
+     */
     if (gl_info->supported[WINED3D_GL_VERSION_3_2]
-            && gl_info->supported[ARB_POLYGON_OFFSET_CLAMP]
+/*            && gl_info->supported[ARB_POLYGON_OFFSET_CLAMP]*/
             && gl_info->supported[ARB_SAMPLER_OBJECTS])
     {
         if (shader_model >= 5
@@ -2912,6 +2931,12 @@ static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info, struct 
         gl_info->limits.buffers = min(MAX_RENDER_TARGET_VIEWS, gl_max);
         TRACE("Max draw buffers: %u.\n", gl_max);
     }
+    if (gl_info->supported[ARB_BLEND_FUNC_EXTENDED])
+    {
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_MAX_DUAL_SOURCE_DRAW_BUFFERS, &gl_max);
+        gl_info->limits.dual_buffers = gl_max;
+        TRACE("Max dual source draw buffers: %u.\n", gl_max);
+    }
     if (gl_info->supported[ARB_MULTITEXTURE])
     {
         if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
@@ -3060,6 +3085,9 @@ static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info, struct 
             gl_info->limits.uniform_blocks[WINED3D_SHADER_TYPE_VERTEX] = min(gl_max, WINED3D_MAX_CBS);
             TRACE("Max vertex uniform blocks: %u (%d).\n",
                     gl_info->limits.uniform_blocks[WINED3D_SHADER_TYPE_VERTEX], gl_max);
+            gl_info->gl_ops.gl.p_glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &gl_max);
+            gl_info->limits.glsl_max_uniform_block_size = gl_max;
+            TRACE("Max uniform block size %u.\n", gl_max);
         }
     }
     if (gl_info->supported[ARB_TESSELLATION_SHADER])
@@ -3702,7 +3730,8 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
     d3d_info->limits.gs_version = shader_caps.gs_version;
     d3d_info->limits.ps_version = shader_caps.ps_version;
     d3d_info->limits.cs_version = shader_caps.cs_version;
-    d3d_info->limits.vs_uniform_count = shader_caps.vs_uniform_count;
+    d3d_info->limits.vs_uniform_count_swvp = shader_caps.vs_uniform_count;
+    d3d_info->limits.vs_uniform_count = min(WINED3D_MAX_VS_CONSTS_F, shader_caps.vs_uniform_count);
     d3d_info->limits.ps_uniform_count = shader_caps.ps_uniform_count;
     d3d_info->limits.varying_count = shader_caps.varying_count;
     d3d_info->shader_double_precision = !!(shader_caps.wined3d_caps & WINED3D_SHADER_CAP_DOUBLE_PRECISION);
@@ -3714,6 +3743,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
     d3d_info->ffp_generic_attributes = vertex_caps.ffp_generic_attributes;
     d3d_info->limits.ffp_vertex_blend_matrices = vertex_caps.max_vertex_blend_matrices;
     d3d_info->limits.active_light_count = vertex_caps.max_active_lights;
+    d3d_info->limits.ffp_max_vertex_blend_matrix_index = vertex_caps.max_vertex_blend_matrix_index;
     d3d_info->emulated_flatshading = vertex_caps.emulated_flatshading;
 
     adapter->fragment_pipe->get_caps(adapter, &fragment_caps);
@@ -3737,6 +3767,10 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
         d3d_info->multisample_draw_location = WINED3D_LOCATION_RB_MULTISAMPLE;
 
     TRACE("Max texture stages: %u.\n", d3d_info->limits.ffp_blend_stages);
+
+    d3d_info->valid_dual_rt_mask = 0;
+    for (i = 0; i < gl_info->limits.dual_buffers; ++i)
+        d3d_info->valid_dual_rt_mask |= (1u << i);
 
     if (!d3d_info->shader_color_key)
     {
@@ -4596,6 +4630,7 @@ static void adapter_gl_uninit_3d(struct wined3d_device *device)
 {
     TRACE("device %p.\n", device);
 
+    context_set_current(NULL);
     wined3d_cs_destroy_object(device->cs, wined3d_device_delete_opengl_contexts_cs, device);
     wined3d_cs_finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
 }

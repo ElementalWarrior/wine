@@ -415,7 +415,7 @@ static HRESULT joydev_enum_deviceA(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINS
     }
 
     if ((dwDevType == 0) ||
-	((dwDevType == DIDEVTYPE_JOYSTICK) && (version > 0x0300 && version < 0x0800)) ||
+	((dwDevType == DIDEVTYPE_JOYSTICK) && (version >= 0x0300 && version < 0x0800)) ||
 	(((dwDevType == DI8DEVCLASS_GAMECTRL) || (dwDevType == DI8DEVTYPE_JOYSTICK)) && (version >= 0x0800))) {
         /* check whether we have a joystick */
         if ((fd = open(joystick_devices[id].device, O_RDONLY)) == -1)
@@ -444,7 +444,7 @@ static HRESULT joydev_enum_deviceW(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINS
     }
 
     if ((dwDevType == 0) ||
-	((dwDevType == DIDEVTYPE_JOYSTICK) && (version > 0x0300 && version < 0x0800)) ||
+	((dwDevType == DIDEVTYPE_JOYSTICK) && (version >= 0x0300 && version < 0x0800)) ||
 	(((dwDevType == DI8DEVCLASS_GAMECTRL) || (dwDevType == DI8DEVTYPE_JOYSTICK)) && (version >= 0x0800))) {
         /* check whether we have a joystick */
         if ((fd = open(joystick_devices[id].device, O_RDONLY)) == -1)
@@ -850,10 +850,13 @@ static void joy_polldev(LPDIRECTINPUTDEVICE8A iface)
               jse.type,jse.number,jse.value);
         if (jse.type & JS_EVENT_BUTTON)
         {
+            int button;
             if (jse.number >= This->generic.devcaps.dwButtons) return;
 
-            inst_id = DIDFT_MAKEINSTANCE(jse.number) | DIDFT_PSHBUTTON;
-            This->generic.js.rgbButtons[jse.number] = value = jse.value ? 0x80 : 0x00;
+            button = This->generic.button_map[jse.number];
+
+            inst_id = DIDFT_MAKEINSTANCE(button) | DIDFT_PSHBUTTON;
+            This->generic.js.rgbButtons[button] = value = jse.value ? 0x80 : 0x00;
         }
         else if (jse.type & JS_EVENT_AXIS)
         {
