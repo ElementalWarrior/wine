@@ -38,6 +38,8 @@ static const WCHAR driver_device[] = {'\\','D','e','v','i','c','e',
 static const WCHAR driver_link[] = {'\\','D','o','s','D','e','v','i','c','e','s',
                                     '\\','W','i','n','e','T','e','s','t','D','r','i','v','e','r',0};
 
+static LDR_MODULE *ldr_module;
+
 static HANDLE okfile;
 static LONG successes;
 static LONG failures;
@@ -316,7 +318,14 @@ static NTSTATUS wait_single_handle(HANDLE handle, ULONGLONG timeout)
     return ZwWaitForSingleObject(handle, FALSE, &integer);
 }
 
-static void run_thread(PKSTART_ROUTINE proc, void *arg)
+static void sleep(void)
+{
+    LARGE_INTEGER timeout;
+    timeout.QuadPart = -2000;
+    KeDelayExecutionThread( KernelMode, FALSE, &timeout );
+}
+
+static HANDLE create_thread(PKSTART_ROUTINE proc, void *arg)
 {
     OBJECT_ATTRIBUTES attr = {0};
     HANDLE thread;
@@ -327,10 +336,23 @@ static void run_thread(PKSTART_ROUTINE proc, void *arg)
     ret = PsCreateSystemThread(&thread, THREAD_ALL_ACCESS, &attr, NULL, NULL, proc, arg);
     ok(!ret, "got %#x\n", ret);
 
+    return thread;
+}
+
+static void join_thread(HANDLE thread)
+{
+    NTSTATUS ret;
+
     ret = ZwWaitForSingleObject(thread, FALSE, NULL);
     ok(!ret, "got %#x\n", ret);
     ret = ZwClose(thread);
     ok(!ret, "got %#x\n", ret);
+}
+
+static void run_thread(PKSTART_ROUTINE proc, void *arg)
+{
+    HANDLE thread = create_thread(proc, arg);
+    join_thread(thread);
 }
 
 static KMUTEX test_mutex;
@@ -814,6 +836,340 @@ static void test_ob_reference(const WCHAR *test_path)
     ok(!status, "ZwClose failed: %#x\n", status);
 }
 
+static void check_resource_(int line, ERESOURCE *resource, ULONG exclusive_waiters,
+        ULONG shared_waiters, BOOLEAN exclusive, ULONG shared_count)
+{
+    BOOLEAN ret;
+    ULONG count;
+
+    count = ExGetExclusiveWaiterCount(resource);
+    ok_(__FILE__, line, count == exclusive_waiters,
+            "expected %u exclusive waiters, got %u\n", exclusive_waiters, count);
+    count = ExGetSharedWaiterCount(resource);
+    ok_(__FILE__, line, count == shared_waiters,
+            "expected %u shared waiters, got %u\n", shared_waiters, count);
+    ret = ExIsResourceAcquiredExclusiveLite(resource);
+    ok_(__FILE__, line, ret == exclusive,
+            "expected exclusive %u, got %u\n", exclusive, ret);
+    count = ExIsResourceAcquiredSharedLite(resource);
+    ok_(__FILE__, line, count == shared_count,
+            "expected shared %u, got %u\n", shared_count, count);
+}
+#define check_resource(a,b,c,d,e) check_resource_(__LINE__,a,b,c,d,e)
+
+static KEVENT resource_shared_ready, resource_shared_done, resource_exclusive_ready, resource_exclusive_done;
+
+static void WINAPI resource_shared_thread(void *arg)
+{
+    ERESOURCE *resource = arg;
+    BOOLEAN ret;
+
+    check_resource(resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceSharedLite(resource, TRUE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+
+    check_resource(resource, 0, 0, FALSE, 1);
+
+    KeSetEvent(&resource_shared_ready, IO_NO_INCREMENT, FALSE);
+    KeWaitForSingleObject(&resource_shared_done, Executive, KernelMode, FALSE, NULL);
+
+    ExReleaseResourceForThreadLite(resource, (ULONG_PTR)PsGetCurrentThread());
+
+    PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
+static void WINAPI resource_exclusive_thread(void *arg)
+{
+    ERESOURCE *resource = arg;
+    BOOLEAN ret;
+
+    check_resource(resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceExclusiveLite(resource, TRUE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+
+    check_resource(resource, 0, 0, TRUE, 1);
+
+    KeSetEvent(&resource_exclusive_ready, IO_NO_INCREMENT, FALSE);
+    KeWaitForSingleObject(&resource_exclusive_done, Executive, KernelMode, FALSE, NULL);
+
+    ExReleaseResourceForThreadLite(resource, (ULONG_PTR)PsGetCurrentThread());
+
+    PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
+static void test_resource(void)
+{
+    ERESOURCE resource;
+    NTSTATUS status;
+    BOOLEAN ret;
+    HANDLE thread, thread2;
+
+    memset(&resource, 0xcc, sizeof(resource));
+
+    status = ExInitializeResourceLite(&resource);
+    ok(status == STATUS_SUCCESS, "got status %#x\n", status);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    KeEnterCriticalRegion();
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, TRUE, 1);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, TRUE, 2);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, TRUE, 3);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, TRUE, 2);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, TRUE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 2);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 2);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedStarveExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedWaitForExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    /* Do not acquire the resource ourselves, but spawn a shared thread holding it. */
+
+    KeInitializeEvent(&resource_shared_ready, SynchronizationEvent, FALSE);
+    KeInitializeEvent(&resource_shared_done, SynchronizationEvent, FALSE);
+    thread = create_thread(resource_shared_thread, &resource);
+    KeWaitForSingleObject(&resource_shared_ready, Executive, KernelMode, FALSE, NULL);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedStarveExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedWaitForExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    KeSetEvent(&resource_shared_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    /* Acquire the resource as exclusive, and then spawn a shared thread. */
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, TRUE, 1);
+
+    thread = create_thread(resource_shared_thread, &resource);
+    sleep();
+    check_resource(&resource, 0, 1, TRUE, 1);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 1, TRUE, 2);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    KeWaitForSingleObject(&resource_shared_ready, Executive, KernelMode, FALSE, NULL);
+    KeSetEvent(&resource_shared_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    /* Do not acquire the resource ourselves, but spawn an exclusive thread holding it. */
+
+    KeInitializeEvent(&resource_exclusive_ready, SynchronizationEvent, FALSE);
+    KeInitializeEvent(&resource_exclusive_done, SynchronizationEvent, FALSE);
+    thread = create_thread(resource_exclusive_thread, &resource);
+    KeWaitForSingleObject(&resource_exclusive_ready, Executive, KernelMode, FALSE, NULL);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedStarveExclusive(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    ret = ExAcquireSharedWaitForExclusive(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    KeSetEvent(&resource_exclusive_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    /* Acquire the resource as shared, and then spawn an exclusive waiter. */
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 0, 0, FALSE, 1);
+
+    thread = create_thread(resource_exclusive_thread, &resource);
+    sleep();
+    check_resource(&resource, 1, 0, FALSE, 1);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 2);
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+
+    ret = ExAcquireSharedStarveExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 2);
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+
+    ret = ExAcquireSharedWaitForExclusive(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 1);
+
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+    KeWaitForSingleObject(&resource_exclusive_ready, Executive, KernelMode, FALSE, NULL);
+    KeSetEvent(&resource_exclusive_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    /* Spawn a shared and then exclusive waiter. */
+
+    KeInitializeEvent(&resource_shared_ready, SynchronizationEvent, FALSE);
+    KeInitializeEvent(&resource_shared_done, SynchronizationEvent, FALSE);
+    thread = create_thread(resource_shared_thread, &resource);
+    KeWaitForSingleObject(&resource_shared_ready, Executive, KernelMode, FALSE, NULL);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    thread2 = create_thread(resource_exclusive_thread, &resource);
+    sleep();
+    check_resource(&resource, 1, 0, FALSE, 0);
+
+    ret = ExAcquireResourceExclusiveLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 0);
+
+    ret = ExAcquireResourceSharedLite(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 0);
+
+    ret = ExAcquireSharedStarveExclusive(&resource, FALSE);
+    ok(ret == TRUE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 1);
+    ExReleaseResourceForThreadLite(&resource, (ULONG_PTR)PsGetCurrentThread());
+
+    ret = ExAcquireSharedWaitForExclusive(&resource, FALSE);
+    ok(ret == FALSE, "got ret %u\n", ret);
+    check_resource(&resource, 1, 0, FALSE, 0);
+
+    KeSetEvent(&resource_shared_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread);
+    KeWaitForSingleObject(&resource_exclusive_ready, Executive, KernelMode, FALSE, NULL);
+    KeSetEvent(&resource_exclusive_done, IO_NO_INCREMENT, FALSE);
+    join_thread(thread2);
+    check_resource(&resource, 0, 0, FALSE, 0);
+
+    KeLeaveCriticalRegion();
+
+    status = ExDeleteResourceLite(&resource);
+    ok(status == STATUS_SUCCESS, "got status %#x\n", status);
+}
+
+static void test_default_modules(void)
+{
+    BOOL win32k = FALSE, dxgkrnl = FALSE, dxgmms1 = FALSE;
+    LIST_ENTRY *start, *entry;
+    ANSI_STRING name_a;
+    LDR_MODULE *mod;
+    NTSTATUS status;
+
+    /* Try to find start of the InLoadOrderModuleList list */
+    for (start = ldr_module->InLoadOrderModuleList.Flink; ; start = start->Flink)
+    {
+        mod = CONTAINING_RECORD(start, LDR_MODULE, InLoadOrderModuleList);
+
+        if (!MmIsAddressValid(&mod->BaseAddress) || !mod->BaseAddress) break;
+        if (!MmIsAddressValid(&mod->LoadCount) || !mod->LoadCount) break;
+        if (!MmIsAddressValid(&mod->SizeOfImage) || !mod->SizeOfImage) break;
+        if (!MmIsAddressValid(&mod->EntryPoint) || mod->EntryPoint < mod->BaseAddress ||
+            (DWORD_PTR)mod->EntryPoint > (DWORD_PTR)mod->BaseAddress + mod->SizeOfImage) break;
+    }
+
+    for (entry = start->Flink; entry != start; entry = entry->Flink)
+    {
+        mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+
+        status = RtlUnicodeStringToAnsiString(&name_a, &mod->BaseDllName, TRUE);
+        ok(!status, "RtlUnicodeStringToAnsiString failed with %08x\n", status);
+        if (status) continue;
+
+        if (entry == start->Flink)
+        {
+            ok(!strncmp(name_a.Buffer, "ntoskrnl.exe", name_a.Length),
+               "Expected ntoskrnl.exe, got %.*s\n", name_a.Length, name_a.Buffer);
+        }
+
+        if (!strncmp(name_a.Buffer, "win32k.sys", name_a.Length)) win32k = TRUE;
+        if (!strncmp(name_a.Buffer, "dxgkrnl.sys", name_a.Length)) dxgkrnl = TRUE;
+        if (!strncmp(name_a.Buffer, "dxgmms1.sys", name_a.Length)) dxgmms1 = TRUE;
+
+        RtlFreeAnsiString(&name_a);
+    }
+
+    ok(win32k, "Failed to find win32k.sys\n");
+    ok(dxgkrnl, "Failed to find dxgkrnl.sys\n");
+    ok(dxgmms1, "Failed to find dxgmms1.sys\n");
+}
+
 static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
 {
     ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
@@ -856,6 +1212,8 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_stack_callout();
     test_lookaside_list();
     test_ob_reference(test_input->path);
+    test_default_modules();
+    test_resource();
 
     /* print process report */
     if (winetest_debug)
@@ -967,6 +1325,8 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
     NTSTATUS status;
 
     DbgPrint("loading driver\n");
+
+    ldr_module = (LDR_MODULE *)driver->DriverSection;
 
     /* Allow unloading of the driver */
     driver->DriverUnload = driver_Unload;

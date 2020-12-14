@@ -158,3 +158,11 @@ BOOLEAN WINAPI HidD_SetOutputReport(HANDLE HidDeviceObject, void *ReportBuffer, 
     TRACE("(%p %p %u)\n", HidDeviceObject, ReportBuffer, ReportBufferLength);
     return sync_ioctl(HidDeviceObject, IOCTL_HID_SET_OUTPUT_REPORT, ReportBuffer, ReportBufferLength, NULL, 0, NULL);
 }
+
+BOOLEAN WINAPI HidD_FlushQueue(HANDLE HidDeviceObject)
+{
+    DWORD RetLen;
+    TRACE("(%p)\n", HidDeviceObject);
+
+    return DeviceIoControl(HidDeviceObject, IOCTL_HID_FLUSH_QUEUE, NULL, 0, NULL, 0,&RetLen, NULL);
+}

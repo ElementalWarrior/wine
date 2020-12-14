@@ -1750,6 +1750,16 @@ NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable 
 
 
 /***********************************************************************
+ *           IoGetDeviceAttachmentBaseRef   (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoGetDeviceAttachmentBaseRef( PDEVICE_OBJECT device )
+{
+    FIXME( "(%p): stub\n", device );
+    return NULL;
+}
+
+
+/***********************************************************************
  *           IoGetDeviceInterfaces   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoGetDeviceInterfaces( const GUID *InterfaceClassGuid,
@@ -2375,17 +2385,6 @@ void WINAPI ExFreePoolWithTag( void *ptr, ULONG tag )
     HeapFree( GetProcessHeap(), 0, ptr );
 }
 
-
-/***********************************************************************
- *           ExInitializeResourceLite   (NTOSKRNL.EXE.@)
- */
-NTSTATUS WINAPI ExInitializeResourceLite(PERESOURCE Resource)
-{
-    FIXME( "stub: %p\n", Resource );
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-
 /***********************************************************************
  *           ExInitializeNPagedLookasideList   (NTOSKRNL.EXE.@)
  */
@@ -2746,6 +2745,16 @@ VOID WINAPI MmLockPagableSectionByHandle(PVOID ImageSectionHandle)
     FIXME("stub %p\n", ImageSectionHandle);
 }
 
+ /***********************************************************************
+ *           MmMapLockedPages   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmMapLockedPages(PMDL MemoryDescriptorList, KPROCESSOR_MODE AccessMode)
+{
+    TRACE("%p %d\n", MemoryDescriptorList, AccessMode);
+    return MemoryDescriptorList->MappedSystemVa;
+}
+
+
 /***********************************************************************
  *           MmMapLockedPagesSpecifyCache  (NTOSKRNL.EXE.@)
  */
@@ -2808,6 +2817,16 @@ void WINAPI  MmUnlockPages(PMDLX MemoryDescriptorList)
 VOID WINAPI MmUnmapIoSpace( PVOID BaseAddress, SIZE_T NumberOfBytes )
 {
     FIXME( "stub: %p, %lu\n", BaseAddress, NumberOfBytes );
+}
+
+
+/***********************************************************************
+ *           MmUnmapLockedPages   (NTOSKRNL.EXE.@)
+ */
+void WINAPI MmUnmapLockedPages(PVOID BaseAddress, PMDLX MemoryDescriptorList)
+{
+    TRACE("%p %p\n", BaseAddress, MemoryDescriptorList);
+    /* Nothing to do */
 }
 
 
@@ -3354,32 +3373,6 @@ NTSTATUS WINAPI IoCsqInitialize(PIO_CSQ csq, PIO_CSQ_INSERT_IRP insert_irp, PIO_
 }
 
 /***********************************************************************
- *           ExAcquireResourceExclusiveLite  (NTOSKRNL.EXE.@)
- */
-BOOLEAN WINAPI ExAcquireResourceExclusiveLite( PERESOURCE resource, BOOLEAN wait )
-{
-    FIXME( ":%p %u stub\n", resource, wait );
-    return TRUE;
-}
-
-/***********************************************************************
- *           ExDeleteResourceLite  (NTOSKRNL.EXE.@)
- */
-NTSTATUS WINAPI ExDeleteResourceLite(PERESOURCE resource)
-{
-    FIXME("(%p): stub\n", resource);
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-/***********************************************************************
- *           ExReleaseResourceForThreadLite   (NTOSKRNL.EXE.@)
- */
-void WINAPI ExReleaseResourceForThreadLite( PERESOURCE resource, ERESOURCE_THREAD tid )
-{
-    FIXME( "stub: %p %lu\n", resource, tid );
-}
-
-/***********************************************************************
  *           KeEnterCriticalRegion  (NTOSKRNL.EXE.@)
  */
 void WINAPI KeEnterCriticalRegion(void)
@@ -3527,6 +3520,39 @@ static LDR_MODULE *find_ldr_module( HMODULE module )
     return ldr;
 }
 
+/* change permissions of a specific memory range, save original permissions */
+static void virtual_protect_save( void *addr, SIZE_T size, ULONG new_prot, ULONG *old_prot )
+{
+    SYSTEM_BASIC_INFORMATION info;
+    UINT i = 0;
+
+    NtQuerySystemInformation( SystemBasicInformation, &info, sizeof(info), NULL );
+    while (size)
+    {
+        SIZE_T block_size = min( size, info.PageSize - ((UINT_PTR)addr & (info.PageSize - 1)) );
+        VirtualProtect( addr, block_size, new_prot, &old_prot[i++] );
+        addr  = (void *)((char *)addr + block_size);
+        size -= block_size;
+    }
+}
+
+/* restore permissions for a specific memory range */
+static void virtual_protect_load( void *addr, SIZE_T size, ULONG *old_prot )
+{
+    SYSTEM_BASIC_INFORMATION info;
+    DWORD dummy;
+    UINT i = 0;
+
+    NtQuerySystemInformation( SystemBasicInformation, &info, sizeof(info), NULL );
+    while (size)
+    {
+        SIZE_T block_size = min( size, info.PageSize - ((UINT_PTR)addr & (info.PageSize - 1)) );
+        VirtualProtect( addr, block_size, old_prot[i++], &dummy );
+        addr  = (void *)((char *)addr + block_size);
+        size -= block_size;
+    }
+}
+
 /* load the driver module file */
 static HMODULE load_driver_module( const WCHAR *name )
 {
@@ -3550,27 +3576,31 @@ static HMODULE load_driver_module( const WCHAR *name )
     if (nt->OptionalHeader.SectionAlignment < info.PageSize ||
         !(nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
     {
-        DWORD old;
+        DWORD old_prot[3];
         IMAGE_BASE_RELOCATION *rel, *end;
 
         if ((rel = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_BASERELOC, &size )))
         {
             TRACE( "%s: relocating from %p to %p\n", wine_dbgstr_w(name), (char *)module - delta, module );
             end = (IMAGE_BASE_RELOCATION *)((char *)rel + size);
-            while (rel < end && rel->SizeOfBlock)
+            while (rel < end - 1 && rel->SizeOfBlock)
             {
                 void *page = (char *)module + rel->VirtualAddress;
-                VirtualProtect( page, info.PageSize, PAGE_EXECUTE_READWRITE, &old );
+                /* LdrProcessRelocationBlock can access the memory range from page - (page + 0xfff + 8), so
+                 * changing permissions of a single page is not sufficient. We assume here that the minimum
+                 * page size is 0x1000, so we have to save/restore two or three pages, depending on the
+                 * virtual address. */
+                virtual_protect_save( page, 0xfff + 8, PAGE_EXECUTE_READWRITE, old_prot );
                 rel = LdrProcessRelocationBlock( page, (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
                                                  (USHORT *)(rel + 1), delta );
-                if (old != PAGE_EXECUTE_READWRITE) VirtualProtect( page, info.PageSize, old, &old );
+                virtual_protect_load( page, 0xfff + 8, old_prot );
                 if (!rel) goto error;
             }
             /* make sure we don't try again */
             size = FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader ) + nt->FileHeader.SizeOfOptionalHeader;
-            VirtualProtect( nt, size, PAGE_READWRITE, &old );
+            VirtualProtect( nt, size, PAGE_READWRITE, &old_prot[0] );
             nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress = 0;
-            VirtualProtect( nt, size, old, &old );
+            VirtualProtect( nt, size, old_prot[0], &old_prot[0] );
         }
     }
 
@@ -4237,14 +4267,6 @@ NTSTATUS WINAPI DbgQueryDebugFilterState(ULONG component, ULONG level)
 {
     FIXME("stub: %d %d\n", component, level);
     return STATUS_NOT_IMPLEMENTED;
-}
-
-/*********************************************************************
- *           ExReleaseResourceLite    (NTOSKRNL.@)
- */
-void WINAPI ExReleaseResourceLite(PERESOURCE resource)
-{
-    FIXME("stub: %p\n", resource);
 }
 
 /*********************************************************************

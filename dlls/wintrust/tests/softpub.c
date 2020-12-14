@@ -1152,7 +1152,7 @@ static void test_wintrust_digest(void)
         {
             {{ SelfSignedFile32, sizeof(SelfSignedFile32) },
              { Dummy, sizeof(Dummy) }},
-            { TRUST_E_NOSIGNATURE, TRUE }, { TRUST_E_NOSIGNATURE, TRUE }
+            { TRUST_E_NOSIGNATURE, FALSE }, { TRUST_E_NOSIGNATURE, FALSE }
         },
         {
             {{ Dummy, sizeof(Dummy) },
@@ -1163,7 +1163,7 @@ static void test_wintrust_digest(void)
             {{ SelfSignedFile32, 19 },
              { Dummy, sizeof(Dummy) },
              { SelfSignedFile32 + 19 + sizeof(Dummy), sizeof(SelfSignedFile32) - 19 - sizeof(Dummy) }},
-            { TRUST_E_BAD_DIGEST, TRUE }, { TRUST_E_NOSIGNATURE, TRUE }
+            { TRUST_E_BAD_DIGEST, FALSE }, { TRUST_E_NOSIGNATURE, TRUE }
         },
         {
             {{ SelfSignedFile32, sizeof(IMAGE_DOS_HEADER) }},
@@ -1182,7 +1182,7 @@ static void test_wintrust_digest(void)
         {
             {{ SelfSignedFile64, sizeof(SelfSignedFile64) },
              { Dummy, sizeof(Dummy) }},
-            { TRUST_E_NOSIGNATURE, TRUE }, { TRUST_E_NOSIGNATURE, TRUE }
+            { TRUST_E_NOSIGNATURE, FALSE }, { TRUST_E_NOSIGNATURE, FALSE }
         },
         {
             {{ Dummy, sizeof(Dummy) },
@@ -1193,7 +1193,7 @@ static void test_wintrust_digest(void)
             {{ SelfSignedFile64, 19 },
              { Dummy, sizeof(Dummy) },
              { SelfSignedFile64 + 19 + sizeof(Dummy), sizeof(SelfSignedFile64) - 19 - sizeof(Dummy) }},
-            { TRUST_E_BAD_DIGEST, TRUE }, { TRUST_E_NOSIGNATURE, TRUE }
+            { TRUST_E_BAD_DIGEST, FALSE }, { TRUST_E_NOSIGNATURE, TRUE }
         },
         {
             {{ SelfSignedFile64, sizeof(IMAGE_DOS_HEADER) }},
@@ -1300,6 +1300,14 @@ static void test_get_known_usages(void)
      "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 }
 
+static void test_WTHelperGetProvCertFromChain(void)
+{
+    CRYPT_PROVIDER_CERT *cert;
+
+    cert = WTHelperGetProvCertFromChain(NULL, 0);
+    ok(!cert, "got certificate\n");
+}
+
 START_TEST(softpub)
 {
     InitFunctionPtrs();
@@ -1308,4 +1316,5 @@ START_TEST(softpub)
     test_wintrust();
     test_wintrust_digest();
     test_get_known_usages();
+    test_WTHelperGetProvCertFromChain();
 }
