@@ -41,6 +41,7 @@ struct ntdll_thread_data
     int                wait_fd[2];    /* fd for sleeping server requests */
     BOOL               wow64_redir;   /* Wow64 filesystem redirection flag */
     pthread_t          pthread_id;    /* pthread thread id */
+    void              *pthread_stack; /* pthread stack */
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
@@ -84,6 +85,7 @@ extern unsigned int CDECL server_select( const select_op_t *select_op, data_size
 extern unsigned int CDECL server_wait( const select_op_t *select_op, data_size_t size, UINT flags,
                                        const LARGE_INTEGER *timeout ) DECLSPEC_HIDDEN;
 extern void CDECL server_send_fd( int fd ) DECLSPEC_HIDDEN;
+extern void CDECL server_remove_fds_from_cache_by_type( enum server_fd_type type ) DECLSPEC_HIDDEN;
 extern int CDECL server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
                                      int *needs_close, enum server_fd_type *type,
                                      unsigned int *options ) DECLSPEC_HIDDEN;
@@ -95,7 +97,7 @@ extern void CDECL server_release_fd( HANDLE handle, int unix_fd ) DECLSPEC_HIDDE
 extern void CDECL server_init_process_done(void) DECLSPEC_HIDDEN;
 extern TEB * CDECL init_threading( int *nb_threads_ptr, struct ldt_copy **ldt_copy, SIZE_T *size,
                                    BOOL *suspend, unsigned int *cpus, BOOL *wow64,
-                                   timeout_t *start_time ) DECLSPEC_HIDDEN;
+                                   timeout_t *start_time, void *syscall_handler ) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN start_process( PRTL_THREAD_START_ROUTINE entry, BOOL suspend, void *relay ) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN abort_thread( int status ) DECLSPEC_HIDDEN;
 extern void CDECL DECLSPEC_NORETURN exit_thread( int status ) DECLSPEC_HIDDEN;
@@ -135,7 +137,7 @@ extern void virtual_init(void) DECLSPEC_HIDDEN;
 extern TEB *virtual_alloc_first_teb(void) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_teb( TEB **ret_teb ) DECLSPEC_HIDDEN;
 extern void virtual_free_teb( TEB *teb ) DECLSPEC_HIDDEN;
-extern void virtual_map_user_shared_data(void) DECLSPEC_HIDDEN;
+extern void virtual_map_user_shared_data(void *) DECLSPEC_HIDDEN;
 
 extern void signal_init_threading(void) DECLSPEC_HIDDEN;
 extern NTSTATUS signal_alloc_thread( TEB *teb ) DECLSPEC_HIDDEN;

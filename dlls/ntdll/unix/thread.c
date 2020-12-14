@@ -83,7 +83,7 @@ static void pthread_exit_wrapper( int status )
  *           init_threading
  */
 TEB * CDECL init_threading( int *nb_threads_ptr, struct ldt_copy **ldt_copy, SIZE_T *size, BOOL *suspend,
-                            unsigned int *cpus, BOOL *wow64, timeout_t *start_time )
+                            unsigned int *cpus, BOOL *wow64, timeout_t *start_time, void *syscall_handler )
 {
     TEB *teb;
     SIZE_T info_size;
@@ -95,6 +95,7 @@ TEB * CDECL init_threading( int *nb_threads_ptr, struct ldt_copy **ldt_copy, SIZ
     nb_threads = nb_threads_ptr;
 
     teb = virtual_alloc_first_teb();
+    teb->WOW32Reserved = syscall_handler;
     thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     thread_data->request_fd = -1;
     thread_data->reply_fd   = -1;
@@ -107,7 +108,7 @@ TEB * CDECL init_threading( int *nb_threads_ptr, struct ldt_copy **ldt_copy, SIZ
     dbg_init();
     server_init_process();
     info_size = server_init_thread( teb->Peb, suspend );
-    virtual_map_user_shared_data();
+    virtual_map_user_shared_data(syscall_handler);
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
 
     if (size) *size = info_size;
@@ -344,6 +345,7 @@ void CDECL abort_thread( int status )
 void CDECL exit_thread( int status )
 {
     static void *prev_teb;
+    sigset_t sigset;
     TEB *teb;
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
@@ -358,6 +360,12 @@ void CDECL exit_thread( int status )
             virtual_free_teb( teb );
         }
     }
+
+    sigemptyset( &sigset );
+    sigaddset( &sigset, SIGQUIT );
+    pthread_sigmask( SIG_BLOCK, &sigset, NULL );
+    if (!InterlockedDecrement( nb_threads )) _exit( status );
+
     signal_exit_thread( status, pthread_exit_wrapper );
 }
 

@@ -1074,6 +1074,7 @@ static struct unix_funcs unix_funcs =
     server_select,
     server_wait,
     server_send_fd,
+    server_remove_fds_from_cache_by_type,
     server_get_unix_fd,
     server_fd_to_handle,
     server_handle_to_fd,

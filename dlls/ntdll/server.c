@@ -239,6 +239,14 @@ void CDECL wine_server_release_fd( HANDLE handle, int unix_fd )
     unix_funcs->server_release_fd( handle, unix_fd );
 }
 
+ /***********************************************************************
+ *           wine_server_close_fds_by_type
+ */
+void CDECL wine_server_close_fds_by_type( enum server_fd_type type )
+{
+    unix_funcs->server_remove_fds_from_cache_by_type( type );
+}
+
 
 /***********************************************************************
  *           server_init_process

@@ -304,12 +304,16 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
                    "movl 0xc4(%ecx),%eax\n\t" /* Esp */
                    "leal -4*4(%eax),%eax\n\t"
                    "movl 0xc0(%ecx),%edx\n\t" /* EFlags */
+                   ".byte 0x36\n\t"
                    "movl %edx,3*4(%eax)\n\t"
                    "movl 0xbc(%ecx),%edx\n\t" /* SegCs */
+                   ".byte 0x36\n\t"
                    "movl %edx,2*4(%eax)\n\t"
                    "movl 0xb8(%ecx),%edx\n\t" /* Eip */
+                   ".byte 0x36\n\t"
                    "movl %edx,1*4(%eax)\n\t"
                    "movl 0xb0(%ecx),%edx\n\t" /* Eax */
+                   ".byte 0x36\n\t"
                    "movl %edx,0*4(%eax)\n\t"
                    "pushl 0x98(%ecx)\n\t"     /* SegDs */
                    "movl 0xa8(%ecx),%edx\n\t" /* Edx */
@@ -821,7 +825,7 @@ NTSTATUS CDECL get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG
                 if (reply->flags)
                     info->Entry = ldt_make_entry( (void *)reply->base, reply->limit, reply->flags );
                 else
-                    status = STATUS_UNSUCCESSFUL;
+                    status = STATUS_ACCESS_VIOLATION;
             }
         }
         SERVER_END_REQ;
@@ -843,8 +847,6 @@ NTSTATUS WINAPI NtSetLdtEntries( ULONG sel1, LDT_ENTRY entry1, ULONG sel2, LDT_E
     sigset_t sigset;
 
     if (sel1 >> 16 || sel2 >> 16) return STATUS_INVALID_LDT_DESCRIPTOR;
-    if (sel1 && (sel1 >> 3) < first_ldt_entry) return STATUS_INVALID_LDT_DESCRIPTOR;
-    if (sel2 && (sel2 >> 3) < first_ldt_entry) return STATUS_INVALID_LDT_DESCRIPTOR;
 
     server_enter_uninterrupted_section( &ldt_section, &sigset );
     if (sel1) ldt_set_entry( sel1, entry1 );

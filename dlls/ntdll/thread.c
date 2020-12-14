@@ -23,6 +23,8 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#include <string.h>
+#include <stdio.h>
 #include <limits.h>
 #include <sys/types.h>
 #ifdef HAVE_SYS_MMAN_H
@@ -58,6 +60,7 @@ static PEB_LDR_DATA ldr;
 static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
 static RTL_BITMAP fls_bitmap;
+static API_SET_NAMESPACE_ARRAY apiset_map;
 static int nb_threads = 1;
 
 struct ldt_copy *__wine_ldt_copy = NULL;
@@ -138,6 +141,53 @@ static ULONG_PTR get_image_addr(void)
 #endif
 
 
+
+BOOL read_process_time(int unix_pid, int unix_tid, unsigned long clk_tck,
+                       LARGE_INTEGER *kernel, LARGE_INTEGER *user)
+{
+#ifdef __linux__
+    unsigned long usr, sys;
+    char buf[512], *pos;
+    FILE *fp;
+    int i;
+
+    /* based on https://github.com/torvalds/linux/blob/master/fs/proc/array.c */
+    if (unix_tid != -1)
+        sprintf( buf, "/proc/%u/task/%u/stat", unix_pid, unix_tid );
+    else
+        sprintf( buf, "/proc/%u/stat", unix_pid );
+    if ((fp = fopen( buf, "r" )))
+    {
+        pos = fgets( buf, sizeof(buf), fp );
+        fclose( fp );
+
+        /* format of first chunk is "%d (%s) %c" - we have to skip to the last ')'
+         * to avoid misinterpreting the string. */
+        if (pos) pos = strrchr( pos, ')' );
+        if (pos) pos = strchr( pos + 1, ' ' );
+        if (pos) pos++;
+
+        /* skip over the following fields: state, ppid, pgid, sid, tty_nr, tty_pgrp,
+         * task->flags, min_flt, cmin_flt, maj_flt, cmaj_flt */
+        for (i = 0; (i < 11) && pos; i++)
+        {
+            pos = strchr( pos + 1, ' ' );
+            if (pos) pos++;
+        }
+
+        /* the next two values are user and system time */
+        if (pos && (sscanf( pos, "%lu %lu", &usr, &sys ) == 2))
+        {
+            kernel->QuadPart = (ULONGLONG)sys * 10000000 / clk_tck;
+            user->QuadPart   = (ULONGLONG)usr * 10000000 / clk_tck;
+            return TRUE;
+        }
+    }
+#endif
+    return FALSE;
+}
+
+
 /***********************************************************************
  *		__wine_dbg_get_channel_flags  (NTDLL.@)
  *
@@ -173,6 +223,40 @@ int __cdecl __wine_dbg_output( const char *str )
     return unix_funcs->dbg_output( str );
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+
+void *WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+    HMODULE base;
+    WCHAR *moduleW;
+    void *proc = NULL;
+    DWORD len = strlen(module);
+
+    TRACE( "(%s, %u)\n", debugstr_a(module), ord );
+
+    if (!(moduleW = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    ascii_to_unicode( moduleW, module, len );
+    moduleW[ len ] = 0;
+    RtlInitUnicodeString( &name, moduleW );
+
+    status = LdrGetDllHandle( NULL, 0, &name, &base );
+    if (status == STATUS_DLL_NOT_FOUND)
+        status = LdrLoadDll( NULL, 0, &name, &base );
+    if (status == STATUS_SUCCESS)
+        status = LdrAddRefDll( LDR_ADDREF_DLL_PIN, base );
+    if (status == STATUS_SUCCESS)
+        status = LdrGetProcedureAddress( base, NULL, ord, &proc );
+
+    if (status)
+        FIXME( "No procedure address found for %s.#%u, status %x\n", debugstr_a(module), ord, status );
+
+    RtlFreeHeap( GetProcessHeap(), 0, moduleW );
+    return proc;
+}
 
 /***********************************************************************
  *           thread_init
@@ -186,12 +270,15 @@ TEB *thread_init( SIZE_T *info_size, BOOL *suspend )
     TEB *teb;
 
     virtual_init();
+    signal_init_early();
 
     teb = unix_funcs->init_threading( &nb_threads, &__wine_ldt_copy, info_size, suspend, &server_cpus,
-                                      &is_wow64, &server_start_time );
+                                      &is_wow64, &server_start_time, __wine_syscall_dispatcher );
+    teb->Spare2 = (ULONG_PTR)__wine_fakedll_dispatcher;
 
     peb = teb->Peb;
     peb->FastPebLock        = &peb_lock;
+    peb->ApiSetMap          = &apiset_map;
     peb->TlsBitmap          = &tls_bitmap;
     peb->TlsExpansionBitmap = &tls_expansion_bitmap;
     peb->FlsBitmap          = &fls_bitmap;
@@ -243,7 +330,7 @@ void WINAPI RtlExitUserThread( ULONG status )
         SERVER_END_REQ;
     }
 
-    if (InterlockedDecrement( &nb_threads ) <= 0)
+    if (InterlockedCompareExchange( &nb_threads, 0, 0 ) <= 0)
     {
         LdrShutdownProcess();
         unix_funcs->exit_process( status );
@@ -332,6 +419,42 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
                                          flags, zero_bits, stack_commit, stack_reserve, attr_list );
 }
 
+BOOL read_process_memory_stats(int unix_pid, VM_COUNTERS *pvmi)
+{
+    BOOL ret = FALSE;
+#ifdef __linux__
+    unsigned long size, resident, shared, trs, drs, lrs, dt;
+    char buf[512];
+    FILE *fp;
+
+    sprintf( buf, "/proc/%u/statm", unix_pid );
+    if ((fp = fopen( buf, "r" )))
+    {
+        if (fscanf( fp, "%lu %lu %lu %lu %lu %lu %lu",
+            &size, &resident, &shared, &trs, &drs, &lrs, &dt ) == 7)
+        {
+            pvmi->VirtualSize = size * page_size;
+            pvmi->WorkingSetSize = resident * page_size;
+            pvmi->PrivatePageCount = size - shared;
+
+            /* these values are not available through /proc/pid/statm */
+            pvmi->PeakVirtualSize = pvmi->VirtualSize;
+            pvmi->PageFaultCount = 0;
+            pvmi->PeakWorkingSetSize = pvmi->WorkingSetSize;
+            pvmi->QuotaPagedPoolUsage = pvmi->VirtualSize;
+            pvmi->QuotaPeakPagedPoolUsage = pvmi->QuotaPagedPoolUsage;
+            pvmi->QuotaPeakNonPagedPoolUsage = 0;
+            pvmi->QuotaNonPagedPoolUsage = 0;
+            pvmi->PagefileUsage = 0;
+            pvmi->PeakPagefileUsage = 0;
+
+            ret = TRUE;
+        }
+        fclose( fp );
+    }
+#endif
+    return ret;
+}
 
 /***********************************************************************
  *              RtlCreateUserThread   (NTDLL.@)
@@ -696,7 +819,10 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadTimes:
         {
             KERNEL_USER_TIMES   kusrt;
+            int unix_pid, unix_tid;
 
+            /* We need to do a server call to get the creation time, exit time, PID and TID */
+            /* This works on any thread */
             SERVER_START_REQ( get_thread_times )
             {
                 req->handle = wine_server_obj_handle( handle );
@@ -705,36 +831,44 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                 {
                     kusrt.CreateTime.QuadPart = reply->creation_time;
                     kusrt.ExitTime.QuadPart = reply->exit_time;
+                    unix_pid = reply->unix_pid;
+                    unix_tid = reply->unix_tid;
                 }
             }
             SERVER_END_REQ;
             if (status == STATUS_SUCCESS)
             {
-                /* We call times(2) for kernel time or user time */
-                /* We can only (portably) do this for the current thread */
-                if (handle == GetCurrentThread())
+                unsigned long clk_tck = sysconf(_SC_CLK_TCK);
+                BOOL filled_times = FALSE;
+
+#ifdef __linux__
+                /* only /proc provides exact values for a specific thread */
+                if (unix_pid != -1 && unix_tid != -1)
+                    filled_times = read_process_time(unix_pid, unix_tid, clk_tck, &kusrt.KernelTime, &kusrt.UserTime);
+#endif
+
+                /* get values for current process instead */
+                if (!filled_times && handle == GetCurrentThread())
                 {
                     struct tms time_buf;
-                    long clocks_per_sec = sysconf(_SC_CLK_TCK);
-
                     times(&time_buf);
-                    kusrt.KernelTime.QuadPart = (ULONGLONG)time_buf.tms_stime * 10000000 / clocks_per_sec;
-                    kusrt.UserTime.QuadPart = (ULONGLONG)time_buf.tms_utime * 10000000 / clocks_per_sec;
+
+                    kusrt.KernelTime.QuadPart = (ULONGLONG)time_buf.tms_stime * 10000000 / clk_tck;
+                    kusrt.UserTime.QuadPart   = (ULONGLONG)time_buf.tms_utime * 10000000 / clk_tck;
+                    filled_times = TRUE;
                 }
-                else
+
+                /* unable to determine exact values, fill with zero */
+                if (!filled_times)
                 {
-                    static BOOL reported = FALSE;
+                    static int once;
+                    if (!once++)
+                        FIXME("Cannot get kerneltime or usertime of other threads\n");
 
                     kusrt.KernelTime.QuadPart = 0;
-                    kusrt.UserTime.QuadPart = 0;
-                    if (reported)
-                        TRACE("Cannot get kerneltime or usertime of other threads\n");
-                    else
-                    {
-                        FIXME("Cannot get kerneltime or usertime of other threads\n");
-                        reported = TRUE;
-                    }
+                    kusrt.UserTime.QuadPart   = 0;
                 }
+
                 if (data) memcpy( data, &kusrt, min( length, sizeof(kusrt) ));
                 if (ret_len) *ret_len = min( length, sizeof(kusrt) );
             }
@@ -860,6 +994,11 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                 *ret_len = sizeof(*info) + desc_len;
         }
         return status;
+    case ThreadHideFromDebugger:
+        if (length != sizeof(BOOLEAN)) return STATUS_INFO_LENGTH_MISMATCH;
+        *(BOOLEAN *)data = TRUE;
+        if (ret_len) *ret_len = sizeof(BOOLEAN);
+        return STATUS_SUCCESS;
     case ThreadPriority:
     case ThreadBasePriority:
     case ThreadImpersonationToken:
