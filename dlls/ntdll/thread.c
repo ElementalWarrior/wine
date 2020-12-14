@@ -36,6 +36,7 @@
 #include "ddk/wdm.h"
 #include "wine/exception.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(thread);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
@@ -45,6 +46,7 @@ static PEB_LDR_DATA ldr;
 static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
 static RTL_BITMAP fls_bitmap;
+static API_SET_NAMESPACE_ARRAY apiset_map;
 static int nb_threads = 1;
 
 struct ldt_copy *__wine_ldt_copy = NULL;
@@ -94,6 +96,53 @@ int __cdecl __wine_dbg_output( const char *str )
     return unix_funcs->dbg_output( str );
 }
 
+#if defined(__i386__) || defined(__x86_64__)
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+#else
+void __wine_syscall_dispatcher( void )
+{
+    FIXME("Syscall dispatcher is not available for this architecture.\n");
+}
+#endif
+
+#if defined(__x86_64__)
+extern unsigned int __wine_nb_syscalls;
+#else
+unsigned int __wine_nb_syscalls;
+#endif
+
+void *WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+    HMODULE base;
+    WCHAR *moduleW;
+    void *proc = NULL;
+    DWORD len = strlen(module);
+
+    TRACE( "(%s, %u)\n", debugstr_a(module), ord );
+
+    if (!(moduleW = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    ascii_to_unicode( moduleW, module, len );
+    moduleW[ len ] = 0;
+    RtlInitUnicodeString( &name, moduleW );
+
+    status = LdrGetDllHandle( NULL, 0, &name, &base );
+    if (status == STATUS_DLL_NOT_FOUND)
+        status = LdrLoadDll( NULL, 0, &name, &base );
+    if (status == STATUS_SUCCESS)
+        status = LdrAddRefDll( LDR_ADDREF_DLL_PIN, base );
+    if (status == STATUS_SUCCESS)
+        status = LdrGetProcedureAddress( base, NULL, ord, &proc );
+
+    if (status)
+        FIXME( "No procedure address found for %s.#%u, status %x\n", debugstr_a(module), ord, status );
+
+    RtlFreeHeap( GetProcessHeap(), 0, moduleW );
+    return proc;
+}
 
 /***********************************************************************
  *           thread_init
@@ -105,10 +154,12 @@ int __cdecl __wine_dbg_output( const char *str )
 TEB *thread_init( SIZE_T *info_size, BOOL *suspend )
 {
     TEB *teb = unix_funcs->init_threading( &nb_threads, &__wine_ldt_copy, info_size, suspend, &server_cpus,
-                                           &is_wow64, &server_start_time );
+                                           &is_wow64, &server_start_time, __wine_syscall_dispatcher, __wine_nb_syscalls );
+    teb->Spare2 = (ULONG_PTR)__wine_fakedll_dispatcher;
 
     peb = teb->Peb;
     peb->FastPebLock        = &peb_lock;
+    peb->ApiSetMap          = &apiset_map;
     peb->TlsBitmap          = &tls_bitmap;
     peb->TlsExpansionBitmap = &tls_expansion_bitmap;
     peb->FlsBitmap          = &fls_bitmap;
@@ -158,7 +209,7 @@ void WINAPI RtlExitUserThread( ULONG status )
         SERVER_END_REQ;
     }
 
-    if (InterlockedDecrement( &nb_threads ) <= 0)
+    if (InterlockedCompareExchange( &nb_threads, 0, 0 ) <= 0)
     {
         LdrShutdownProcess();
         unix_funcs->exit_process( status );

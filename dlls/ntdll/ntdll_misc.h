@@ -28,6 +28,7 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "unixlib.h"
+#include "wine/debug.h"
 #include "wine/server.h"
 #include "wine/asm.h"
 
@@ -86,6 +87,9 @@ extern int __wine_main_argc;
 extern char **__wine_main_argv;
 extern WCHAR **__wine_main_wargv;
 
+/* token */
+extern HANDLE CDECL __wine_create_default_token(BOOL admin);
+
 /* server support */
 extern const char *build_dir DECLSPEC_HIDDEN;
 extern const char *data_dir DECLSPEC_HIDDEN;
@@ -129,6 +133,43 @@ extern int ntdll_wcstoumbs( const WCHAR* src, DWORD srclen, char* dst, DWORD dst
 extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, __ms_va_list args ) DECLSPEC_HIDDEN;
 extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, __ms_va_list args ) DECLSPEC_HIDDEN;
 
+#ifdef __WINE_WINE_PORT_H
+
+/* inline version of RtlEnterCriticalSection */
+static inline void enter_critical_section( RTL_CRITICAL_SECTION *crit )
+{
+    if (InterlockedIncrement( &crit->LockCount ))
+    {
+        if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
+        {
+            crit->RecursionCount++;
+            return;
+        }
+        RtlpWaitForCriticalSection( crit );
+    }
+    crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
+    crit->RecursionCount = 1;
+}
+
+/* inline version of RtlLeaveCriticalSection */
+static inline void leave_critical_section( RTL_CRITICAL_SECTION *crit )
+{
+    WINE_DECLARE_DEBUG_CHANNEL(ntdll);
+    if (--crit->RecursionCount)
+    {
+        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
+        else ERR_(ntdll)( "section %p is not acquired\n", crit );
+    }
+    else
+    {
+        crit->OwningThread = 0;
+        if (InterlockedDecrement( &crit->LockCount ) >= 0)
+            RtlpUnWaitCriticalSection( crit );
+    }
+}
+
+#endif  /* __WINE_WINE_PORT_H */
+
 /* load order */
 
 enum loadorder
@@ -154,6 +195,7 @@ struct ntdll_thread_data
     int                wait_fd[2];    /* fd for sleeping server requests */
     BOOL               wow64_redir;   /* Wow64 filesystem redirection flag */
     pthread_t          pthread_id;    /* pthread thread id */
+    void              *pthread_stack; /* pthread stack */
 };
 
 C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
@@ -226,5 +268,13 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
 {
     while (len--) *dst++ = (unsigned char)*src++;
 }
+
+#if defined(__i386__) || defined(__x86_64__)
+NTSTATUS WINAPI __syscall_NtOpenFile( PHANDLE handle, ACCESS_MASK access,
+                            POBJECT_ATTRIBUTES attr, PIO_STATUS_BLOCK io,
+                            ULONG sharing, ULONG options );
+#else
+#define __syscall_NtOpenFile NtOpenFile
+#endif
 
 #endif

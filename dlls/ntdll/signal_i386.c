@@ -346,6 +346,8 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 4,
                     "ret $4" )
 
 
+extern NTSTATUS WINAPI __syscall_NtGetContextThread( HANDLE handle, CONTEXT *context );
+
 /***********************************************************************
  *              NtGetContextThread  (NTDLL.@)
  *              ZwGetContextThread  (NTDLL.@)
@@ -370,7 +372,7 @@ NTSTATUS CDECL DECLSPEC_HIDDEN __regs_NtGetContextThread( DWORD edi, DWORD esi, 
     {
         context->Ebp    = ebp;
         context->Esp    = (DWORD)&retaddr;
-        context->Eip    = *(&edi - 1);
+        context->Eip    = (DWORD)__syscall_NtGetContextThread + 18;
         context->EFlags = eflags;
     }
     return unix_funcs->NtGetContextThread( handle, context );
