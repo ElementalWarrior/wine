@@ -882,6 +882,13 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
+
 /***********************************************************************
  *           init_thread_context
  */

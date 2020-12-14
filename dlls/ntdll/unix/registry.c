@@ -25,6 +25,7 @@
 #pragma makedep unix
 #endif
 
+#include <signal.h>
 #include <stdarg.h>
 #include <string.h>
 

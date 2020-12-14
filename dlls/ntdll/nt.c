@@ -91,6 +91,65 @@ NTSTATUS WINAPI NtDuplicateToken(
 }
 
 /******************************************************************************
+ *  NtFilterToken        [NTDLL.@]
+ *  ZwFilterToken        [NTDLL.@]
+ */
+NTSTATUS WINAPI NtFilterToken( HANDLE token, ULONG flags, TOKEN_GROUPS *disable_sids,
+                               TOKEN_PRIVILEGES *privileges, TOKEN_GROUPS *restrict_sids,
+                               HANDLE *new_token )
+{
+    data_size_t privileges_len = 0;
+    data_size_t sids_len = 0;
+    SID *sids = NULL;
+    NTSTATUS status;
+
+    TRACE( "(%p, 0x%08x, %p, %p, %p, %p)\n", token, flags, disable_sids, privileges,
+           restrict_sids, new_token );
+
+    if (flags)
+        FIXME( "flags %x unsupported\n", flags );
+
+    if (restrict_sids)
+        FIXME( "support for restricting sids not yet implemented\n" );
+
+    if (privileges)
+        privileges_len = privileges->PrivilegeCount * sizeof(LUID_AND_ATTRIBUTES);
+
+    if (disable_sids)
+    {
+        DWORD len, i;
+        BYTE *tmp;
+
+        for (i = 0; i < disable_sids->GroupCount; i++)
+            sids_len += RtlLengthSid( disable_sids->Groups[i].Sid );
+
+        sids = RtlAllocateHeap( GetProcessHeap(), 0, sids_len );
+        if (!sids) return STATUS_NO_MEMORY;
+
+        for (i = 0, tmp = (BYTE *)sids; i < disable_sids->GroupCount; i++, tmp += len)
+        {
+            len = RtlLengthSid( disable_sids->Groups[i].Sid );
+            memcpy( tmp, disable_sids->Groups[i].Sid, len );
+        }
+    }
+
+    SERVER_START_REQ( filter_token )
+    {
+        req->handle          = wine_server_obj_handle( token );
+        req->flags           = flags;
+        req->privileges_size = privileges_len;
+        wine_server_add_data( req, privileges->Privileges, privileges_len );
+        wine_server_add_data( req, sids, sids_len );
+        status = wine_server_call( req );
+        if (!status) *new_token = wine_server_ptr_handle( reply->new_handle );
+    }
+    SERVER_END_REQ;
+
+    RtlFreeHeap( GetProcessHeap(), 0, sids );
+    return status;
+}
+
+/******************************************************************************
  *  NtOpenProcessToken		[NTDLL.@]
  *  ZwOpenProcessToken		[NTDLL.@]
  */
@@ -247,13 +306,13 @@ NTSTATUS WINAPI NtQueryInformationToken(
         0,    /* TokenAuditPolicy */
         0,    /* TokenOrigin */
         sizeof(TOKEN_ELEVATION_TYPE), /* TokenElevationType */
-        0,    /* TokenLinkedToken */
+        sizeof(TOKEN_LINKED_TOKEN), /* TokenLinkedToken */
         sizeof(TOKEN_ELEVATION), /* TokenElevation */
         0,    /* TokenHasRestrictions */
         0,    /* TokenAccessInformation */
         0,    /* TokenVirtualizationAllowed */
         sizeof(DWORD), /* TokenVirtualizationEnabled */
-        sizeof(TOKEN_MANDATORY_LABEL) + sizeof(SID), /* TokenIntegrityLevel [sizeof(SID) includes one SubAuthority] */
+        0,    /* TokenIntegrityLevel */
         0,    /* TokenUIAccess */
         0,    /* TokenMandatoryPolicy */
         0,    /* TokenLogonSid */
@@ -478,18 +537,52 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_END_REQ;
         break;
     case TokenElevationType:
+        SERVER_START_REQ( get_token_elevation_type )
         {
             TOKEN_ELEVATION_TYPE *elevation_type = tokeninfo;
-            FIXME("QueryInformationToken( ..., TokenElevationType, ...) semi-stub\n");
-            *elevation_type = TokenElevationTypeFull;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                *elevation_type = reply->elevation;
         }
+        SERVER_END_REQ;
+        break;
+    case TokenLinkedToken:
+        SERVER_START_REQ( get_token_elevation_type )
+        {
+            TOKEN_LINKED_TOKEN *linked_token = tokeninfo;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+            {
+                HANDLE token;
+                /* FIXME: On Wine we do not have real linked tokens yet. Typically, a
+                 * program running with admin privileges is linked to a limited token,
+                 * and vice versa. We just create a new token instead of storing links
+                 * on the wineserver side. Using TokenLinkedToken twice should return
+                 * back the original token. */
+                if ((reply->elevation == TokenElevationTypeFull || reply->elevation == TokenElevationTypeLimited) &&
+                    (token = __wine_create_default_token( reply->elevation != TokenElevationTypeFull )))
+                {
+                    status = NtDuplicateToken( token, 0, NULL, SecurityIdentification, TokenImpersonation, &linked_token->LinkedToken );
+                    NtClose( token );
+                }
+                else
+                    status = STATUS_NO_TOKEN;
+            }
+        }
+        SERVER_END_REQ;
         break;
     case TokenElevation:
+        SERVER_START_REQ( get_token_elevation_type )
         {
             TOKEN_ELEVATION *elevation = tokeninfo;
-            FIXME("QueryInformationToken( ..., TokenElevation, ...) semi-stub\n");
-            elevation->TokenIsElevated = TRUE;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                elevation->TokenIsElevated = (reply->elevation == TokenElevationTypeFull);
         }
+        SERVER_END_REQ;
         break;
     case TokenSessionId:
         {
@@ -504,18 +597,23 @@ NTSTATUS WINAPI NtQueryInformationToken(
         }
         break;
     case TokenIntegrityLevel:
+        SERVER_START_REQ( get_token_integrity )
         {
-            /* report always "S-1-16-12288" (high mandatory level) for now */
-            static const SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                                                            {SECURITY_MANDATORY_HIGH_RID}};
-
             TOKEN_MANDATORY_LABEL *tml = tokeninfo;
-            PSID psid = tml + 1;
+            PSID sid = tml + 1;
+            DWORD sid_len = tokeninfolength < sizeof(*tml) ? 0 : tokeninfolength - sizeof(*tml);
 
-            tml->Label.Sid = psid;
-            tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
-            memcpy(psid, &high_level, sizeof(SID));
+            req->handle = wine_server_obj_handle( token );
+            wine_server_set_reply( req, sid, sid_len );
+            status = wine_server_call( req );
+            if (retlen) *retlen = reply->sid_len + sizeof(*tml);
+            if (status == STATUS_SUCCESS)
+            {
+                tml->Label.Sid = sid;
+                tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
+            }
         }
+        SERVER_END_REQ;
         break;
     case TokenAppContainerSid:
         {
