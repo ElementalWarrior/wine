@@ -1630,6 +1630,32 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
     info->TotalCommitLimit    = (totalram + totalswap) / page_size;
 }
 
+static void get_ntdll_system_module(SYSTEM_MODULE *sm)
+{
+    char *ptr;
+    ANSI_STRING str;
+    PLIST_ENTRY entry;
+    LDR_DATA_TABLE_ENTRY *mod;
+
+    /* The first entry must be ntdll. */
+    entry = NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList.Flink;
+    mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+
+    sm->Section = 0;
+    sm->MappedBaseAddress = 0;
+    sm->ImageBaseAddress = mod->DllBase;
+    sm->ImageSize = mod->SizeOfImage;
+    sm->Flags = mod->Flags;
+    sm->LoadOrderIndex = 0;
+    sm->InitOrderIndex = 0;
+    sm->LoadCount = 0;
+    str.Length = 0;
+    str.MaximumLength = MAXIMUM_FILENAME_LENGTH;
+    str.Buffer = (char*)sm->Name;
+    RtlUnicodeStringToAnsiString(&str, &mod->FullDllName, FALSE);
+    ptr = strrchr(str.Buffer, '\\');
+    sm->NameOffset = (ptr != NULL) ? (ptr - str.Buffer + 1) : 0;
+}
 
 /* calculate the mday of dst change date, so that for instance Sun 5 Oct 2007
  * (last Sunday in October of 2007) becomes Sun Oct 28 2007
@@ -1998,6 +2024,18 @@ static void get_timezone_info( RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi )
     RtlLeaveCriticalSection( &TIME_tz_section );
 }
 
+static DWORD translate_object_index(DWORD index)
+{
+    WORD version = MAKEWORD(NtCurrentTeb()->Peb->OSMinorVersion, NtCurrentTeb()->Peb->OSMajorVersion);
+
+    /* Process Hacker depends on this logic */
+    if (version >= 0x0602)
+        return index;
+    else if (version == 0x0601)
+        return index + 2;
+    else
+        return index + 1;
+}
 
 /******************************************************************************
  *              NtQuerySystemInformation  (NTDLL.@)
@@ -2137,6 +2175,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                         spi->UniqueProcessId = UlongToHandle(reply->pid);
                         spi->ParentProcessId = UlongToHandle(reply->ppid);
                         spi->HandleCount = reply->handles;
+                        spi->CreationTime.QuadPart = reply->start_time;
 
                         /* spi->ti will be set later on */
 
@@ -2162,6 +2201,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                 while (ret == STATUS_SUCCESS)
                 {
                     int unix_tid, pid, tid, base_pri, delta_pri;
+                    timeout_t creation_time;
                     SERVER_START_REQ( next_thread )
                     {
                         req->handle = wine_server_obj_handle( handle );
@@ -2173,6 +2213,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                             tid = reply->tid;
                             base_pri = reply->base_pri;
                             delta_pri = reply->delta_pri;
+                            creation_time = reply->creation_time;
                             j++;
                         }
                     }
@@ -2184,7 +2225,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                         {
                             memset(&spi->ti[i], 0, sizeof(spi->ti));
 
-                            spi->ti[i].CreateTime.QuadPart = 0xdeadbeef;
+                            spi->ti[i].CreateTime.QuadPart = creation_time;
                             spi->ti[i].ClientId.UniqueProcess = UlongToHandle(pid);
                             spi->ti[i].ClientId.UniqueThread  = UlongToHandle(tid);
                             spi->ti[i].dwCurrentPriority = base_pri + delta_pri;
@@ -2318,9 +2359,44 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     }
 
     case SystemModuleInformation:
-        /* FIXME: should be system-wide */
-        if (!info) ret = STATUS_ACCESS_VIOLATION;
-        else ret = LdrQueryProcessModuleInformation( info, size, &len );
+        if (!info)
+            ret = STATUS_ACCESS_VIOLATION;
+        else if (size < FIELD_OFFSET( SYSTEM_MODULE_INFORMATION, Modules[1] ))
+        {
+            len = FIELD_OFFSET( SYSTEM_MODULE_INFORMATION, Modules[1] );
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        else
+        {
+            SYSTEM_MODULE_INFORMATION *smi = info;
+
+            FIXME("returning fake driver list\n");
+            smi->ModulesCount = 1;
+            get_ntdll_system_module(&smi->Modules[0]);
+            ret = STATUS_SUCCESS;
+        }
+        break;
+
+    case SystemModuleInformationEx:
+        if (!info)
+            ret = STATUS_ACCESS_VIOLATION;
+        else if (size < sizeof(SYSTEM_MODULE_INFORMATION_EX))
+        {
+            len = sizeof(SYSTEM_MODULE_INFORMATION_EX);
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        else
+        {
+            SYSTEM_MODULE_INFORMATION_EX *info = info;
+
+            FIXME("info_class SystemModuleInformationEx stub!\n");
+            get_ntdll_system_module(&info->BaseInfo);
+            info->NextOffset = 0;
+            info->ImageCheckSum = 0;
+            info->TimeDateStamp = 0;
+            info->DefaultBase = info->BaseInfo.ImageBaseAddress;
+            ret = STATUS_SUCCESS;
+        }
         break;
 
     case SystemHandleInformation:
@@ -2358,12 +2434,66 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                     shi->Handle[i].OwnerPid     = handle_info[i].owner;
                     shi->Handle[i].HandleValue  = handle_info[i].handle;
                     shi->Handle[i].AccessMask   = handle_info[i].access;
-                    /* FIXME: Fill out ObjectType, HandleFlags, ObjectPointer */
+                    shi->Handle[i].ObjectType   = translate_object_index( handle_info[i].type );
+                    /* FIXME: Fill out HandleFlags, ObjectPointer */
                 }
             }
             else if (ret == STATUS_BUFFER_TOO_SMALL)
             {
                 len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION, Handle[reply->count] );
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
+        }
+        SERVER_END_REQ;
+
+        RtlFreeHeap( GetProcessHeap(), 0, handle_info );
+        break;
+    }
+
+    case SystemExtendedHandleInformation:
+    {
+        struct handle_info *handle_info;
+        DWORD i, num_handles;
+
+        if (size < sizeof(SYSTEM_HANDLE_INFORMATION_EX))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        num_handles = size - FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle );
+        num_handles /= sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX);
+        if (!(handle_info = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*handle_info) * num_handles )))
+            return STATUS_NO_MEMORY;
+
+        SERVER_START_REQ( get_system_handles )
+        {
+            wine_server_set_reply( req, handle_info, sizeof(*handle_info) * num_handles );
+            if (!(ret = wine_server_call( req )))
+            {
+                SYSTEM_HANDLE_INFORMATION_EX *shi = info;
+                shi->Count = wine_server_reply_size( req ) / sizeof(*handle_info);
+                shi->Reserved = 0;
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[shi->Count] );
+                for (i = 0; i < shi->Count; i++)
+                {
+                    memset( &shi->Handle[i], 0, sizeof(shi->Handle[i]) );
+                    shi->Handle[i].UniqueProcessId = handle_info[i].owner;
+                    shi->Handle[i].HandleValue     = handle_info[i].handle;
+                    shi->Handle[i].GrantedAccess   = handle_info[i].access;
+                    shi->Handle[i].ObjectTypeIndex = translate_object_index( handle_info[i].type );
+                    /* FIXME: Fill out remaining fields */
+                }
+            }
+            else if (ret == STATUS_BUFFER_TOO_SMALL)
+            {
+                len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[reply->count] );
                 ret = STATUS_INFO_LENGTH_MISMATCH;
             }
         }
@@ -2391,8 +2521,20 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     case SystemInterruptInformation:
     {
         SYSTEM_INTERRUPT_INFORMATION sii = {{ 0 }};
+        int dev_random;
 
         len = sizeof(sii);
+
+        /* Some applications use the returned buffer for random number
+         * generation. Its unlikely that an app depends on the exact
+         * layout, so just fill with values from /dev/urandom. */
+        dev_random = open( "/dev/urandom", O_RDONLY );
+        if (dev_random != -1)
+        {
+            read( dev_random, &sii, sizeof(sii) );
+            close( dev_random );
+        }
+
         if (size >= len)
         {
             if (!info) ret = STATUS_ACCESS_VIOLATION;
@@ -2563,6 +2705,34 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemExtendedProcessInformation:
+        FIXME("SystemExtendedProcessInformation, size %u, info %p, stub!\n", size, info);
+        memset( info, 0, size );
+        ret = STATUS_SUCCESS;
+        break;
+
+    case SystemCodeIntegrityInformation:
+    {
+        SYSTEM_CODEINTEGRITY_INFORMATION *scii = info;
+
+        FIXME("SystemCodeIntegrityInformation, size %u, info %p, stub!\n", size, info);
+
+        if (size < sizeof(SYSTEM_CODEINTEGRITY_INFORMATION))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+
+        scii->CodeIntegrityOptions = CODEINTEGRITY_OPTION_ENABLED;
+        break;
+    }
+
     default:
 	FIXME( "(0x%08x,%p,0x%08x,%p) stub\n", class, info, size, ret_size );
 
@@ -2576,7 +2746,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     if (ret_size) *ret_size = len;
     return ret;
 }
-
 
 /******************************************************************************
  *              NtQuerySystemInformationEx  (NTDLL.@)
