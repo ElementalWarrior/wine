@@ -524,7 +524,7 @@ static void test_buffer_callbacks(IXAudio2 *xa)
 
     if(xaudio27){
         hr = IXAudio27SourceVoice_SetSourceSampleRate((IXAudio27SourceVoice*)src, 48000);
-        ok(hr == S_OK, "SetSourceSampleRate failed: %08x\n", hr);
+        todo_wine ok(hr == S_OK, "SetSourceSampleRate failed: %08x\n", hr);
     }else{
         hr = IXAudio2SourceVoice_SetSourceSampleRate(src, 48000);
         ok(hr == XAUDIO2_E_INVALID_CALL, "SetSourceSampleRate should have failed: %08x\n", hr);
@@ -952,16 +952,19 @@ static void test_xapo_creation_legacy(const char *module, unsigned int version)
     HRESULT (CDECL *pCreateFX)(REFCLSID,IUnknown**) = NULL;
 
     /* CLSIDs are the same across all versions */
-    static const GUID *const_clsids[] = {
-        &CLSID_FXEQ27,
-        &CLSID_FXMasteringLimiter27,
-        &CLSID_FXReverb27,
-        &CLSID_FXEcho27,
+    static struct {
+        const GUID *clsid;
+        BOOL todo;
+    } const_clsids[] = {
+        { &CLSID_FXEQ27, FALSE },
+        { &CLSID_FXMasteringLimiter27, TRUE },
+        { &CLSID_FXReverb27, FALSE },
+        { &CLSID_FXEcho27, TRUE},
         /* older versions of xapofx actually have support for new clsids */
-        &CLSID_FXEQ,
-        &CLSID_FXMasteringLimiter,
-        &CLSID_FXReverb,
-        &CLSID_FXEcho
+        { &CLSID_FXEQ, FALSE },
+        { &CLSID_FXMasteringLimiter, TRUE },
+        { &CLSID_FXReverb, FALSE },
+        { &CLSID_FXEcho, TRUE}
     };
 
     /* different CLSID for each version */
@@ -1000,9 +1003,29 @@ static void test_xapo_creation_legacy(const char *module, unsigned int version)
         return;
     }
 
-    for(i = 0; i < ARRAY_SIZE(const_clsids); ++i){
-        hr = pCreateFX(const_clsids[i], &fx_unk);
-        ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(const_clsids[i]), hr);
+    if(pCreateFX){
+        for(i = 0; i < ARRAY_SIZE(const_clsids); ++i){
+            hr = pCreateFX(const_clsids[i].clsid, &fx_unk);
+            todo_wine_if(const_clsids[i].todo)
+                ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(const_clsids[i].clsid), hr);
+            if(SUCCEEDED(hr)){
+                IXAPO *xapo;
+                hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO27, (void**)&xapo);
+                ok(hr == S_OK, "Couldn't get IXAPO27 interface: %08x\n", hr);
+                if(SUCCEEDED(hr))
+                    IXAPO_Release(xapo);
+                IUnknown_Release(fx_unk);
+            }
+
+            hr = CoCreateInstance(const_clsids[i].clsid, NULL, CLSCTX_INPROC_SERVER,
+                    &IID_IUnknown, (void**)&fx_unk);
+            ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance should have failed: %08x\n", hr);
+            if(SUCCEEDED(hr))
+                IUnknown_Release(fx_unk);
+        }
+
+        hr = pCreateFX(avm_clsids[version - 20], &fx_unk);
+        ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(avm_clsids[version - 20]), hr);
         if(SUCCEEDED(hr)){
             IXAPO *xapo;
             hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO27, (void**)&xapo);
@@ -1012,33 +1035,16 @@ static void test_xapo_creation_legacy(const char *module, unsigned int version)
             IUnknown_Release(fx_unk);
         }
 
-        hr = CoCreateInstance(const_clsids[i], NULL, CLSCTX_INPROC_SERVER,
-                &IID_IUnknown, (void**)&fx_unk);
-        ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance should have failed: %08x\n", hr);
-        if(SUCCEEDED(hr))
+        hr = pCreateFX(ar_clsids[version - 20], &fx_unk);
+        ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(ar_clsids[version - 20]), hr);
+        if(SUCCEEDED(hr)){
+            IXAPO *xapo;
+            hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO27, (void**)&xapo);
+            ok(hr == S_OK, "Couldn't get IXAPO27 interface: %08x\n", hr);
+            if(SUCCEEDED(hr))
+                IXAPO_Release(xapo);
             IUnknown_Release(fx_unk);
-    }
-
-    hr = pCreateFX(avm_clsids[version - 20], &fx_unk);
-    ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(avm_clsids[version - 20]), hr);
-    if(SUCCEEDED(hr)){
-        IXAPO *xapo;
-        hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO27, (void**)&xapo);
-        ok(hr == S_OK, "Couldn't get IXAPO27 interface: %08x\n", hr);
-        if(SUCCEEDED(hr))
-            IXAPO_Release(xapo);
-        IUnknown_Release(fx_unk);
-    }
-
-    hr = pCreateFX(ar_clsids[version - 20], &fx_unk);
-    ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(ar_clsids[version - 20]), hr);
-    if(SUCCEEDED(hr)){
-        IXAPO *xapo;
-        hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO27, (void**)&xapo);
-        ok(hr == S_OK, "Couldn't get IXAPO27 interface: %08x\n", hr);
-        if(SUCCEEDED(hr))
-            IXAPO_Release(xapo);
-        IUnknown_Release(fx_unk);
+        }
     }
 
     FreeLibrary(xapofxdll);
@@ -1056,17 +1062,19 @@ static void test_xapo_creation_modern(const char *module)
     HRESULT (WINAPI *pCAR)(IUnknown**) = NULL;
 
     /* CLSIDs are the same across all versions */
-    static const GUID *const_clsids[] = {
-        &CLSID_FXEQ27,
-        &CLSID_FXMasteringLimiter27,
-        &CLSID_FXReverb27,
-        &CLSID_FXEcho27,
-        &CLSID_FXEQ,
-        &CLSID_FXMasteringLimiter,
-        &CLSID_FXReverb,
-        &CLSID_FXEcho
+    static struct {
+        const GUID *clsid;
+        BOOL todo;
+    } const_clsids[] = {
+        { &CLSID_FXEQ27, FALSE },
+        { &CLSID_FXMasteringLimiter27, TRUE },
+        { &CLSID_FXReverb27, FALSE },
+        { &CLSID_FXEcho27, TRUE},
+        { &CLSID_FXEQ, FALSE },
+        { &CLSID_FXMasteringLimiter, TRUE },
+        { &CLSID_FXReverb, FALSE },
+        { &CLSID_FXEcho, TRUE}
     };
-
 
     xaudio2dll = LoadLibraryA(module);
     if(xaudio2dll){
@@ -1081,9 +1089,30 @@ static void test_xapo_creation_modern(const char *module)
         return;
     }
 
-    for(i = 0; i < ARRAY_SIZE(const_clsids); ++i){
-        hr = pCreateFX(const_clsids[i], &fx_unk, NULL, 0);
-        ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(const_clsids[i]), hr);
+    if(pCreateFX){
+        for(i = 0; i < ARRAY_SIZE(const_clsids); ++i){
+            hr = pCreateFX(const_clsids[i].clsid, &fx_unk, NULL, 0);
+            todo_wine_if(const_clsids[i].todo)
+                ok(hr == S_OK, "%s: CreateFX(%s) failed: %08x\n", module, wine_dbgstr_guid(const_clsids[i].clsid), hr);
+            if(SUCCEEDED(hr)){
+                IXAPO *xapo;
+                hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO, (void**)&xapo);
+                ok(hr == S_OK, "Couldn't get IXAPO interface: %08x\n", hr);
+                if(SUCCEEDED(hr))
+                    IXAPO_Release(xapo);
+                IUnknown_Release(fx_unk);
+            }
+
+            hr = CoCreateInstance(const_clsids[i].clsid, NULL, CLSCTX_INPROC_SERVER,
+                    &IID_IUnknown, (void**)&fx_unk);
+            ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance should have failed: %08x\n", hr);
+            if(SUCCEEDED(hr))
+                IUnknown_Release(fx_unk);
+        }
+
+        /* test legacy CLSID */
+        hr = pCreateFX(&CLSID_AudioVolumeMeter27, &fx_unk, NULL, 0);
+        ok(hr == S_OK, "%s: CreateFX(CLSID_AudioVolumeMeter) failed: %08x\n", module, hr);
         if(SUCCEEDED(hr)){
             IXAPO *xapo;
             hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO, (void**)&xapo);
@@ -1092,24 +1121,6 @@ static void test_xapo_creation_modern(const char *module)
                 IXAPO_Release(xapo);
             IUnknown_Release(fx_unk);
         }
-
-        hr = CoCreateInstance(const_clsids[i], NULL, CLSCTX_INPROC_SERVER,
-                &IID_IUnknown, (void**)&fx_unk);
-        ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance should have failed: %08x\n", hr);
-        if(SUCCEEDED(hr))
-            IUnknown_Release(fx_unk);
-    }
-
-    /* test legacy CLSID */
-    hr = pCreateFX(&CLSID_AudioVolumeMeter27, &fx_unk, NULL, 0);
-    ok(hr == S_OK, "%s: CreateFX(CLSID_AudioVolumeMeter) failed: %08x\n", module, hr);
-    if(SUCCEEDED(hr)){
-        IXAPO *xapo;
-        hr = IUnknown_QueryInterface(fx_unk, &IID_IXAPO, (void**)&xapo);
-        ok(hr == S_OK, "Couldn't get IXAPO interface: %08x\n", hr);
-        if(SUCCEEDED(hr))
-            IXAPO_Release(xapo);
-        IUnknown_Release(fx_unk);
     }
 
     pCAVM = (void*)GetProcAddress(xaudio2dll, "CreateAudioVolumeMeter");

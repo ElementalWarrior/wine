@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016 Andrew Eikum for CodeWeavers
- * Copyright (c) 2018 Ethan Lee for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,17 +16,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
-#include "windef.h"
-#include "winbase.h"
+#include "xaudio_private.h"
 #include "x3daudio.h"
 
 #include "wine/debug.h"
-
-#include <F3DAudio.h>
 
 #if XAUDIO2_VER >= 8 || defined X3DAUDIO1_VER
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
@@ -40,6 +34,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
 
     switch (reason)
     {
+    case DLL_WINE_PREATTACH:
+        return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinstDLL );
         break;
@@ -52,13 +48,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
 HRESULT CDECL X3DAudioInitialize(UINT32 chanmask, float speedofsound,
         X3DAUDIO_HANDLE handle)
 {
-    TRACE("0x%x, %f, %p\n", chanmask, speedofsound, handle);
-#ifdef HAVE_F3DAUDIOINITIALIZE8
-    return F3DAudioInitialize8(chanmask, speedofsound, handle);
-#else
-    F3DAudioInitialize(chanmask, speedofsound, handle);
+    FIXME("0x%x, %f, %p: Stub!\n", chanmask, speedofsound, handle);
     return S_OK;
-#endif
 }
 #endif /* XAUDIO2_VER >= 8 */
 
@@ -66,8 +57,7 @@ HRESULT CDECL X3DAudioInitialize(UINT32 chanmask, float speedofsound,
 void CDECL LEGACY_X3DAudioInitialize(UINT32 chanmask, float speedofsound,
         X3DAUDIO_HANDLE handle)
 {
-    TRACE("0x%x, %f, %p\n", chanmask, speedofsound, handle);
-    F3DAudioInitialize(chanmask, speedofsound, handle);
+    FIXME("0x%x, %f, %p: Stub!\n", chanmask, speedofsound, handle);
 }
 #endif /* X3DAUDIO1_VER */
 
@@ -76,13 +66,19 @@ void CDECL X3DAudioCalculate(const X3DAUDIO_HANDLE handle,
         const X3DAUDIO_LISTENER *listener, const X3DAUDIO_EMITTER *emitter,
         UINT32 flags, X3DAUDIO_DSP_SETTINGS *out)
 {
-    TRACE("%p, %p, %p, 0x%x, %p\n", handle, listener, emitter, flags, out);
-    F3DAudioCalculate(
-        handle,
-        (const F3DAUDIO_LISTENER*) listener,
-        (const F3DAUDIO_EMITTER*) emitter,
-        flags,
-        (F3DAUDIO_DSP_SETTINGS*) out
-    );
+    static int once = 0;
+    if(!once){
+        FIXME("%p %p %p 0x%x %p: Stub!\n", handle, listener, emitter, flags, out);
+        ++once;
+    }
+
+    out->LPFDirectCoefficient = 0;
+    out->LPFReverbCoefficient = 0;
+    out->ReverbLevel = 0;
+    out->DopplerFactor = 1;
+    out->EmitterToListenerAngle = 0;
+    out->EmitterToListenerDistance = 0;
+    out->EmitterVelocityComponent = 0;
+    out->ListenerVelocityComponent = 0;
 }
 #endif /* XAUDIO2_VER >= 8 || defined X3DAUDIO1_VER */
