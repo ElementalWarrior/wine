@@ -327,6 +327,21 @@ LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
 }
 
 
+/*********************************************************************
+ *         NtContinue   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alert )
+{
+    TRACE( "(%p, %d) stub!\n", context, alert );
+
+    /* NtSetContextThread will not have the intended behavior for a partial context. */
+    if ((context->ContextFlags & CONTEXT_FULL) != CONTEXT_FULL)
+        return STATUS_NOT_IMPLEMENTED;
+
+    return NtSetContextThread( GetCurrentThread(), context );
+}
+
+
 /*************************************************************
  *            __wine_spec_unimplemented_stub
  *

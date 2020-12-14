@@ -190,7 +190,15 @@ ULONG WINAPI HttpAddUrl( HANDLE handle, PCWSTR url, PVOID reserved )
 ULONG WINAPI HttpCreateServerSession( HTTPAPI_VERSION version, HTTP_SERVER_SESSION_ID *id, ULONG reserved )
 {
     FIXME( "({%d,%d}, %p, %d): stub!\n", version.HttpApiMajorVersion, version.HttpApiMinorVersion, id, reserved );
-    return ERROR_ACCESS_DENIED;
+
+    if(!id || reserved)
+        return ERROR_INVALID_PARAMETER;
+    if((version.HttpApiMajorVersion != 1 && version.HttpApiMajorVersion != 2)  || version.HttpApiMinorVersion != 0)
+        return ERROR_REVISION_MISMATCH;
+
+    *id = 0xabcdefff;
+
+    return NO_ERROR;
 }
 
 /***********************************************************************
@@ -201,3 +209,54 @@ ULONG WINAPI HttpCloseServerSession( HTTP_SERVER_SESSION_ID id )
     FIXME( "(%s): stub!\n", wine_dbgstr_longlong(id));
     return ERROR_INVALID_PARAMETER;
 }
+
+/***********************************************************************
+ *        HttpCreateUrlGroup     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpCreateUrlGroup( HTTP_SERVER_SESSION_ID id, HTTP_URL_GROUP_ID *urlgroupid, ULONG reserved )
+{
+    FIXME( "(%s, %p, %d): stub!\n", wine_dbgstr_longlong(id), urlgroupid, reserved );
+
+    *urlgroupid = 0xdeadbeef;
+
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpCloseUrlGroup     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpCloseUrlGroup( HTTP_URL_GROUP_ID urlgroupid )
+{
+    FIXME( "(%s): stub!\n", wine_dbgstr_longlong(urlgroupid));
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpCreateRequestQueue     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpCreateRequestQueue( HTTPAPI_VERSION version, PCWSTR name, PSECURITY_ATTRIBUTES security, ULONG flags, PHANDLE request )
+{
+    FIXME( "({%d,%d}, %s, %p, 0x%x, %p): stub!\n",version.HttpApiMajorVersion,version.HttpApiMinorVersion,debugstr_w(name),security,flags,request ); 
+
+    *request = (HANDLE)0xbeefdead;
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpSetUrlGroupProperty     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpSetUrlGroupProperty( HTTP_URL_GROUP_ID urlgroupid, HTTP_SERVER_PROPERTY property, void *property_info, ULONG property_info_length )
+{
+    FIXME( "(%s, %d, %p, %d): stub!\n", wine_dbgstr_longlong(urlgroupid), property, property_info, property_info_length );
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpAddUrlToUrlGroup     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpAddUrlToUrlGroup( HTTP_URL_GROUP_ID urlgroupid, PCWSTR name, HTTP_URL_CONTEXT urlcontext, ULONG reserved )
+{
+    FIXME( "(%s, %s, %s, %d): stub!\n", wine_dbgstr_longlong(urlgroupid), debugstr_w(name), wine_dbgstr_longlong(urlcontext), reserved );
+    return NO_ERROR;
+}
+

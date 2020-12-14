@@ -97,6 +97,7 @@ C_SRCS = \
 	pread.c \
 	pwrite.c \
 	readlink.c \
+	renameat2.c \
 	rint.c \
 	sortkey.c \
 	spawn.c \
@@ -108,4 +109,6 @@ C_SRCS = \
 	usleep.c \
 	utf8.c \
 	wctomb.c \
-	wctype.c
+	wctype.c \
+	xattr.c
+

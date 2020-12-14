@@ -65,3 +65,10 @@ DWORD WINAPI GetStorageDependencyInformation(HANDLE obj, GET_STORAGE_DEPENDENCY_
 
     return ERROR_SUCCESS;
 }
+
+DWORD WINAPI OpenVirtualDisk(VIRTUAL_STORAGE_TYPE *type, const WCHAR *path, VIRTUAL_DISK_ACCESS_MASK mask, OPEN_VIRTUAL_DISK_FLAG flags,
+                             OPEN_VIRTUAL_DISK_PARAMETERS *param, HANDLE *handle)
+{
+    FIXME("(%p, %s, %d, 0x%x, %p, %p): stub\n", type, wine_dbgstr_w(path), mask, flags, param, handle);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}

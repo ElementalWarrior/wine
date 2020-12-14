@@ -903,7 +903,17 @@ static BOOL motion_event( HWND hwnd, XEvent *event )
                                             (abs(motion->axis_data[3]),
                                              abs(motion->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
-    gMsgPacket.pkNormalPressure = motion->axis_data[2];
+
+    if (gMsgPacket.pkOrientation.orAltitude < 0)
+    {
+        FIXME("Negative orAltitude detected\n");
+        return FALSE;
+    }
+    /* Scale the value sent from XInput 0-65536
+     * Windows                          0-1023
+     */
+    gMsgPacket.pkNormalPressure = ((motion->axis_data[2] - gSysDevice.NPRESSURE.axMin) /
+                        ((float)gSysDevice.NPRESSURE.axMax - gSysDevice.NPRESSURE.axMin)) * 1023;
     gMsgPacket.pkButtons = get_button_state(curnum);
     gMsgPacket.pkChanged = get_changed_state(&gMsgPacket);
     SendMessageW(hwndTabletDefault,WT_PACKET,gMsgPacket.pkSerialNumber,(LPARAM)hwnd);
@@ -935,6 +945,12 @@ static BOOL button_event( HWND hwnd, XEvent *event )
     gMsgPacket.pkOrientation.orAltitude = ((1000 - 15 * max(abs(button->axis_data[3]),
                                                             abs(button->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
+    if (gMsgPacket.pkOrientation.orAltitude < 0)
+    {
+        FIXME("Negative orAltitude detected\n");
+        return FALSE;
+    }
+
     gMsgPacket.pkNormalPressure = button->axis_data[2];
     gMsgPacket.pkButtons = get_button_state(curnum);
     gMsgPacket.pkChanged = get_changed_state(&gMsgPacket);
@@ -978,7 +994,16 @@ static BOOL proximity_event( HWND hwnd, XEvent *event )
     gMsgPacket.pkOrientation.orAltitude = ((1000 - 15 * max(abs(proximity->axis_data[3]),
                                                             abs(proximity->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
-    gMsgPacket.pkNormalPressure = proximity->axis_data[2];
+    if (gMsgPacket.pkOrientation.orAltitude < 0)
+    {
+        FIXME("Negative orAltitude detected\n");
+        return FALSE;
+    }
+    /* Scale the value sent from XInput 0-65536
+     * Windows                          0-1023
+     */
+    gMsgPacket.pkNormalPressure = ((proximity->axis_data[2] - gSysDevice.NPRESSURE.axMin) /
+                        ((float)gSysDevice.NPRESSURE.axMax - gSysDevice.NPRESSURE.axMin)) * 1023;
     gMsgPacket.pkButtons = get_button_state(curnum);
 
     /* FIXME: LPARAM loword is true when cursor entering context, false when leaving context
@@ -1125,6 +1150,17 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
 
     if (!xinput_handle) return 0;
 
+    if(wCategory >= WTI_DSCTXS)
+    {
+        nIndex = wCategory - WTI_DSCTXS;
+        wCategory = WTI_DSCTXS;
+    }
+    else if(wCategory >= WTI_DDCTXS)
+    {
+        nIndex = wCategory - WTI_DDCTXS;
+        wCategory = WTI_DDCTXS;
+    }
+
     switch(wCategory)
     {
         case 0:
@@ -1165,6 +1201,62 @@ UINT CDECL X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                     break;
                 default:
                     FIXME("WTI_INTERFACE unhandled index %i\n",nIndex);
+                    rc = 0;
+            }
+            break;
+        case WTI_STATUS:
+            switch (nIndex)
+            {
+                case STA_CONTEXTS:
+                {
+                    FIXME("STA_CONTEXTS unhandled\n");
+                    rc = 1;
+                    break;
+                }
+                case STA_SYSCTXS:
+                {
+                    FIXME("STA_SYSCTXS unhandled\n");
+                    rc = 1;
+                    break;
+                }
+                case STA_PKTRATE:
+                {
+                    FIXME("STA_PKTRATE unhandled\n");
+                    rc = 0;
+                    break;
+                }
+                case STA_PKTDATA:
+                {
+                    FIXME("STA_PKTDATA unhandled\n");
+                    rc = 0;
+                    break;
+                }
+                case STA_MANAGERS:
+                {
+                    FIXME("STA_MANAGERS unhandled\n");
+                    rc = 1;
+                    break;
+                }
+                case STA_SYSTEM:
+                {
+                    FIXME("STA_SYSTEM unhandled\n");
+                    rc = TRUE;
+                    break;
+                }
+                case STA_BUTTONUSE:
+                {
+                    FIXME("STA_BUTTONUSE unhandled\n");
+                    rc = 0;
+                    break;
+                }
+                case STA_SYSBTNUSE:
+                {
+                    FIXME("STA_SYSBTNUSE unhandled\n");
+                    rc = 0;
+                    break;
+                }
+                default:
+                    FIXME("WTI_STATUS unhandled index %i\n",nIndex);
                     rc = 0;
             }
             break;
