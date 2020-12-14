@@ -16,6 +16,7 @@ WINE_1.0
     wine_cp_wcstombs;
     wine_cpsymbol_mbstowcs;
     wine_cpsymbol_wcstombs;
+    wine_dladdr;
     wine_dlclose;
     wine_dll_enum_load_path;
     wine_dll_set_callback;
@@ -32,11 +33,13 @@ WINE_1.0
     wine_get_es;
     wine_get_fs;
     wine_get_gs;
+    wine_get_libs;
     wine_get_server_dir;
     wine_get_sortkey;
     wine_get_ss;
     wine_get_user_name;
     wine_get_version;
+    wine_get_patches;
     wine_init;
     wine_init_argv0_path;
     wine_is_dbcs_leadbyte;
@@ -56,6 +59,10 @@ WINE_1.0
     wine_mmap_enum_reserved_areas;
     wine_mmap_is_in_reserved_area;
     wine_mmap_remove_reserved_area;
+    wine_mmap_add_free_area;
+    wine_mmap_enum_free_areas;
+    wine_mmap_is_in_free_area;
+    wine_mmap_remove_free_area;
     wine_set_fs;
     wine_set_gs;
     wine_utf8_mbstowcs;

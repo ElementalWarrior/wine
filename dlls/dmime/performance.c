@@ -707,18 +707,29 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_AssignPChannel(IDirectMusicPe
 }
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_PChannelInfo(IDirectMusicPerformance8 *iface,
-        DWORD PChannel, IDirectMusicPort **port, DWORD *group, DWORD *MChannel)
+        DWORD pchannel, IDirectMusicPort **port, DWORD *group, DWORD *channel)
 {
     IDirectMusicPerformance8Impl *This = impl_from_IDirectMusicPerformance8(iface);
-    DMUS_PORTPARAMS8 port_params;
-    GUID default_port;
+    struct pchannel_block *block;
+    struct wine_rb_entry *entry;
+    DWORD block_num = pchannel / 16;
+    unsigned int index = pchannel % 16;
 
-    FIXME("(%p)->(%d, %p, %p, %p): stub\n", This, PChannel, port, group, MChannel);
+    TRACE("(%p)->(%d, %p, %p, %p)\n", This, pchannel, port, group, channel);
 
-    port_params.dwSize = sizeof(DMUS_PORTPARAMS8);
-    port_params.dwValidParams = 0;
-    IDirectMusic8_GetDefaultPort(This->dmusic, &default_port);
-    IDirectMusic8_CreatePort(This->dmusic, &default_port, &port_params, port, NULL);
+    entry = wine_rb_get(&This->pchannels, &block_num);
+    if (!entry)
+        return E_INVALIDARG;
+    block = WINE_RB_ENTRY_VALUE(entry, struct pchannel_block, entry);
+
+    if (port) {
+        *port = block->pchannel[index].port;
+        IDirectMusicPort_AddRef(*port);
+    }
+    if (group)
+        *group = block->pchannel[index].group;
+    if (channel)
+        *channel = block->pchannel[index].channel;
 
     return S_OK;
 }
@@ -1108,7 +1119,9 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_CreateStandardAudioPath(IDire
 	        return E_INVALIDARG;
 	}
 
-	/* FIXME: Should we create one secondary buffer for each PChannel? */
+        /* FIXME: Create a proper port with enough dwGroups for the PChannels */
+        IDirectMusicPerformance8_AddPort(iface, NULL);
+
         hr = IDirectSound_CreateSoundBuffer(This->dsound, &desc, &buffer, NULL);
 	if (FAILED(hr))
 	        return DSERR_BUFFERLOST;

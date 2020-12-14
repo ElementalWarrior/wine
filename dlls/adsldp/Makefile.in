@@ -1,10 +1,13 @@
 MODULE    = adsldp.dll
-IMPORTS   = oleaut32 secur32
+IMPORTS   = oleaut32 secur32 rpcrt4
 
 EXTRADLLFLAGS = -mno-cygwin
+dlldata_EXTRADEFS = -DENTRY_PREFIX=ADSLDP_
 
 C_SRCS = \
 	adsldp.c
 
 IDL_SRCS = \
 	adsldp.idl
+
+RC_SRCS = rsrc.rc

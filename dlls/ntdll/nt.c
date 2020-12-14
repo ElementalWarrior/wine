@@ -76,6 +76,7 @@
 #include "winternl.h"
 #include "ntdll_misc.h"
 #include "wine/server.h"
+#include "wine/library.h"
 #include "ddk/wdm.h"
 
 #ifdef __APPLE__
@@ -146,6 +147,19 @@ struct smbios_chassis {
 #define FIRM 0x4649524D
 #define RSMB 0x52534D42
 
+static DWORD translate_object_index(DWORD index)
+{
+    WORD version = MAKEWORD(NtCurrentTeb()->Peb->OSMinorVersion, NtCurrentTeb()->Peb->OSMajorVersion);
+
+    /* Process Hacker depends on this logic */
+    if (version >= 0x0602)
+        return index;
+    else if (version == 0x0601)
+        return index + 2;
+    else
+        return index + 1;
+}
+
 /*
  *	Token
  */
@@ -195,6 +209,65 @@ NTSTATUS WINAPI NtDuplicateToken(
     SERVER_END_REQ;
 
     RtlFreeHeap( GetProcessHeap(), 0, objattr );
+    return status;
+}
+
+/******************************************************************************
+ *  NtFilterToken        [NTDLL.@]
+ *  ZwFilterToken        [NTDLL.@]
+ */
+NTSTATUS WINAPI NtFilterToken( HANDLE token, ULONG flags, TOKEN_GROUPS *disable_sids,
+                               TOKEN_PRIVILEGES *privileges, TOKEN_GROUPS *restrict_sids,
+                               HANDLE *new_token )
+{
+    data_size_t privileges_len = 0;
+    data_size_t sids_len = 0;
+    SID *sids = NULL;
+    NTSTATUS status;
+
+    TRACE( "(%p, 0x%08x, %p, %p, %p, %p)\n", token, flags, disable_sids, privileges,
+           restrict_sids, new_token );
+
+    if (flags)
+        FIXME( "flags %x unsupported\n", flags );
+
+    if (restrict_sids)
+        FIXME( "support for restricting sids not yet implemented\n" );
+
+    if (privileges)
+        privileges_len = privileges->PrivilegeCount * sizeof(LUID_AND_ATTRIBUTES);
+
+    if (disable_sids)
+    {
+        DWORD len, i;
+        BYTE *tmp;
+
+        for (i = 0; i < disable_sids->GroupCount; i++)
+            sids_len += RtlLengthSid( disable_sids->Groups[i].Sid );
+
+        sids = RtlAllocateHeap( GetProcessHeap(), 0, sids_len );
+        if (!sids) return STATUS_NO_MEMORY;
+
+        for (i = 0, tmp = (BYTE *)sids; i < disable_sids->GroupCount; i++, tmp += len)
+        {
+            len = RtlLengthSid( disable_sids->Groups[i].Sid );
+            memcpy( tmp, disable_sids->Groups[i].Sid, len );
+        }
+    }
+
+    SERVER_START_REQ( filter_token )
+    {
+        req->handle          = wine_server_obj_handle( token );
+        req->flags           = flags;
+        req->privileges_size = privileges_len;
+        wine_server_add_data( req, privileges->Privileges, privileges_len );
+        wine_server_add_data( req, sids, sids_len );
+        status = wine_server_call( req );
+        if (!status) *new_token = wine_server_ptr_handle( reply->new_handle );
+    }
+    SERVER_END_REQ;
+
+    RtlFreeHeap( GetProcessHeap(), 0, sids );
     return status;
 }
 
@@ -355,13 +428,13 @@ NTSTATUS WINAPI NtQueryInformationToken(
         0,    /* TokenAuditPolicy */
         0,    /* TokenOrigin */
         sizeof(TOKEN_ELEVATION_TYPE), /* TokenElevationType */
-        0,    /* TokenLinkedToken */
+        sizeof(TOKEN_LINKED_TOKEN), /* TokenLinkedToken */
         sizeof(TOKEN_ELEVATION), /* TokenElevation */
         0,    /* TokenHasRestrictions */
         0,    /* TokenAccessInformation */
         0,    /* TokenVirtualizationAllowed */
         sizeof(DWORD), /* TokenVirtualizationEnabled */
-        sizeof(TOKEN_MANDATORY_LABEL) + sizeof(SID), /* TokenIntegrityLevel [sizeof(SID) includes one SubAuthority] */
+        0,    /* TokenIntegrityLevel */
         0,    /* TokenUIAccess */
         0,    /* TokenMandatoryPolicy */
         0,    /* TokenLogonSid */
@@ -586,18 +659,52 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_END_REQ;
         break;
     case TokenElevationType:
+        SERVER_START_REQ( get_token_elevation_type )
         {
             TOKEN_ELEVATION_TYPE *elevation_type = tokeninfo;
-            FIXME("QueryInformationToken( ..., TokenElevationType, ...) semi-stub\n");
-            *elevation_type = TokenElevationTypeFull;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                *elevation_type = reply->elevation;
         }
+        SERVER_END_REQ;
+        break;
+    case TokenLinkedToken:
+        SERVER_START_REQ( get_token_elevation_type )
+        {
+            TOKEN_LINKED_TOKEN *linked_token = tokeninfo;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+            {
+                HANDLE token;
+                /* FIXME: On Wine we do not have real linked tokens yet. Typically, a
+                 * program running with admin privileges is linked to a limited token,
+                 * and vice versa. We just create a new token instead of storing links
+                 * on the wineserver side. Using TokenLinkedToken twice should return
+                 * back the original token. */
+                if ((reply->elevation == TokenElevationTypeFull || reply->elevation == TokenElevationTypeLimited) &&
+                    (token = __wine_create_default_token( reply->elevation != TokenElevationTypeFull )))
+                {
+                    status = NtDuplicateToken( token, 0, NULL, SecurityIdentification, TokenImpersonation, &linked_token->LinkedToken );
+                    NtClose( token );
+                }
+                else
+                    status = STATUS_NO_TOKEN;
+            }
+        }
+        SERVER_END_REQ;
         break;
     case TokenElevation:
+        SERVER_START_REQ( get_token_elevation_type )
         {
             TOKEN_ELEVATION *elevation = tokeninfo;
-            FIXME("QueryInformationToken( ..., TokenElevation, ...) semi-stub\n");
-            elevation->TokenIsElevated = TRUE;
+            req->handle = wine_server_obj_handle( token );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                elevation->TokenIsElevated = (reply->elevation == TokenElevationTypeFull);
         }
+        SERVER_END_REQ;
         break;
     case TokenSessionId:
         {
@@ -612,18 +719,23 @@ NTSTATUS WINAPI NtQueryInformationToken(
         }
         break;
     case TokenIntegrityLevel:
+        SERVER_START_REQ( get_token_integrity )
         {
-            /* report always "S-1-16-12288" (high mandatory level) for now */
-            static const SID high_level = {SID_REVISION, 1, {SECURITY_MANDATORY_LABEL_AUTHORITY},
-                                                            {SECURITY_MANDATORY_HIGH_RID}};
-
             TOKEN_MANDATORY_LABEL *tml = tokeninfo;
-            PSID psid = tml + 1;
+            PSID sid = tml + 1;
+            DWORD sid_len = tokeninfolength < sizeof(*tml) ? 0 : tokeninfolength - sizeof(*tml);
 
-            tml->Label.Sid = psid;
-            tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
-            memcpy(psid, &high_level, sizeof(SID));
+            req->handle = wine_server_obj_handle( token );
+            wine_server_set_reply( req, sid, sid_len );
+            status = wine_server_call( req );
+            if (retlen) *retlen = reply->sid_len + sizeof(*tml);
+            if (status == STATUS_SUCCESS)
+            {
+                tml->Label.Sid = sid;
+                tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
+            }
         }
+        SERVER_END_REQ;
         break;
     case TokenAppContainerSid:
         {
@@ -1060,6 +1172,7 @@ static inline BOOL have_sse_daz_mode(void)
 static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
 {
     unsigned int regs[4], regs2[4];
+    BOOL amd_or_intel = FALSE;
 
 #if defined(__i386__)
     info->Architecture = PROCESSOR_ARCHITECTURE_INTEL;
@@ -1070,6 +1183,8 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
     /* We're at least a 386 */
     info->FeatureSet = CPU_FEATURE_VME | CPU_FEATURE_X86 | CPU_FEATURE_PGE;
     info->Level = 3;
+
+    user_shared_data->ProcessorFeatures[PF_RDWRFSGSBASE_AVAILABLE] = TRUE;
 
     if (!have_cpuid()) return;
 
@@ -1115,15 +1230,7 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             info->Revision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
             info->Revision |= regs2[0] & 0xf;                 /* stepping       */
 
-            do_cpuid(0x80000000, regs);  /* get vendor cpuid level */
-            if (regs[0] >= 0x80000001)
-            {
-                do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED]        = (regs2[2] >> 2) & 1;
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED]                   = (regs2[3] >> 20) & 1;
-                user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 31) & 1;
-                if (regs2[3] >> 31) info->FeatureSet |= CPU_FEATURE_3DNOW;
-            }
+            amd_or_intel = TRUE;
         }
         else if (regs[1] == GENU && regs[3] == INEI && regs[2] == NTEL)
         {
@@ -1138,12 +1245,7 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             if(regs2[3] & (1 << 21)) info->FeatureSet |= CPU_FEATURE_DS;
             user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED] = (regs2[2] >> 5) & 1;
 
-            do_cpuid(0x80000000, regs);  /* get vendor cpuid level */
-            if (regs[0] >= 0x80000001)
-            {
-                do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED] = (regs2[3] >> 20) & 1;
-            }
+            amd_or_intel = TRUE;
         }
         else
         {
@@ -1152,6 +1254,21 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             /* repack model and stepping to make a "revision" */
             info->Revision = ((regs2[0] >> 4 ) & 0xf) << 8;  /* model    */
             info->Revision |= regs2[0] & 0xf;                /* stepping */
+        }
+
+        if (amd_or_intel)
+        {
+            do_cpuid(0x80000000, regs);  /* get vendor cpuid level */
+            if (regs[0] >= 0x80000001)
+            {
+                do_cpuid(0x80000001, regs2);  /* get vendor features */
+                user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED]        = (regs2[2] >> 2) & 1;
+                user_shared_data->ProcessorFeatures[PF_NX_ENABLED]                   = (regs2[3] >> 20) & 1;
+                user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 31) & 1;
+                user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = (regs2[3] >> 27) & 1;
+                if (regs2[3] >> 31) info->FeatureSet |= CPU_FEATURE_3DNOW;
+                if ((regs2[3] >> 27) & 1) info->FeatureSet |= CPU_FEATURE_TSC;
+            }
         }
     }
 }
@@ -2514,6 +2631,33 @@ BOOLEAN WINAPI RtlIsProcessorFeaturePresent( UINT feature )
     return feature < PROCESSOR_FEATURE_MAX && user_shared_data->ProcessorFeatures[feature];
 }
 
+static void get_ntdll_system_module(SYSTEM_MODULE *sm)
+{
+    char *ptr;
+    ANSI_STRING str;
+    PLIST_ENTRY entry;
+    PLDR_MODULE mod;
+
+    /* The first entry must be ntdll. */
+    entry = NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList.Flink;
+    mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+
+    sm->Section = 0;
+    sm->MappedBaseAddress = 0;
+    sm->ImageBaseAddress = mod->BaseAddress;
+    sm->ImageSize = mod->SizeOfImage;
+    sm->Flags = mod->Flags;
+    sm->LoadOrderIndex = 0;
+    sm->InitOrderIndex = 0;
+    sm->LoadCount = 0;
+    str.Length = 0;
+    str.MaximumLength = MAXIMUM_FILENAME_LENGTH;
+    str.Buffer = (char*)sm->Name;
+    RtlUnicodeStringToAnsiString(&str, &mod->FullDllName, FALSE);
+    ptr = strrchr(str.Buffer, '\\');
+    sm->NameOffset = (ptr != NULL) ? (ptr - str.Buffer + 1) : 0;
+}
+
 /******************************************************************************
  * NtQuerySystemInformation [NTDLL.@]
  * ZwQuerySystemInformation [NTDLL.@]
@@ -2612,11 +2756,13 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         {
             SYSTEM_PROCESS_INFORMATION* spi = SystemInformation;
             SYSTEM_PROCESS_INFORMATION* last = NULL;
+            unsigned long clk_tck = sysconf(_SC_CLK_TCK);
             HANDLE hSnap = 0;
             WCHAR procname[1024];
             WCHAR* exename;
             DWORD wlen = 0;
             DWORD procstructlen = 0;
+            int unix_pid = -1;
 
             SERVER_START_REQ( create_snapshot )
             {
@@ -2649,7 +2795,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
 
                         if (Length >= len + procstructlen)
                         {
-                            /* ftCreationTime, ftUserTime, ftKernelTime;
+                            /* ftCreationTime;
                              * vmCounters, ioCounters
                              */
  
@@ -2664,9 +2810,17 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                             spi->UniqueProcessId = UlongToHandle(reply->pid);
                             spi->ParentProcessId = UlongToHandle(reply->ppid);
                             spi->HandleCount = reply->handles;
+                            spi->CreationTime.QuadPart = reply->start_time;
 
                             /* spi->ti will be set later on */
 
+                            if (reply->unix_pid != -1)
+                            {
+                                read_process_time(reply->unix_pid, -1, clk_tck,
+                                                  &spi->KernelTime, &spi->UserTime);
+                                read_process_memory_stats(reply->unix_pid, &spi->vmCounters);
+                            }
+                            unix_pid = reply->unix_pid;
                         }
                         len += procstructlen;
                     }
@@ -2702,11 +2856,15 @@ NTSTATUS WINAPI NtQuerySystemInformation(
 
                                     memset(&spi->ti[i], 0, sizeof(spi->ti));
 
-                                    spi->ti[i].CreateTime.QuadPart = 0xdeadbeef;
+                                    spi->ti[i].CreateTime.QuadPart = reply->creation_time;
                                     spi->ti[i].ClientId.UniqueProcess = UlongToHandle(reply->pid);
                                     spi->ti[i].ClientId.UniqueThread  = UlongToHandle(reply->tid);
                                     spi->ti[i].dwCurrentPriority = reply->base_pri + reply->delta_pri;
                                     spi->ti[i].dwBasePriority = reply->base_pri;
+
+                                    if (unix_pid != -1 && reply->unix_tid != -1)
+                                        read_process_time(unix_pid, reply->unix_tid, clk_tck,
+                                                          &spi->ti[i].KernelTime, &spi->ti[i].UserTime);
                                     i++;
                                 }
                             }
@@ -2837,9 +2995,43 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         }
         break;
     case SystemModuleInformation:
-        /* FIXME: should be system-wide */
-        if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
-        else ret = LdrQueryProcessModuleInformation( SystemInformation, Length, &len );
+        if (!SystemInformation)
+            ret = STATUS_ACCESS_VIOLATION;
+        else if (Length < FIELD_OFFSET( SYSTEM_MODULE_INFORMATION, Modules[1] ))
+        {
+            len = FIELD_OFFSET( SYSTEM_MODULE_INFORMATION, Modules[1] );
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        else
+        {
+            SYSTEM_MODULE_INFORMATION *smi = SystemInformation;
+
+            FIXME("returning fake driver list\n");
+            smi->ModulesCount = 1;
+            get_ntdll_system_module(&smi->Modules[0]);
+            ret = STATUS_SUCCESS;
+        }
+        break;
+    case SystemModuleInformationEx:
+        if (!SystemInformation)
+            ret = STATUS_ACCESS_VIOLATION;
+        else if (Length < sizeof(SYSTEM_MODULE_INFORMATION_EX))
+        {
+            len = sizeof(SYSTEM_MODULE_INFORMATION_EX);
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        else
+        {
+            SYSTEM_MODULE_INFORMATION_EX *info = SystemInformation;
+
+            FIXME("info_class SystemModuleInformationEx stub!\n");
+            get_ntdll_system_module(&info->BaseInfo);
+            info->NextOffset = 0;
+            info->ImageCheckSum = 0;
+            info->TimeDateStamp = 0;
+            info->DefaultBase = info->BaseInfo.ImageBaseAddress;
+            ret = STATUS_SUCCESS;
+        }
         break;
     case SystemHandleInformation:
         {
@@ -2876,12 +3068,65 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                         shi->Handle[i].OwnerPid     = info[i].owner;
                         shi->Handle[i].HandleValue  = info[i].handle;
                         shi->Handle[i].AccessMask   = info[i].access;
-                        /* FIXME: Fill out ObjectType, HandleFlags, ObjectPointer */
+                        shi->Handle[i].ObjectType   = translate_object_index(info[i].type);
+                        /* FIXME: Fill out HandleFlags, ObjectPointer */
                     }
                 }
                 else if (ret == STATUS_BUFFER_TOO_SMALL)
                 {
                     len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION, Handle[reply->count] );
+                    ret = STATUS_INFO_LENGTH_MISMATCH;
+                }
+            }
+            SERVER_END_REQ;
+
+            RtlFreeHeap( GetProcessHeap(), 0, info );
+        }
+        break;
+    case SystemExtendedHandleInformation:
+        {
+            struct handle_info *info;
+            DWORD i, num_handles;
+
+            if (Length < sizeof(SYSTEM_HANDLE_INFORMATION_EX))
+            {
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+                break;
+            }
+
+            if (!SystemInformation)
+            {
+                ret = STATUS_ACCESS_VIOLATION;
+                break;
+            }
+
+            num_handles = (Length - FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle ));
+            num_handles /= sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX);
+            if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*info) * num_handles )))
+                return STATUS_NO_MEMORY;
+
+            SERVER_START_REQ( get_system_handles )
+            {
+                wine_server_set_reply( req, info, sizeof(*info) * num_handles );
+                if (!(ret = wine_server_call( req )))
+                {
+                    SYSTEM_HANDLE_INFORMATION_EX *shi = SystemInformation;
+                    shi->Count = wine_server_reply_size( req ) / sizeof(*info);
+                    shi->Reserved = 0;
+                    len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[shi->Count] );
+                    for (i = 0; i < shi->Count; i++)
+                    {
+                        memset( &shi->Handle[i], 0, sizeof(shi->Handle[i]) );
+                        shi->Handle[i].UniqueProcessId = info[i].owner;
+                        shi->Handle[i].HandleValue     = info[i].handle;
+                        shi->Handle[i].GrantedAccess   = info[i].access;
+                        shi->Handle[i].ObjectTypeIndex = translate_object_index(info[i].type);
+                        /* FIXME: Fill out remaining fields */
+                    }
+                }
+                else if (ret == STATUS_BUFFER_TOO_SMALL)
+                {
+                    len = FIELD_OFFSET( SYSTEM_HANDLE_INFORMATION_EX, Handle[reply->count] );
                     ret = STATUS_INFO_LENGTH_MISMATCH;
                 }
             }
@@ -2909,9 +3154,20 @@ NTSTATUS WINAPI NtQuerySystemInformation(
     case SystemInterruptInformation:
         {
             SYSTEM_INTERRUPT_INFORMATION sii;
+            int dev_random;
 
             memset(&sii, 0, sizeof(sii));
             len = sizeof(sii);
+
+            /* Some applications use the returned buffer for random number
+             * generation. Its unlikely that an app depends on the exact
+             * layout, so just fill with values from /dev/urandom. */
+            dev_random = open( "/dev/urandom", O_RDONLY );
+            if (dev_random != -1)
+            {
+                read( dev_random, &sii, sizeof(sii) );
+                close( dev_random );
+            }
 
             if ( Length >= len)
             {
@@ -3026,6 +3282,11 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 FIXME("info_class SYSTEM_FIRMWARE_TABLE_INFORMATION action %d\n", sfti->Action);
             }
         }
+        break;
+    case SystemExtendedProcessInformation:
+        FIXME("SystemExtendedProcessInformation, len %u, buffer %p, stub!\n", Length, SystemInformation);
+        memset(SystemInformation, 0, Length);
+        ret = STATUS_SUCCESS;
         break;
     default:
 	FIXME("(0x%08x,%p,0x%08x,%p) stub\n",
@@ -3676,7 +3937,32 @@ NTSTATUS WINAPI NtSystemDebugControl(SYSDBG_COMMAND command, PVOID inbuffer, ULO
 NTSTATUS WINAPI NtSetLdtEntries(ULONG selector1, ULONG entry1_low, ULONG entry1_high,
                                 ULONG selector2, ULONG entry2_low, ULONG entry2_high)
 {
-    FIXME("(%u, %u, %u, %u, %u, %u): stub\n", selector1, entry1_low, entry1_high, selector2, entry2_low, entry2_high);
+#ifdef __i386__
+    union
+    {
+        LDT_ENTRY entry;
+        ULONG dw[2];
+    } sel;
 
+    TRACE("(%x,%x,%x,%x,%x,%x)\n", selector1, entry1_low, entry1_high, selector2, entry2_low, entry2_high);
+
+    if (selector1)
+    {
+        sel.dw[0] = entry1_low;
+        sel.dw[1] = entry1_high;
+        if (wine_ldt_set_entry(selector1, &sel.entry) < 0)
+            return STATUS_ACCESS_DENIED;
+    }
+    if (selector2)
+    {
+        sel.dw[0] = entry2_low;
+        sel.dw[1] = entry2_high;
+        if (wine_ldt_set_entry(selector2, &sel.entry) < 0)
+            return STATUS_ACCESS_DENIED;
+    }
+    return STATUS_SUCCESS;
+#else
+    FIXME("(%x,%x,%x,%x,%x,%x): stub\n", selector1, entry1_low, entry1_high, selector2, entry2_low, entry2_high);
     return STATUS_NOT_IMPLEMENTED;
+#endif
 }
