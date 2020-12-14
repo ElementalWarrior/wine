@@ -175,6 +175,7 @@ struct makefile
     struct strarray include_paths;
     struct strarray include_args;
     struct strarray define_args;
+    struct strarray extraincl_args;
     struct strarray programs;
     struct strarray scripts;
     struct strarray imports;
@@ -2949,6 +2950,17 @@ static void output_source_svg( struct makefile *make, struct incl_file *source, 
 
 
 /*******************************************************************
+ *         output_source_icm
+ */
+static void output_source_icm( struct makefile *make, struct incl_file *source, const char *obj )
+{
+    add_install_rule( make, source->name, source->name,
+                      strmake( "D$(colordir)/%s", source->name ));
+    output_srcdir_symlink( make, strmake( "%s.icm", obj ));
+}
+
+
+/*******************************************************************
  *         output_source_nls
  */
 static void output_source_nls( struct makefile *make, struct incl_file *source, const char *obj )
@@ -3108,6 +3120,7 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
             if (source->use_msvcrt) output_filenames( msvcrt_flags );
         }
         output_filenames( extra_cflags );
+        output_filenames( make->extraincl_args );
         output_filenames( cpp_flags );
         output_filename( "$(CFLAGS)" );
         output( "\n" );
@@ -3164,6 +3177,7 @@ static const struct
     { "tlb", output_source_tlb },
     { "sfd", output_source_sfd },
     { "svg", output_source_svg },
+    { "icm", output_source_icm },
     { "nls", output_source_nls },
     { "desktop", output_source_desktop },
     { "po", output_source_po },
@@ -4157,6 +4171,7 @@ static void load_sources( struct makefile *make )
     make->include_paths = empty_strarray;
     make->include_args = empty_strarray;
     make->define_args = empty_strarray;
+    make->extraincl_args = empty_strarray;
     strarray_add( &make->define_args, "-D__WINESRC__" );
 
     value = get_expanded_make_var_array( make, "EXTRAINCL" );
@@ -4164,7 +4179,7 @@ static void load_sources( struct makefile *make )
         if (!strncmp( value.str[i], "-I", 2 ))
             strarray_add_uniq( &make->include_paths, value.str[i] + 2 );
         else
-            strarray_add_uniq( &make->define_args, value.str[i] );
+            strarray_add_uniq( &make->extraincl_args, value.str[i] );
     strarray_addall( &make->define_args, get_expanded_make_var_array( make, "EXTRADEFS" ));
 
     strarray_add( &make->include_args, strmake( "-I%s", obj_dir_path( make, "" )));

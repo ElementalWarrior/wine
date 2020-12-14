@@ -399,23 +399,27 @@ static void dump_hw_input( const char *prefix, const hw_input_t *input )
 {
     switch (input->type)
     {
-    case INPUT_MOUSE:
+    case HW_INPUT_MOUSE:
         fprintf( stderr, "%s{type=MOUSE,x=%d,y=%d,data=%08x,flags=%08x,time=%u",
                  prefix, input->mouse.x, input->mouse.y, input->mouse.data, input->mouse.flags,
                  input->mouse.time );
         dump_uint64( ",info=", &input->mouse.info );
         fputc( '}', stderr );
         break;
-    case INPUT_KEYBOARD:
+    case HW_INPUT_KEYBOARD:
         fprintf( stderr, "%s{type=KEYBOARD,vkey=%04hx,scan=%04hx,flags=%08x,time=%u",
                  prefix, input->kbd.vkey, input->kbd.scan, input->kbd.flags, input->kbd.time );
         dump_uint64( ",info=", &input->kbd.info );
         fputc( '}', stderr );
         break;
-    case INPUT_HARDWARE:
+    case HW_INPUT_HARDWARE:
         fprintf( stderr, "%s{type=HARDWARE,msg=%04x", prefix, input->hw.msg );
         dump_uint64( ",lparam=", &input->hw.lparam );
         fputc( '}', stderr );
+        break;
+    case HW_INPUT_HID:
+        fprintf( stderr, "%s{type=HID,device=%04x,usage_page=%02x,usage=%02x,length=%04x}",
+                 prefix, input->hid.device, input->hid.usage_page, input->hid.usage, input->hid.length );
         break;
     default:
         fprintf( stderr, "%s{type=%04x}", prefix, input->type );
@@ -1862,6 +1866,7 @@ static void dump_alloc_file_handle_reply( const struct alloc_file_handle_reply *
 static void dump_get_handle_unix_name_request( const struct get_handle_unix_name_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", nofollow=%d", req->nofollow );
 }
 
 static void dump_get_handle_unix_name_reply( const struct get_handle_unix_name_reply *req )
@@ -2000,6 +2005,7 @@ static void dump_get_socket_info_reply( const struct get_socket_info_reply *req 
     fprintf( stderr, " family=%d", req->family );
     fprintf( stderr, ", type=%d", req->type );
     fprintf( stderr, ", protocol=%d", req->protocol );
+    dump_timeout( ", connect_time=", &req->connect_time );
 }
 
 static void dump_enable_socket_event_request( const struct enable_socket_event_request *req )
@@ -2631,6 +2637,7 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
     fprintf( stderr, " win=%08x", req->win );
     dump_hw_input( ", input=", &req->input );
     fprintf( stderr, ", flags=%08x", req->flags );
+    dump_varargs_bytes( ", data=", cur_size );
 }
 
 static void dump_send_hardware_message_reply( const struct send_hardware_message_reply *req )
@@ -3109,6 +3116,12 @@ static void dump_set_window_region_request( const struct set_window_region_reque
 {
     fprintf( stderr, " window=%08x", req->window );
     fprintf( stderr, ", redraw=%d", req->redraw );
+    dump_varargs_rectangles( ", region=", cur_size );
+}
+
+static void dump_set_layer_region_request( const struct set_layer_region_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
@@ -4037,6 +4050,18 @@ static void dump_get_object_type_request( const struct get_object_type_request *
 
 static void dump_get_object_type_reply( const struct get_object_type_reply *req )
 {
+    fprintf( stderr, " index=%08x", req->index );
+    fprintf( stderr, ", total=%u", req->total );
+    dump_varargs_unicode_str( ", type=", cur_size );
+}
+
+static void dump_get_object_type_by_index_request( const struct get_object_type_by_index_request *req )
+{
+    fprintf( stderr, " index=%08x", req->index );
+}
+
+static void dump_get_object_type_by_index_reply( const struct get_object_type_by_index_reply *req )
+{
     fprintf( stderr, " total=%u", req->total );
     dump_varargs_unicode_str( ", type=", cur_size );
 }
@@ -4261,6 +4286,12 @@ static void dump_set_fd_name_info_request( const struct set_fd_name_info_request
     fprintf( stderr, ", link=%d", req->link );
     fprintf( stderr, ", replace=%d", req->replace );
     dump_varargs_string( ", filename=", cur_size );
+}
+
+static void dump_set_fd_eof_info_request( const struct set_fd_eof_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", eof=", &req->eof );
 }
 
 static void dump_get_window_layered_info_request( const struct get_window_layered_info_request *req )
@@ -4586,6 +4617,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_surface_region_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
+    (dump_func)dump_set_layer_region_request,
     (dump_func)dump_get_update_region_request,
     (dump_func)dump_update_window_zorder_request,
     (dump_func)dump_redraw_window_request,
@@ -4665,6 +4697,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_request,
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_object_type_request,
+    (dump_func)dump_get_object_type_by_index_request,
     (dump_func)dump_get_token_impersonation_level_request,
     (dump_func)dump_allocate_locally_unique_id_request,
     (dump_func)dump_create_device_manager_request,
@@ -4688,6 +4721,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_fd_completion_mode_request,
     (dump_func)dump_set_fd_disp_info_request,
     (dump_func)dump_set_fd_name_info_request,
+    (dump_func)dump_set_fd_eof_info_request,
     (dump_func)dump_get_window_layered_info_request,
     (dump_func)dump_set_window_layered_info_request,
     (dump_func)dump_alloc_user_handle_request,
@@ -4870,6 +4904,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_surface_region_reply,
     (dump_func)dump_get_window_region_reply,
     NULL,
+    NULL,
     (dump_func)dump_get_update_region_reply,
     NULL,
     NULL,
@@ -4949,6 +4984,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_reply,
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_object_type_reply,
+    (dump_func)dump_get_object_type_by_index_reply,
     (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
     (dump_func)dump_create_device_manager_reply,
@@ -4967,6 +5003,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_remove_completion_reply,
     (dump_func)dump_query_completion_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5154,6 +5191,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_surface_region",
     "get_window_region",
     "set_window_region",
+    "set_layer_region",
     "get_update_region",
     "update_window_zorder",
     "redraw_window",
@@ -5233,6 +5271,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "query_symlink",
     "get_object_info",
     "get_object_type",
+    "get_object_type_by_index",
     "get_token_impersonation_level",
     "allocate_locally_unique_id",
     "create_device_manager",
@@ -5256,6 +5295,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_fd_completion_mode",
     "set_fd_disp_info",
     "set_fd_name_info",
+    "set_fd_eof_info",
     "get_window_layered_info",
     "set_window_layered_info",
     "alloc_user_handle",
