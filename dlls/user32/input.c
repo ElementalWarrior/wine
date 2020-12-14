@@ -122,9 +122,9 @@ BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret )
  *
  * Internal SendInput function to allow the graphics driver to inject real events.
  */
-BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input )
+BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, UINT flags )
 {
-    NTSTATUS status = send_hardware_message( hwnd, input, 0 );
+    NTSTATUS status = send_hardware_message( hwnd, input, flags );
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
 }
@@ -192,9 +192,9 @@ UINT WINAPI SendInput( UINT count, LPINPUT inputs, int size )
             /* we need to update the coordinates to what the server expects */
             INPUT input = inputs[i];
             update_mouse_coords( &input );
-            status = send_hardware_message( 0, &input, SEND_HWMSG_INJECTED );
+            status = send_hardware_message( 0, &input, SEND_HWMSG_INJECTED|SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
         }
-        else status = send_hardware_message( 0, &inputs[i], SEND_HWMSG_INJECTED );
+        else status = send_hardware_message( 0, &inputs[i], SEND_HWMSG_INJECTED|SEND_HWMSG_RAWINPUT|SEND_HWMSG_WINDOW );
 
         if (status)
         {
@@ -365,8 +365,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReleaseCapture(void)
  */
 HWND WINAPI GetCapture(void)
 {
+    shmlocal_t *shm = wine_get_shmlocal();
     HWND ret = 0;
 
+    if (shm) return wine_server_ptr_handle( shm->input_capture );
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
@@ -477,17 +479,29 @@ DWORD WINAPI GetQueueStatus( UINT flags )
  */
 BOOL WINAPI GetInputState(void)
 {
+    shmlocal_t *shm = wine_get_shmlocal();
     DWORD ret;
 
     check_for_events( QS_INPUT );
+
+    /* req->clear is not set, so we can safely get the
+     * wineserver status without an additional call. */
+    if (shm)
+    {
+        ret = shm->queue_bits;
+        goto done;
+    }
 
     SERVER_START_REQ( get_queue_status )
     {
         req->clear_bits = 0;
         wine_server_call( req );
-        ret = reply->wake_bits & (QS_KEY | QS_MOUSEBUTTON);
+        ret = reply->wake_bits;
     }
     SERVER_END_REQ;
+
+done:
+    ret &= (QS_KEY | QS_MOUSEBUTTON);
     return ret;
 }
 
@@ -498,6 +512,7 @@ BOOL WINAPI GetInputState(void)
 BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
 {
     BOOL ret;
+    shmglobal_t *shm = wine_get_shmglobal();
 
     TRACE("%p\n", plii);
 
@@ -505,6 +520,12 @@ BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
+    }
+
+    if (shm)
+    {
+        plii->dwTime = shm->last_input_time;
+        return TRUE;
     }
 
     SERVER_START_REQ( get_last_input_time )
@@ -1013,6 +1034,15 @@ HKL WINAPI LoadKeyboardLayoutA(LPCSTR pwszKLID, UINT Flags)
     return ret;
 }
 
+/***********************************************************************
+ *              LoadKeyboardLayoutEx (USER32.@)
+ */
+HKL WINAPI LoadKeyboardLayoutEx(DWORD unknown, const WCHAR *locale, UINT flags)
+{
+    FIXME("(%d, %s, %x) semi-stub!\n", unknown, debugstr_w(locale), flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return LoadKeyboardLayoutW(locale, flags);
+}
 
 /***********************************************************************
  *		UnloadKeyboardLayout (USER32.@)

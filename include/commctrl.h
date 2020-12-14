@@ -51,7 +51,7 @@ enum _LI_METRIC
 HRESULT WINAPI LoadIconWithScaleDown(HINSTANCE, const WCHAR *, int, int, HICON *);
 HRESULT WINAPI LoadIconMetric(HINSTANCE, const WCHAR *, int, HICON *);
 
-#define COMCTL32_VERSION                5  /* dll version */
+#define COMCTL32_VERSION                6  /* dll version */
 
 #ifndef _WIN32_IE
 #define _WIN32_IE 0x0400

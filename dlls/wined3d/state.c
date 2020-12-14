@@ -564,6 +564,7 @@ static BOOL is_blend_enabled(struct wined3d_context *context, const struct wined
 static void blend(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
+    BOOL enable_dual_blend = wined3d_dualblend_enabled(state, gl_info);
     const struct wined3d_blend_state *b = state->blend_state;
     const struct wined3d_format *rt_format;
     GLenum src_blend, dst_blend;
@@ -588,6 +589,13 @@ static void blend(struct wined3d_context *context, const struct wined3d_state *s
             mask & WINED3DCOLORWRITEENABLE_BLUE ? GL_TRUE : GL_FALSE,
             mask & WINED3DCOLORWRITEENABLE_ALPHA ? GL_TRUE : GL_FALSE);
     checkGLcall("glColorMask");
+
+    /* Dual state blending changes the assignment of the output variables */
+    if (context->last_was_dual_blend != enable_dual_blend)
+    {
+        context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
+        context->last_was_dual_blend = enable_dual_blend;
+    }
 
     if (!b || !is_blend_enabled(context, state, 0))
     {
@@ -647,6 +655,7 @@ static void set_color_mask(const struct wined3d_gl_info *gl_info, UINT index, DW
 static void blend_db2(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
+    BOOL enable_dual_blend = wined3d_dualblend_enabled(state, gl_info);
     GLenum src_blend, dst_blend, src_blend_alpha, dst_blend_alpha;
     const struct wined3d_blend_state *b = state->blend_state;
     const struct wined3d_format *rt_format;
@@ -662,6 +671,13 @@ static void blend_db2(struct wined3d_context *context, const struct wined3d_stat
     {
         blend(context, state, state_id);
         return;
+    }
+
+    /* Dual state blending changes the assignment of the output variables */
+    if (context->last_was_dual_blend != enable_dual_blend)
+    {
+        context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
+        context->last_was_dual_blend = enable_dual_blend;
     }
 
     rt_format = state->fb->render_targets[0]->format;
@@ -707,6 +723,7 @@ static void blend_db2(struct wined3d_context *context, const struct wined3d_stat
 static void blend_dbb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
+    BOOL enable_dual_blend = wined3d_dualblend_enabled(state, gl_info);
     const struct wined3d_blend_state *b = state->blend_state;
     unsigned int i;
 
@@ -720,6 +737,13 @@ static void blend_dbb(struct wined3d_context *context, const struct wined3d_stat
     {
         blend(context, state, state_id);
         return;
+    }
+
+    /* Dual state blending changes the assignment of the output variables */
+    if (context->last_was_dual_blend != enable_dual_blend)
+    {
+        context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
+        context->last_was_dual_blend = enable_dual_blend;
     }
 
     for (i = 0; i < WINED3D_MAX_RENDER_TARGETS; ++i)
@@ -4461,6 +4485,11 @@ static void state_cb(struct wined3d_context *context, const struct wined3d_state
     unsigned int i, base, count;
 
     TRACE("context %p, state %p, state_id %#x.\n", context, state, state_id);
+    if (context->d3d_info->wined3d_creation_flags & WINED3D_LEGACY_SHADER_CONSTANTS)
+    {
+        WARN("Called in legacy shader constant mode.\n");
+        return;
+    }
 
     if (STATE_IS_GRAPHICS_CONSTANT_BUFFER(state_id))
         shader_type = state_id - STATE_GRAPHICS_CONSTANT_BUFFER(0);
@@ -5454,7 +5483,8 @@ static void prune_invalid_states(struct wined3d_state_entry *state_table, const 
         state_table[i].apply = state_undefined;
     }
 
-    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(d3d_info->limits.ffp_vertex_blend_matrices));
+    start = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(max(d3d_info->limits.ffp_vertex_blend_matrices,
+            d3d_info->limits.ffp_max_vertex_blend_matrix_index + 1)));
     last = STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255));
     for (i = start; i <= last; ++i)
     {

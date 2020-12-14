@@ -713,9 +713,10 @@ static void wined3d_state_record_lights(struct wined3d_light_state *dst_state,
 void CDECL wined3d_stateblock_capture(struct wined3d_stateblock *stateblock,
         const struct wined3d_stateblock *device_state)
 {
+    const struct wined3d_d3d_info *d3d_info = &stateblock->device->adapter->d3d_info;
     const struct wined3d_stateblock_state *state = &device_state->stateblock_state;
+    unsigned int i, start, vs_uniform_count;
     struct wined3d_range range;
-    unsigned int i, start;
     DWORD map;
 
     TRACE("stateblock %p, device_state %p.\n", stateblock, device_state);
@@ -731,9 +732,13 @@ void CDECL wined3d_stateblock_capture(struct wined3d_stateblock *stateblock,
         stateblock->stateblock_state.vs = state->vs;
     }
 
+    vs_uniform_count = stateblock->device->create_parms.flags
+            & (WINED3DCREATE_SOFTWARE_VERTEXPROCESSING | WINED3DCREATE_MIXED_VERTEXPROCESSING)
+            ? d3d_info->limits.vs_uniform_count_swvp : d3d_info->limits.vs_uniform_count;
+
     for (start = 0; ; start = range.offset + range.size)
     {
-        if (!wined3d_bitmap_get_range(stateblock->changed.vs_consts_f, WINED3D_MAX_VS_CONSTS_F, start, &range))
+        if (!wined3d_bitmap_get_range(stateblock->changed.vs_consts_f, vs_uniform_count, start, &range))
             break;
 
         memcpy(&stateblock->stateblock_state.vs_consts_f[range.offset], &state->vs_consts_f[range.offset],
@@ -976,9 +981,10 @@ void CDECL wined3d_stateblock_capture(struct wined3d_stateblock *stateblock,
 void CDECL wined3d_stateblock_apply(const struct wined3d_stateblock *stateblock,
         struct wined3d_stateblock *device_state)
 {
+    const struct wined3d_d3d_info *d3d_info = &stateblock->device->adapter->d3d_info;
     const struct wined3d_stateblock_state *state = &stateblock->stateblock_state;
+    unsigned int i, start, vs_uniform_count;
     struct wined3d_range range;
-    unsigned int i, start;
     DWORD map;
 
     TRACE("stateblock %p, device_state %p.\n", stateblock, device_state);
@@ -986,9 +992,13 @@ void CDECL wined3d_stateblock_apply(const struct wined3d_stateblock *stateblock,
     if (stateblock->changed.vertexShader)
         wined3d_stateblock_set_vertex_shader(device_state, state->vs);
 
+    vs_uniform_count = stateblock->device->create_parms.flags
+            & (WINED3DCREATE_SOFTWARE_VERTEXPROCESSING | WINED3DCREATE_MIXED_VERTEXPROCESSING)
+            ? d3d_info->limits.vs_uniform_count_swvp : d3d_info->limits.vs_uniform_count;
+
     for (start = 0; ; start = range.offset + range.size)
     {
-        if (!wined3d_bitmap_get_range(stateblock->changed.vs_consts_f, WINED3D_MAX_VS_CONSTS_F, start, &range))
+        if (!wined3d_bitmap_get_range(stateblock->changed.vs_consts_f, vs_uniform_count, start, &range))
             break;
         wined3d_stateblock_set_vs_consts_f(device_state, range.offset, range.size, &state->vs_consts_f[range.offset]);
     }
@@ -1190,12 +1200,16 @@ HRESULT CDECL wined3d_stateblock_set_vs_consts_f(struct wined3d_stateblock *stat
         unsigned int start_idx, unsigned int count, const struct wined3d_vec4 *constants)
 {
     const struct wined3d_d3d_info *d3d_info = &stateblock->device->adapter->d3d_info;
+    unsigned int constants_count;
 
     TRACE("stateblock %p, start_idx %u, count %u, constants %p.\n",
             stateblock, start_idx, count, constants);
 
-    if (!constants || start_idx >= d3d_info->limits.vs_uniform_count
-            || count > d3d_info->limits.vs_uniform_count - start_idx)
+    constants_count = stateblock->device->create_parms.flags
+            & (WINED3DCREATE_SOFTWARE_VERTEXPROCESSING | WINED3DCREATE_MIXED_VERTEXPROCESSING)
+            ? d3d_info->limits.vs_uniform_count_swvp : d3d_info->limits.vs_uniform_count;
+
+    if (!constants || start_idx >= constants_count || count > constants_count - start_idx)
         return WINED3DERR_INVALIDCALL;
 
     memcpy(&stateblock->stateblock_state.vs_consts_f[start_idx], constants, count * sizeof(*constants));
@@ -1949,7 +1963,7 @@ static HRESULT stateblock_init(struct wined3d_stateblock *stateblock, const stru
             stateblock_init_lights(stateblock->stateblock_state.light_state->light_map,
                     device_state->stateblock_state.light_state->light_map);
             stateblock_savedstates_set_all(&stateblock->changed,
-                    d3d_info->limits.vs_uniform_count, d3d_info->limits.ps_uniform_count);
+                    d3d_info->limits.vs_uniform_count_swvp, d3d_info->limits.ps_uniform_count);
             break;
 
         case WINED3D_SBT_PIXEL_STATE:
@@ -1961,7 +1975,7 @@ static HRESULT stateblock_init(struct wined3d_stateblock *stateblock, const stru
             stateblock_init_lights(stateblock->stateblock_state.light_state->light_map,
                     device_state->stateblock_state.light_state->light_map);
             stateblock_savedstates_set_vertex(&stateblock->changed,
-                    d3d_info->limits.vs_uniform_count);
+                    d3d_info->limits.vs_uniform_count_swvp);
             break;
 
         default:
