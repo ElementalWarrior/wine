@@ -231,24 +231,6 @@ INT WINAPI SetupPromptReboot( HSPFILEQ file_queue, HWND owner, BOOL scan_only )
 }
 
 /***********************************************************************
- *      SetupQueryDrivesInDiskSpaceListA (SETUPAPI.@)
- */
-BOOL WINAPI SetupQueryDrivesInDiskSpaceListA(HDSKSPC disk_space, PSTR return_buffer, DWORD return_buffer_size, PDWORD required_size)
-{
-    FIXME("%p, %p, %d, %p: stub\n", disk_space, return_buffer, return_buffer_size, required_size);
-    return FALSE;
-}
-
-/***********************************************************************
- *      SetupQueryDrivesInDiskSpaceListW (SETUPAPI.@)
- */
-BOOL WINAPI SetupQueryDrivesInDiskSpaceListW(HDSKSPC disk_space, PWSTR return_buffer, DWORD return_buffer_size, PDWORD required_size)
-{
-    FIXME("%p, %p, %d, %p: stub\n", disk_space, return_buffer, return_buffer_size, required_size);
-    return FALSE;
-}
-
-/***********************************************************************
  *      SetupAddToSourceListA (SETUPAPI.@)
  */
 BOOL WINAPI SetupAddToSourceListA(DWORD flags, PCSTR source)
@@ -685,4 +667,22 @@ BOOL WINAPI SetupDiEnumDriverInfoW(HDEVINFO DeviceInfoSet, PSP_DEVINFO_DATA Devi
 
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
+}
+
+/***********************************************************************
+ *              CM_Request_Device_EjectA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Request_Device_EjectA(DEVINST dev, PPNP_VETO_TYPE type, LPSTR name, ULONG length, ULONG flags)
+{
+    FIXME("(0x%08x, %p, %p, %u, 0x%08x) stub\n", dev, type, name, length, flags);
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *              CM_Request_Device_EjectW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Request_Device_EjectW(DEVINST dev, PPNP_VETO_TYPE type, LPWSTR name, ULONG length, ULONG flags)
+{
+    FIXME("(0x%08x, %p, %p, %u, 0x%08x) stub\n", dev, type, name, length, flags);
+    return CR_SUCCESS;
 }

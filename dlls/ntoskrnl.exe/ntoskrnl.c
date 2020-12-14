@@ -58,6 +58,7 @@ WINE_DECLARE_DEBUG_CHANNEL(plugplay);
 
 BOOLEAN KdDebuggerEnabled = FALSE;
 ULONG InitSafeBootMode = 0;
+USHORT NtBuildNumber = 0;
 
 extern LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs );
 
@@ -1483,6 +1484,16 @@ NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable 
 
 
 /***********************************************************************
+ *           IoGetDeviceAttachmentBaseRef   (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoGetDeviceAttachmentBaseRef( PDEVICE_OBJECT device )
+{
+    FIXME( "(%p): stub\n", device );
+    return NULL;
+}
+
+
+/***********************************************************************
  *           IoGetDeviceInterfaces   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoGetDeviceInterfaces( const GUID *InterfaceClassGuid,
@@ -2210,7 +2221,24 @@ void WINAPI ExInitializeNPagedLookasideList(PNPAGED_LOOKASIDE_LIST Lookaside,
                                             ULONG Tag,
                                             USHORT Depth)
 {
-    FIXME( "stub: %p, %p, %p, %u, %lu, %u, %u\n", Lookaside, Allocate, Free, Flags, Size, Tag, Depth );
+    TRACE( "%p, %p, %p, %u, %lu, %u, %u\n", Lookaside, Allocate, Free, Flags, Size, Tag, Depth );
+
+    RtlInitializeSListHead( &Lookaside->L.u.ListHead );
+    Lookaside->L.Depth                 = 4;
+    Lookaside->L.MaximumDepth          = 256;
+    Lookaside->L.TotalAllocates        = 0;
+    Lookaside->L.u2.AllocateMisses     = 0;
+    Lookaside->L.TotalFrees            = 0;
+    Lookaside->L.u3.FreeMisses         = 0;
+    Lookaside->L.Type                  = NonPagedPool | Flags;
+    Lookaside->L.Tag                   = Tag;
+    Lookaside->L.Size                  = Size;
+    Lookaside->L.u4.Allocate           = Allocate ? Allocate : ExAllocatePoolWithTag;
+    Lookaside->L.u5.Free               = Free ? Free : ExFreePool;
+    Lookaside->L.LastTotalAllocates    = 0;
+    Lookaside->L.u6.LastAllocateMisses = 0;
+
+    /* FIXME: insert in global list of lookadside lists */
 }
 
 /***********************************************************************
@@ -2491,6 +2519,16 @@ VOID WINAPI MmLockPagableSectionByHandle(PVOID ImageSectionHandle)
     FIXME("stub %p\n", ImageSectionHandle);
 }
 
+ /***********************************************************************
+ *           MmMapLockedPages   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmMapLockedPages(PMDL MemoryDescriptorList, KPROCESSOR_MODE AccessMode)
+{
+    TRACE("%p %d\n", MemoryDescriptorList, AccessMode);
+    return MemoryDescriptorList->MappedSystemVa;
+}
+
+
 /***********************************************************************
  *           MmMapLockedPagesSpecifyCache  (NTOSKRNL.EXE.@)
  */
@@ -2553,6 +2591,16 @@ void WINAPI  MmUnlockPages(PMDLX MemoryDescriptorList)
 VOID WINAPI MmUnmapIoSpace( PVOID BaseAddress, SIZE_T NumberOfBytes )
 {
     FIXME( "stub: %p, %lu\n", BaseAddress, NumberOfBytes );
+}
+
+
+/***********************************************************************
+ *           MmUnmapLockedPages   (NTOSKRNL.EXE.@)
+ */
+void WINAPI MmUnmapLockedPages(PVOID BaseAddress, PMDLX MemoryDescriptorList)
+{
+    TRACE("%p %p\n", BaseAddress, MemoryDescriptorList);
+    /* Nothing to do */
 }
 
 
@@ -2996,6 +3044,13 @@ NTSTATUS WINAPI IoAcquireRemoveLockEx(PIO_REMOVE_LOCK lock, PVOID tag,
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static void ntoskrnl_init(void)
+{
+    LARGE_INTEGER count;
+
+    KeQueryTickCount( &count );  /* initialize the global KeTickCount */
+    NtBuildNumber = NtCurrentTeb()->Peb->OSBuildNumber;
+}
 
 /*****************************************************
  *           DllMain
@@ -3003,7 +3058,6 @@ NTSTATUS WINAPI IoAcquireRemoveLockEx(PIO_REMOVE_LOCK lock, PVOID tag,
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
     static void *handler;
-    LARGE_INTEGER count;
 
     switch(reason)
     {
@@ -3012,7 +3066,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 #if defined(__i386__) || defined(__x86_64__)
         handler = RtlAddVectoredExceptionHandler( TRUE, vectored_handler );
 #endif
-        KeQueryTickCount( &count );  /* initialize the global KeTickCount */
+        ntoskrnl_init();
         break;
     case DLL_PROCESS_DETACH:
         if (reserved) break;
@@ -3295,6 +3349,39 @@ static LDR_MODULE *find_ldr_module( HMODULE module )
     return ldr;
 }
 
+/* change permissions of a specific memory range, save original permissions */
+static void virtual_protect_save( void *addr, SIZE_T size, ULONG new_prot, ULONG *old_prot )
+{
+    SYSTEM_BASIC_INFORMATION info;
+    UINT i = 0;
+
+    NtQuerySystemInformation( SystemBasicInformation, &info, sizeof(info), NULL );
+    while (size)
+    {
+        SIZE_T block_size = min( size, info.PageSize - ((UINT_PTR)addr & (info.PageSize - 1)) );
+        VirtualProtect( addr, block_size, new_prot, &old_prot[i++] );
+        addr  = (void *)((char *)addr + block_size);
+        size -= block_size;
+    }
+}
+
+/* restore permissions for a specific memory range */
+static void virtual_protect_load( void *addr, SIZE_T size, ULONG *old_prot )
+{
+    SYSTEM_BASIC_INFORMATION info;
+    DWORD dummy;
+    UINT i = 0;
+
+    NtQuerySystemInformation( SystemBasicInformation, &info, sizeof(info), NULL );
+    while (size)
+    {
+        SIZE_T block_size = min( size, info.PageSize - ((UINT_PTR)addr & (info.PageSize - 1)) );
+        VirtualProtect( addr, block_size, old_prot[i++], &dummy );
+        addr  = (void *)((char *)addr + block_size);
+        size -= block_size;
+    }
+}
+
 /* load the driver module file */
 static HMODULE load_driver_module( const WCHAR *name )
 {
@@ -3318,27 +3405,31 @@ static HMODULE load_driver_module( const WCHAR *name )
     if (nt->OptionalHeader.SectionAlignment < info.PageSize ||
         !(nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
     {
-        DWORD old;
+        DWORD old_prot[3];
         IMAGE_BASE_RELOCATION *rel, *end;
 
         if ((rel = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_BASERELOC, &size )))
         {
             TRACE( "%s: relocating from %p to %p\n", wine_dbgstr_w(name), (char *)module - delta, module );
             end = (IMAGE_BASE_RELOCATION *)((char *)rel + size);
-            while (rel < end && rel->SizeOfBlock)
+            while (rel < end - 1 && rel->SizeOfBlock)
             {
                 void *page = (char *)module + rel->VirtualAddress;
-                VirtualProtect( page, info.PageSize, PAGE_EXECUTE_READWRITE, &old );
+                /* LdrProcessRelocationBlock can access the memory range from page - (page + 0xfff + 8), so
+                 * changing permissions of a single page is not sufficient. We assume here that the minimum
+                 * page size is 0x1000, so we have to save/restore two or three pages, depending on the
+                 * virtual address. */
+                virtual_protect_save( page, 0xfff + 8, PAGE_EXECUTE_READWRITE, old_prot );
                 rel = LdrProcessRelocationBlock( page, (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
                                                  (USHORT *)(rel + 1), delta );
-                if (old != PAGE_EXECUTE_READWRITE) VirtualProtect( page, info.PageSize, old, &old );
+                virtual_protect_load( page, 0xfff + 8, old_prot );
                 if (!rel) goto error;
             }
             /* make sure we don't try again */
             size = FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader ) + nt->FileHeader.SizeOfOptionalHeader;
-            VirtualProtect( nt, size, PAGE_READWRITE, &old );
+            VirtualProtect( nt, size, PAGE_READWRITE, &old_prot[0] );
             nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress = 0;
-            VirtualProtect( nt, size, old, &old );
+            VirtualProtect( nt, size, old_prot[0], &old_prot[0] );
         }
     }
 

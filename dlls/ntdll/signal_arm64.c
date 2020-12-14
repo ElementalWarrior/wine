@@ -927,6 +927,12 @@ void signal_init_thread( TEB *teb )
     pthread_setspecific( teb_key, teb );
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 /**********************************************************************
  *		signal_init_process
@@ -1093,7 +1099,7 @@ static void thread_startup( void *param )
     context.Pc = (DWORD_PTR)info->start;
 
     if (info->suspend) wait_suspend( &context );
-    attach_dlls( &context, (void **)&context.u.s.X0 );
+    LdrInitializeThunk( &context, (ULONG_PTR *)&context.u.s.X0, 0, 0 );
 
     ((thread_start_func)context.Pc)( (LPTHREAD_START_ROUTINE)context.u.s.X0, (void *)context.u.s.X1 );
 }

@@ -823,7 +823,8 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
     LIST_FOR_EACH_ENTRY(r, &layout->runs, struct layout_run, entry) {
         struct regular_layout_run *run = &r->u.regular;
         IDWriteFont *font;
-        UINT32 length;
+        UINT32 length, mapped_length;
+        FLOAT scale;
 
         if (r->kind == LAYOUT_RUN_INLINE)
             continue;
@@ -831,12 +832,19 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
         range = get_layout_range_by_pos(layout, run->descr.textPosition);
 
         if (run->sa.shapes == DWRITE_SCRIPT_SHAPES_NO_VISUAL) {
-            IDWriteFontCollection *collection;
-
-            collection = range->collection ? range->collection : sys_collection;
-
-            if (FAILED(hr = create_matching_font(collection, range->fontfamily, range->weight, range->style,
-                    range->stretch, &font))) {
+            hr = IDWriteFontFallback_MapCharacters(fallback,
+                (IDWriteTextAnalysisSource *)&layout->IDWriteTextAnalysisSource1_iface,
+                run->descr.textPosition,
+                run->descr.stringLength,
+                range->collection,
+                range->fontfamily,
+                range->weight,
+                range->style,
+                range->stretch,
+                &mapped_length,
+                &font,
+                &scale);
+            if (FAILED(hr)) {
                 WARN("%s: failed to create matching font for non visual run, family %s, collection %p\n",
                         debugstr_rundescr(&run->descr), debugstr_w(range->fontfamily), range->collection);
                 break;
@@ -876,6 +884,12 @@ static HRESULT layout_resolve_fonts(struct dwrite_textlayout *layout)
             if (FAILED(hr)) {
                 WARN("%s: failed to map family %s, collection %p, hr %#x.\n", debugstr_rundescr(&run->descr),
                         debugstr_w(range->fontfamily), range->collection, hr);
+                goto fatal;
+            }
+
+            if (!font) {
+                hr = E_FAIL;
+                WARN("Failed to create font face, hr %#x.\n", hr);
                 goto fatal;
             }
 
@@ -1795,8 +1809,11 @@ static HRESULT layout_set_dummy_line_metrics(struct dwrite_textlayout *layout, U
     DWRITE_FONT_METRICS fontmetrics;
     struct layout_range *range;
     IDWriteFontFace *fontface;
+    IDWriteFontFallback *fallback;
     IDWriteFont *font;
     HRESULT hr;
+    UINT32 mapped_length;
+    FLOAT scale;
 
     range = get_layout_range_by_pos(layout, pos);
     hr = create_matching_font(range->collection,
@@ -1805,8 +1822,34 @@ static HRESULT layout_set_dummy_line_metrics(struct dwrite_textlayout *layout, U
         range->style,
         range->stretch,
         &font);
+
+    if (FAILED(hr)) {
+        if (layout->format.fallback) {
+            fallback = layout->format.fallback;
+            IDWriteFontFallback_AddRef(fallback);
+        } else if (FAILED(hr = IDWriteFactory5_GetSystemFontFallback(layout->factory, &fallback))) {
+            WARN("Failed to get system fallback, hr %#x.\n", hr);
+            return hr;
+        }
+
+        hr = IDWriteFontFallback_MapCharacters(fallback,
+                (IDWriteTextAnalysisSource *)&layout->IDWriteTextAnalysisSource1_iface,
+                pos,
+                layout->len,
+                range->collection,
+                range->fontfamily,
+                range->weight,
+                range->style,
+                range->stretch,
+                &mapped_length,
+                &font,
+                &scale);
+        IDWriteFontFallback_Release(fallback);
+    }
     if (FAILED(hr))
         return hr;
+    if (font == NULL)
+        return S_OK;
     hr = IDWriteFont_CreateFontFace(font, &fontface);
     IDWriteFont_Release(font);
     if (FAILED(hr))
@@ -5613,7 +5656,7 @@ static const IDWriteTextFormat2Vtbl dwritetextformatvtbl = {
 static struct dwrite_textformat *unsafe_impl_from_IDWriteTextFormat(IDWriteTextFormat *iface)
 {
     return (iface->lpVtbl == (IDWriteTextFormatVtbl*)&dwritetextformatvtbl) ?
-        CONTAINING_RECORD(iface, struct dwrite_textformat, IDWriteTextFormat2_iface) : NULL;
+        CONTAINING_RECORD((IDWriteTextFormat2 *)iface, struct dwrite_textformat, IDWriteTextFormat2_iface) : NULL;
 }
 
 HRESULT create_textformat(const WCHAR *family_name, IDWriteFontCollection *collection, DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STYLE style,

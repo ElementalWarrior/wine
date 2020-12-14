@@ -43,6 +43,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
 #define NB_USER_HANDLES  ((LAST_USER_HANDLE - FIRST_USER_HANDLE + 1) >> 1)
 #define USER_HANDLE_TO_INDEX(hwnd) ((LOWORD(hwnd) - FIRST_USER_HANDLE) >> 1)
 
+extern HANDLE CDECL __wine_create_default_token(BOOL admin);
+
 static DWORD process_layout = ~0u;
 
 static struct list window_surfaces = LIST_INIT( window_surfaces );
@@ -970,7 +972,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     WND *wndPtr;
     HWND *list;
     HMENU menu = 0, sys_menu;
-    HWND icon_title;
     struct window_surface *surface;
 
     TRACE("%p\n", hwnd );
@@ -1018,7 +1019,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     sys_menu = wndPtr->hSysMenu;
     free_dce( wndPtr->dce, hwnd );
     wndPtr->dce = NULL;
-    icon_title = wndPtr->icon_title;
     HeapFree( GetProcessHeap(), 0, wndPtr->text );
     wndPtr->text = NULL;
     HeapFree( GetProcessHeap(), 0, wndPtr->pScroll );
@@ -1028,7 +1028,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     wndPtr->surface = NULL;
     WIN_ReleasePtr( wndPtr );
 
-    if (icon_title) DestroyWindow( icon_title );
     if (menu) DestroyMenu( menu );
     if (sys_menu) DestroyMenu( sys_menu );
     if (surface)
@@ -2091,6 +2090,7 @@ HWND WINAPI GetDesktopWindow(void)
         WCHAR app[MAX_PATH + ARRAY_SIZE( explorer )];
         WCHAR cmdline[MAX_PATH + ARRAY_SIZE( explorer ) + ARRAY_SIZE( args )];
         WCHAR desktop[MAX_PATH];
+        HANDLE token;
         void *redir;
 
         SERVER_START_REQ( set_user_object_info )
@@ -2123,9 +2123,12 @@ HWND WINAPI GetDesktopWindow(void)
         strcpyW( cmdline, app );
         strcatW( cmdline, args );
 
+        if (!(token = __wine_create_default_token( FALSE )))
+            ERR( "Failed to create limited token\n" );
+
         Wow64DisableWow64FsRedirection( &redir );
-        if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
-                            NULL, windir, &si, &pi ))
+        if (CreateProcessAsUserW( token, app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
+                                  NULL, windir, &si, &pi ))
         {
             TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
             WaitForInputIdle( pi.hProcess, 10000 );
@@ -2134,6 +2137,8 @@ HWND WINAPI GetDesktopWindow(void)
         }
         else WARN( "failed to start explorer, err %d\n", GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
+
+        if (token) CloseHandle( token );
 
         SERVER_START_REQ( get_desktop_window )
         {
@@ -3660,13 +3665,12 @@ BOOL WINAPI FlashWindowEx( PFLASHWINFO pfinfo )
         if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
         hwnd = wndPtr->obj.handle;  /* make it a full handle */
 
-        if (pfinfo->dwFlags) wparam = !(wndPtr->flags & WIN_NCACTIVATED);
-        else wparam = (hwnd == GetForegroundWindow());
+        wparam = (wndPtr->flags & WIN_NCACTIVATED) != 0;
 
         WIN_ReleasePtr( wndPtr );
         SendMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
         USER_Driver->pFlashWindowEx( pfinfo );
-        return wparam;
+        return (pfinfo->dwFlags & FLASHW_CAPTION) ? TRUE : wparam;
     }
 }
 

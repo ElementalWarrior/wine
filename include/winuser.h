@@ -101,6 +101,8 @@ typedef void* HPOWERNOTIFY;
 #define WSF_VISIBLE     1
 #define DF_ALLOWOTHERACCOUNTHOOK  1
 
+#define CWF_CREATE_ONLY 0x01
+
 typedef struct tagUSEROBJECTFLAGS {
     BOOL fInherit;
     BOOL fReserved;
@@ -3828,6 +3830,7 @@ WINUSERAPI HWND        WINAPI GetNextDlgTabItem(HWND,HWND,BOOL);
 WINUSERAPI HWND        WINAPI GetOpenClipboardWindow(void);
 WINUSERAPI HWND        WINAPI GetParent(HWND);
 WINUSERAPI BOOL        WINAPI GetPhysicalCursorPos(POINT*);
+WINUSERAPI BOOL        WINAPI GetPointerType(UINT32,POINTER_INPUT_TYPE *);
 WINUSERAPI INT         WINAPI GetPriorityClipboardFormat(UINT*,INT);
 WINUSERAPI BOOL        WINAPI GetProcessDefaultLayout(DWORD*);
 WINUSERAPI BOOL        WINAPI GetProcessDpiAwarenessInternal(HANDLE,DPI_AWARENESS*);

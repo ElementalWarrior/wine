@@ -328,6 +328,8 @@ static inline struct amd64_thread_data *amd64_thread_data(void)
     return (struct amd64_thread_data *)NtCurrentTeb()->SystemReserved2;
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+
 /***********************************************************************
  * Dynamic unwind table
  */
@@ -2417,7 +2419,6 @@ static EXCEPTION_RECORD *setup_exception( ucontext_t *sigcontext, raise_func fun
         ULONG64           red_zone[16];
     } *stack;
     ULONG64 *rsp_ptr;
-    DWORD exception_code = 0;
 
     stack = (struct stack_layout *)(RSP_sig(sigcontext) & ~15);
 
@@ -2452,8 +2453,7 @@ static EXCEPTION_RECORD *setup_exception( ucontext_t *sigcontext, raise_func fun
     else if ((char *)(stack - 1) < (char *)NtCurrentTeb()->Tib.StackLimit)
     {
         /* stack access below stack limit, may be recoverable */
-        if (virtual_handle_stack_fault( stack - 1 )) exception_code = EXCEPTION_STACK_OVERFLOW;
-        else
+        if (!virtual_handle_stack_fault( stack - 1 ))
         {
             UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)(stack - 1);
             ERR( "stack overflow %u bytes in thread %04x eip %016lx esp %016lx stack %p-%p-%p\n",
@@ -2471,7 +2471,7 @@ static EXCEPTION_RECORD *setup_exception( ucontext_t *sigcontext, raise_func fun
     VALGRIND_MAKE_WRITABLE(stack, sizeof(*stack));
 #endif
     stack->rec.ExceptionRecord  = NULL;
-    stack->rec.ExceptionCode    = exception_code;
+    stack->rec.ExceptionCode    = STATUS_SUCCESS;
     stack->rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
     stack->rec.ExceptionAddress = (void *)RIP_sig(sigcontext);
     stack->rec.NumberParameters = 0;
@@ -3055,8 +3055,9 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         virtual_handle_stack_fault( siginfo->si_addr ))
     {
         /* check if this was the last guard page */
-        if ((char *)siginfo->si_addr < (char *)NtCurrentTeb()->DeallocationStack + 2*4096)
+        if ((char *)siginfo->si_addr < (char *)NtCurrentTeb()->DeallocationStack + 3*4096)
         {
+            virtual_handle_stack_fault( (char *)siginfo->si_addr - 4096 );
             rec = setup_exception( sigcontext, raise_segv_exception );
             rec->ExceptionCode = EXCEPTION_STACK_OVERFLOW;
         }
@@ -3064,7 +3065,6 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     }
 
     rec = setup_exception( sigcontext, raise_segv_exception );
-    if (rec->ExceptionCode == EXCEPTION_STACK_OVERFLOW) return;
 
     switch(TRAP_sig(ucontext))
     {
@@ -3280,6 +3280,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3440,6 +3441,12 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 /**********************************************************************
  *              RtlAddFunctionTable   (NTDLL.@)
@@ -4376,7 +4383,7 @@ __ASM_GLOBAL_FUNC( RtlRaiseException,
  */
 USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, ULONG *hash )
 {
-    FIXME( "(%d, %d, %p, %p) stub!\n", skip, count, buffer, hash );
+    TRACE( "(%d, %d, %p, %p) stub!\n", skip, count, buffer, hash );
     return 0;
 }
 
@@ -4495,7 +4502,7 @@ PCONTEXT DECLSPEC_HIDDEN attach_thread( LPTHREAD_START_ROUTINE entry, void *arg,
         init_thread_context( ctx, entry, arg, relay );
     }
     ctx->ContextFlags = CONTEXT_FULL;
-    attach_dlls( ctx, (void **)&ctx->Rcx );
+    LdrInitializeThunk( ctx, (ULONG_PTR)&ctx->Rcx, 0, 0 );
     return ctx;
 }
 
