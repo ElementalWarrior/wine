@@ -66,17 +66,23 @@ static HRESULT FtpProtocol_open_request(Protocol *prot, IUri *uri, DWORD request
         HINTERNET internet_session, IInternetBindInfo *bind_info)
 {
     FtpProtocol *This = impl_from_Protocol(prot);
-    BSTR url;
+    DWORD path_size = INTERNET_MAX_URL_LENGTH;
+    BSTR url, path;
     HRESULT hres;
 
     hres = IUri_GetAbsoluteUri(uri, &url);
     if(FAILED(hres))
         return hres;
+    path = heap_alloc(path_size);
+    hres = UrlUnescapeW((LPWSTR)url, path, &path_size, 0);
+    if(FAILED(hres))
+        return hres;
+    SysFreeString(url);
 
-    This->base.request = InternetOpenUrlW(internet_session, url, NULL, 0,
+    This->base.request = InternetOpenUrlW(internet_session, path, NULL, 0,
             request_flags|INTERNET_FLAG_EXISTING_CONNECT|INTERNET_FLAG_PASSIVE,
             (DWORD_PTR)&This->base);
-    SysFreeString(url);
+    SysFreeString(path);
     if (!This->base.request && GetLastError() != ERROR_IO_PENDING) {
         WARN("InternetOpenUrl failed: %d\n", GetLastError());
         return INET_E_RESOURCE_NOT_FOUND;
