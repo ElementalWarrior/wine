@@ -1904,6 +1904,28 @@ static void test_device_interface_key(void)
     SetupDiDestroyDeviceInfoList(set);
 }
 
+static void testSetupDiGetClassDevsA(void)
+{
+    static GUID displayguid = {0x4d36e968, 0xe325, 0x11ce, {0xbf,0xc1,0x08,0x00,0x2b,0xe1,0x03,0x18}};
+    SP_DEVINFO_DATA devinfo;
+    DISPLAY_DEVICEA disp;
+    HDEVINFO set;
+    BOOL ret;
+
+    disp.cb = sizeof(disp);
+    ok(EnumDisplayDevicesA(NULL, 0, &disp, 0), "EnumDisplayDevices failed: %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    set = SetupDiGetClassDevsA(&displayguid, disp.DeviceID, 0, 0);
+    ok(set != INVALID_HANDLE_VALUE, "SetupDiGetClassDevsA failed: %08x\n", GetLastError());
+
+    devinfo.cbSize = sizeof(devinfo);
+    ret = SetupDiEnumDeviceInfo(set, 0, &devinfo);
+    ok(ret, "SetupDiEnumDeviceInfo failed: %08x\n", GetLastError());
+
+    SetupDiDestroyDeviceInfoList(set);
+}
+
 static void test_device_install_params(void)
 {
     SP_DEVINFO_DATA device = {sizeof(device)};
@@ -1971,8 +1993,6 @@ static void test_device_install_params(void)
     ok(!params.FileQueue, "Got queue %p.\n", params.FileQueue);
     ok(!params.ClassInstallReserved, "Got class installer data %#lx.\n", params.ClassInstallReserved);
     ok(!strcasecmp(params.DriverPath, "C:\\windows"), "Got driver path %s.\n", params.DriverPath);
-
-    SetupDiDestroyDeviceInfoList(set);
 }
 
 #ifdef __i386__
@@ -2713,6 +2733,7 @@ START_TEST(devinst)
     test_registry_property_a();
     test_registry_property_w();
     test_get_inf_class();
+    testSetupDiGetClassDevsA();
     test_devnode();
     test_device_interface_key();
     test_device_install_params();

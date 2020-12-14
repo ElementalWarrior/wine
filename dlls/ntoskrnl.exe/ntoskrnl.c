@@ -1789,6 +1789,16 @@ NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable 
 
 
 /***********************************************************************
+ *           IoGetDeviceAttachmentBaseRef   (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoGetDeviceAttachmentBaseRef( PDEVICE_OBJECT device )
+{
+    FIXME( "(%p): stub\n", device );
+    return NULL;
+}
+
+
+/***********************************************************************
  *           IoGetDeviceInterfaces   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoGetDeviceInterfaces( const GUID *InterfaceClassGuid,
@@ -2939,6 +2949,16 @@ VOID WINAPI MmLockPagableSectionByHandle(PVOID ImageSectionHandle)
 {
     FIXME("stub %p\n", ImageSectionHandle);
 }
+
+ /***********************************************************************
+ *           MmMapLockedPages   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmMapLockedPages(PMDL MemoryDescriptorList, KPROCESSOR_MODE AccessMode)
+{
+    TRACE("%p %d\n", MemoryDescriptorList, AccessMode);
+    return MemoryDescriptorList->MappedSystemVa;
+}
+
 
 /***********************************************************************
  *           MmMapLockedPagesSpecifyCache  (NTOSKRNL.EXE.@)
