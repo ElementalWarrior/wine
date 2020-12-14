@@ -2301,6 +2301,16 @@ static HRESULT attributes_deserialize_read(struct attr_serialize_context *contex
 }
 
 /***********************************************************************
+ *      MFGetConfigurationDWORD (mfplat.@)
+ */
+HRESULT WINAPI MFGetConfigurationDWORD(void *unk1, void *unk2, void *unk3)
+{
+    FIXME("%p, %p, %p stub!\n", unk1, unk2, unk3);
+
+    return E_NOTIMPL;
+}
+
+/***********************************************************************
  *      MFInitAttributesFromBlob (mfplat.@)
  */
 HRESULT WINAPI MFInitAttributesFromBlob(IMFAttributes *dest, const UINT8 *buffer, UINT size)
@@ -7617,6 +7627,19 @@ HRESULT WINAPI CreatePropertyStore(IPropertyStore **store)
     *store = &object->IPropertyStore_iface;
 
     return S_OK;
+}
+
+/***********************************************************************
+ *      DestroyPropVariant (mfplat.@)
+ */
+HRESULT WINAPI DestroyPropVariant(PROPVARIANT *pv)
+{
+    FIXME("%p stub!\n", pv);
+
+    if (!pv)
+        return E_POINTER;
+
+    return E_NOTIMPL;
 }
 
 struct dxgi_device_manager

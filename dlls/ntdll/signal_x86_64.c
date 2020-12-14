@@ -318,6 +318,8 @@ static inline struct amd64_thread_data *amd64_thread_data(void)
     return (struct amd64_thread_data *)NtCurrentTeb()->SystemReserved2;
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+
 /***********************************************************************
  * Definitions for Win32 unwind tables
  */
@@ -3183,6 +3185,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3352,6 +3355,12 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )
 {

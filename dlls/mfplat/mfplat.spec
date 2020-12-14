@@ -11,7 +11,7 @@
 @ stub CopyPropVariant
 @ stub CreatePropVariant
 @ stdcall CreatePropertyStore(ptr)
-@ stub DestroyPropVariant
+@ stdcall DestroyPropVariant(ptr)
 @ stub GetAMSubtypeFromD3DFormat
 @ stub GetD3DFormatFromMFSubtype
 @ stub LFGetGlobalPool
@@ -89,7 +89,7 @@
 @ stub MFGetAdaptersAddresses
 @ stdcall MFGetAttributesAsBlob(ptr ptr long)
 @ stdcall MFGetAttributesAsBlobSize(ptr ptr)
-@ stub MFGetConfigurationDWORD
+@ stdcall MFGetConfigurationDWORD(ptr ptr ptr)
 @ stub MFGetConfigurationPolicy
 @ stub MFGetConfigurationStore
 @ stub MFGetConfigurationString

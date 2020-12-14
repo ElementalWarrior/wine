@@ -1197,6 +1197,109 @@ CHAR * WINAPI RtlIpv4AddressToStringA(const IN_ADDR *pin, LPSTR buffer)
 }
 
 /***********************************************************************
+ * RtlIpv6AddressToStringExA [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlIpv6AddressToStringExA(const IN6_ADDR *address, ULONG scope, USHORT port, char *str, ULONG *len)
+{
+    char buffer[64];
+    int buffer_len;
+    NTSTATUS ret;
+
+    FIXME("(%p %u %u %p %p): semi-stub\n", address, scope, port, str, len);
+
+    if (!address || !str || !len)
+        return STATUS_INVALID_PARAMETER;
+
+    if (scope && port)
+    {
+        buffer_len = sprintf(buffer, "[%x:%x:%x:%x:%x:%x:%x:%x%%%u]:%u",
+                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
+                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
+                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
+                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
+                             scope, ntohs(port));
+    }
+    else if (scope)
+    {
+        buffer_len = sprintf(buffer, "%x:%x:%x:%x:%x:%x:%x:%x%%%u",
+                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
+                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
+                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
+                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
+                             scope);
+    }
+    else if (port)
+    {
+        buffer_len = sprintf(buffer, "[%x:%x:%x:%x:%x:%x:%x:%x]:%u",
+                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
+                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
+                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
+                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]),
+                             ntohs(port));
+    }
+    else
+    {
+        buffer_len = sprintf(buffer, "%x:%x:%x:%x:%x:%x:%x:%x",
+                             ntohs(address->u.Word[0]), ntohs(address->u.Word[1]),
+                             ntohs(address->u.Word[2]), ntohs(address->u.Word[3]),
+                             ntohs(address->u.Word[4]), ntohs(address->u.Word[5]),
+                             ntohs(address->u.Word[6]), ntohs(address->u.Word[7]));
+    }
+    buffer[buffer_len] = 0;
+    buffer_len++;
+
+    if (buffer_len <= *len)
+    {
+        strcpy(str, buffer);
+        ret = STATUS_SUCCESS;
+    }
+    else
+    {
+        ret = STATUS_INVALID_PARAMETER;
+    }
+
+    *len = buffer_len;
+    return ret;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringA [NTDLL.@]
+ */
+char * WINAPI RtlIpv6AddressToStringA(const IN6_ADDR *address, char *str)
+{
+    ULONG len = 46;
+    if (!address || !str) return str;
+    str[45] = 0;
+    if (FAILED(RtlIpv6AddressToStringExA(address, 0, 0, str, &len)))
+        return str;
+    return str + len - 1;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringExW [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlIpv6AddressToStringExW(const IN6_ADDR *address, ULONG scope, USHORT port, WCHAR *str, ULONG *len)
+{
+    char cstr[64];
+    NTSTATUS ret = RtlIpv6AddressToStringExA(address, scope, port, cstr, len);
+    if (SUCCEEDED(ret)) RtlMultiByteToUnicodeN(str, *len * sizeof(WCHAR), NULL, cstr, *len);
+    return ret;
+}
+
+/***********************************************************************
+ * RtlIpv6AddressToStringW [NTDLL.@]
+ */
+WCHAR * WINAPI RtlIpv6AddressToStringW(const IN6_ADDR *address, WCHAR *str)
+{
+    ULONG len = 46;
+    if (!address || !str) return str;
+    str[45] = 0;
+    if (FAILED(RtlIpv6AddressToStringExW(address, 0, 0, str, &len)))
+        return str;
+    return str + len - 1;
+}
+
+/***********************************************************************
  * get_pointer_obfuscator (internal)
  */
 static DWORD_PTR get_pointer_obfuscator( void )
