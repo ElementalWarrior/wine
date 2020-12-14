@@ -59,6 +59,7 @@ static BOOL (WINAPI *pRtlDosPathNameToNtPathName_U)(LPCWSTR, PUNICODE_STRING, PW
 static NTSTATUS (WINAPI *pRtlAnsiStringToUnicodeString)(PUNICODE_STRING, PCANSI_STRING, BOOLEAN);
 static BOOL (WINAPI *pSetFileInformationByHandle)(HANDLE, FILE_INFO_BY_HANDLE_CLASS, void*, DWORD);
 static BOOL (WINAPI *pGetQueuedCompletionStatusEx)(HANDLE, OVERLAPPED_ENTRY*, ULONG, ULONG*, DWORD, BOOL);
+static HANDLE (WINAPI *pReOpenFile)(HANDLE, DWORD, DWORD, DWORD);
 static void (WINAPI *pRtlInitAnsiString)(PANSI_STRING,PCSZ);
 static void (WINAPI *pRtlFreeUnicodeString)(PUNICODE_STRING);
 static BOOL (WINAPI *pSetFileCompletionNotificationModes)(HANDLE, UCHAR);
@@ -111,6 +112,7 @@ static void InitFunctionPointers(void)
     pGetFinalPathNameByHandleW = (void *) GetProcAddress(hkernel32, "GetFinalPathNameByHandleW");
     pSetFileInformationByHandle = (void *) GetProcAddress(hkernel32, "SetFileInformationByHandle");
     pGetQueuedCompletionStatusEx = (void *) GetProcAddress(hkernel32, "GetQueuedCompletionStatusEx");
+    pReOpenFile = (void *) GetProcAddress(hkernel32, "ReOpenFile");
     pSetFileCompletionNotificationModes = (void *)GetProcAddress(hkernel32, "SetFileCompletionNotificationModes");
     pFindFirstStreamW = (void *)GetProcAddress(hkernel32, "FindFirstStreamW");
 }
@@ -1167,23 +1169,17 @@ static void test_CopyFileEx(void)
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
-    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
     ok(GetFileAttributesA(dest) != INVALID_FILE_ATTRIBUTES, "file was deleted\n");
 
     hfile = CreateFileA(dest, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         NULL, OPEN_EXISTING, 0, 0);
-    todo_wine
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
-    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
-    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
-    todo_wine
     ok(GetFileAttributesA(dest) == INVALID_FILE_ATTRIBUTES, "file was not deleted\n");
 
     retok = CopyFileExA(source, NULL, copy_progress_cb, hfile, NULL, 0);
@@ -2545,11 +2541,85 @@ static char get_windows_drive(void)
     return windowsdir[0];
 }
 
+struct
+{
+    const char *path;
+    BOOL expected;
+}
+static const invalid_char_tests[] =
+{
+    { "./test-dir",                     TRUE },
+    { "./test-dir/",                    FALSE },
+    { ".\\test-dir",                    TRUE },
+    { ".\\test-dir\\",                  FALSE },
+    { "/>test-dir",                     FALSE },
+    { "<\"test->dir",                   FALSE },
+    { "<test->dir",                     FALSE },
+    { "><test->dir",                    FALSE },
+    { ">>test-dir",                     FALSE },
+    { ">test->dir",                     FALSE },
+    { ">test-dir",                      FALSE },
+    { "\"test-dir\"",                   FALSE },
+    { "\"test-file\"",                  FALSE },
+    { "test-/>dir",                     FALSE },
+    { "test-dir/",                      FALSE },
+    { "test-dir//",                     FALSE },
+    { "test-dir/:",                     FALSE },
+    { "test-dir/<",                     TRUE },
+    { "test-dir/>",                     TRUE },
+    { "test-dir/\"",                    TRUE },
+    { "test-dir/\\",                    FALSE },
+    { "test-dir/|",                     FALSE },
+    { "test-dir<",                      TRUE },
+    { "test-dir</",                     FALSE },
+    { "test-dir<<",                     TRUE },
+    { "test-dir<<<><><>\"\"\"\"<<<>",   TRUE },
+    { "test-dir<>",                     TRUE },
+    { "test-dir<\"",                    TRUE },
+    { "test-dir>",                      TRUE },
+    { "test-dir>/",                     FALSE },
+    { "test-dir><",                     TRUE },
+    { "test-dir>>",                     TRUE },
+    { "test-dir>\"",                    TRUE },
+    { "test-dir\"",                     TRUE },
+    { "test-dir\"/",                    FALSE },
+    { "test-dir\"<",                    TRUE },
+    { "test-dir\">",                    TRUE },
+    { "test-dir\"\"",                   TRUE },
+    { "test-dir\"\"\"\"\"",             TRUE },
+    { "test-dir\\",                     FALSE },
+    { "test-dir\\/",                    FALSE },
+    { "test-dir\\<",                    TRUE },
+    { "test-dir\\>",                    TRUE },
+    { "test-dir\\\"",                   TRUE },
+    { "test-dir\\\\",                   FALSE },
+    { "test-file/",                     FALSE },
+    { "test-file/<",                    FALSE },
+    { "test-file/>",                    FALSE },
+    { "test-file/\"",                   FALSE },
+    { "test-file<",                     TRUE },
+    { "test-file<<",                    TRUE },
+    { "test-file<>",                    TRUE },
+    { "test-file<\"",                   TRUE },
+    { "test-file>",                     TRUE },
+    { "test-file><",                    TRUE },
+    { "test-file>>",                    TRUE },
+    { "test-file>\"",                   TRUE },
+    { "test-file\"",                    TRUE },
+    { "test-file\"<",                   TRUE },
+    { "test-file\">",                   TRUE },
+    { "test-file\"\"",                  TRUE },
+    { "test-file\\",                    FALSE },
+    { "test-file\\<",                   FALSE },
+    { "test-file\\>",                   FALSE },
+    { "test-file\\\"",                  FALSE },
+};
+
 static void test_FindFirstFileA(void)
 {
     HANDLE handle;
     WIN32_FIND_DATAA data;
-    int err;
+    int err, i;
     char buffer[5] = "C:\\";
     char buffer2[100];
     char nonexistent[MAX_PATH];
@@ -2717,6 +2787,30 @@ static void test_FindFirstFileA(void)
     err = GetLastError();
     ok ( handle == INVALID_HANDLE_VALUE, "FindFirstFile on %s should fail\n", buffer2 );
     ok ( err == ERROR_PATH_NOT_FOUND, "Bad Error number %d\n", err );
+
+    /* try FindFirstFileA with invalid characters */
+    CreateDirectoryA("test-dir", NULL);
+    _lclose(_lcreat("test-file", 0));
+
+    for (i = 0; i < sizeof(invalid_char_tests) / sizeof(invalid_char_tests[0]); i++)
+    {
+        handle = FindFirstFileA(invalid_char_tests[i].path, &data);
+        if (invalid_char_tests[i].expected)
+        {
+            ok(handle != INVALID_HANDLE_VALUE, "FindFirstFileA on %s should succeed\n",
+               invalid_char_tests[i].path);
+        }
+        else
+        {
+            ok(handle == INVALID_HANDLE_VALUE, "FindFirstFileA on %s should fail\n",
+               invalid_char_tests[i].path);
+        }
+        if (handle != INVALID_HANDLE_VALUE)
+            FindClose(handle);
+    }
+
+    DeleteFileA("test-file");
+    RemoveDirectoryA("test-dir");
 }
 
 static void test_FindNextFileA(void)
@@ -4410,6 +4504,50 @@ static void test_SetFileValidData(void)
     DeleteFileA(filename);
 }
 
+static void test_ReOpenFile(void)
+{
+    static WCHAR prefix[] = {'R','e','O','p','e','n','F','i','l','e','\0'};
+    WCHAR temp_path[MAX_PATH], test_path[MAX_PATH];
+    HANDLE file, h;
+    DWORD count;
+    UINT ret;
+
+    if (!pReOpenFile)
+    {
+        win_skip("ReOpenFile is missing\n");
+        return;
+    }
+
+    /* Test calling with invalid handle */
+    SetLastError(0xcafecafe);
+    h = pReOpenFile(0xfafa, GENERIC_WRITE, FILE_SHARE_WRITE, FILE_FLAG_DELETE_ON_CLOSE);
+    ok(h == INVALID_HANDLE_VALUE, "Expected INVALID_HANDLE_VALUE, got %u\n", h);
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "Expected ERROR_INVALID_HANDLE, got %u\n", GetLastError());
+
+    count = GetTempPathW(MAX_PATH, temp_path);
+    ok(count, "Failed to get temp path, error %u\n", GetLastError());
+    ret = GetTempFileNameW(temp_path, prefix, 0, test_path);
+    ok(ret != 0, "GetTempFileNameW error %u\n", GetLastError());
+
+    file = CreateFileW(test_path, GENERIC_WRITE, FILE_SHARE_WRITE, NULL,
+                       CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFileW error %u\n", GetLastError());
+    trace("Created file %s\n", wine_dbgstr_w(test_path));
+
+    SetLastError(0xcafecafe);
+    h = pReOpenFile(file, GENERIC_WRITE, FILE_SHARE_WRITE, FILE_ATTRIBUTE_NORMAL);
+    ok(h == INVALID_HANDLE_VALUE, "ReOpenFile returned unexpected handle %u\n",h);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    /* Logos Bible calls ReOpenFile with flags being 0, what Flags/Attributes is that?????? */
+    SetLastError(0xcafecafe);
+    h = pReOpenFile(file, GENERIC_WRITE, FILE_SHARE_WRITE, 0);
+    ok(h != INVALID_HANDLE_VALUE, "ReOpenFile returned unexpected INVALID_HANDLE_VALUE\n");
+    ok(GetLastError() == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", GetLastError());
+
+    CloseHandle(file);
+}
+
 static void test_WriteFileGather(void)
 {
     char temp_path[MAX_PATH], filename[MAX_PATH];
@@ -5469,6 +5607,7 @@ START_TEST(file)
     test_RemoveDirectory();
     test_ReplaceFileA();
     test_ReplaceFileW();
+    test_ReOpenFile();
     test_GetFileInformationByHandleEx();
     test_OpenFileById();
     test_SetFileValidData();

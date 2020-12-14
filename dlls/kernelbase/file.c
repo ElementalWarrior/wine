@@ -43,6 +43,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
 
+extern DWORD WINAPI GetFinalPathNameByHandleW(HANDLE,LPWSTR,DWORD,DWORD);
+
 const WCHAR windows_dir[] = {'C',':','\\','w','i','n','d','o','w','s',0};
 const WCHAR system_dir[] = {'C',':','\\','w','i','n','d','o','w','s','\\','s','y','s','t','e','m','3','2',0};
 
@@ -2144,8 +2146,33 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenFileById( HANDLE handle, LPFILE_ID_DESCRIPTO
  */
 HANDLE WINAPI /* DECLSPEC_HOTPATCH */ ReOpenFile( HANDLE handle, DWORD access, DWORD sharing, DWORD flags )
 {
-    FIXME( "(%p, %d, %d, %d): stub\n", handle, access, sharing, flags );
-    return INVALID_HANDLE_VALUE;
+    WCHAR name[MAX_PATH];
+    DWORD size = MAX_PATH;
+    HANDLE h;
+    DWORD  ret;
+    DWORD mask = 0xFFFFF;
+
+    FIXME("(%p, %d, %d, %d): mostly stub\n", handle, access, sharing, flags);
+
+    if(flags & mask) /* FILE_ATTRIBUTE_* flags are invalid */
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    ret = GetFinalPathNameByHandleW(handle, name, size, VOLUME_NAME_DOS);
+
+    if(ret)
+        TRACE("Trying to reopen file %s\n", debugstr_w(name));
+    else
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    h = CreateFileW(name, access, sharing, NULL, OPEN_EXISTING, flags, NULL);
+
+    return h;
 }
 
 

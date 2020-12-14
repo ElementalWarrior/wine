@@ -444,6 +444,7 @@
 @ stdcall InsertMenuItemA(long long long ptr)
 @ stdcall InsertMenuItemW(long long long ptr)
 @ stdcall InsertMenuW(long long long long ptr)
+@ stdcall InternalGetWindowIcon(long long)
 @ stdcall InternalGetWindowText(long long long)
 @ stdcall IntersectRect(ptr ptr ptr)
 @ stdcall InvalidateRect(long ptr long)
@@ -496,7 +497,7 @@
 @ stdcall LoadImageA(long str long long long long)
 @ stdcall LoadImageW(long wstr long long long long)
 @ stdcall LoadKeyboardLayoutA(str long)
-# @ stub LoadKeyboardLayoutEx
+@ stdcall LoadKeyboardLayoutEx(long wstr long)
 @ stdcall LoadKeyboardLayoutW(wstr long)
 @ stdcall LoadLocalFonts()
 @ stdcall LoadMenuA(long str)

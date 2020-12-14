@@ -355,6 +355,7 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 #endif
 }
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
 /***********************************************************************
  * Definitions for Win32 unwind tables
@@ -1699,11 +1700,6 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
     context->SegFs  = FS_sig(sigcontext);
     context->SegGs  = GS_sig(sigcontext);
     context->EFlags = EFL_sig(sigcontext);
-#ifdef DS_sig
-    context->SegDs  = DS_sig(sigcontext);
-#else
-    __asm__("movw %%ds,%0" : "=m" (context->SegDs));
-#endif
 #ifdef ES_sig
     context->SegEs  = ES_sig(sigcontext);
 #else
@@ -1714,6 +1710,12 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
 #else
     __asm__("movw %%ss,%0" : "=m" (context->SegSs));
 #endif
+   /* Legends of Runeterra depends on having SegDs == SegSs in an exception
+    * handler. Testing shows that Windows returns fixed values from
+    * RtlCaptureContext() and NtGetContextThread() for at least %ds and %es,
+    * regardless of their actual values, and never sets them in
+    * NtSetContextThread(). */
+    context->SegDs  = context->SegSs;
     context->Dr0    = amd64_thread_data()->dr0;
     context->Dr1    = amd64_thread_data()->dr1;
     context->Dr2    = amd64_thread_data()->dr2;
@@ -2519,6 +2521,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     return STATUS_UNHANDLED_EXCEPTION;
 }
 
+NTSTATUS WINAPI __syscall_NtContinue( CONTEXT *context, BOOLEAN alert );
 
 static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
@@ -2581,7 +2584,7 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     }
 
 done:
-    return NtSetContextThread( GetCurrentThread(), context );
+    return __syscall_NtContinue( context, FALSE );
 }
 
 
@@ -3133,6 +3136,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3302,6 +3306,12 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+}
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )
 {
