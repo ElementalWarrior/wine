@@ -41,6 +41,7 @@ extern "C" {
 
 /* configuration */
 
+extern const void *wine_get_patches(void);
 extern void wine_init_argv0_path( const char *argv0 );
 extern void wine_exec_wine_binary( const char *name, char **argv, const char *env_var );
 

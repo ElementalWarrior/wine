@@ -89,6 +89,7 @@ static const struct object_ops process_ops =
     NULL,                        /* unlink_name */
     no_open_file,                /* open_file */
     process_get_kernel_obj_list, /* get_kernel_obj_list */
+    no_alloc_handle,             /* alloc_handle */
     no_close_handle,             /* close_handle */
     process_destroy              /* destroy */
 };
@@ -139,6 +140,7 @@ static const struct object_ops startup_info_ops =
     NULL,                          /* unlink_name */
     no_open_file,                  /* open_file */
     no_kernel_obj_list,            /* get_kernel_obj_list */
+    no_alloc_handle,               /* alloc_handle */
     no_close_handle,               /* close_handle */
     startup_info_destroy           /* destroy */
 };
@@ -184,6 +186,7 @@ static const struct object_ops job_ops =
     default_unlink_name,           /* unlink_name */
     no_open_file,                  /* open_file */
     no_kernel_obj_list,            /* get_kernel_obj_list */
+    no_alloc_handle,               /* alloc_handle */
     job_close_handle,              /* close_handle */
     job_destroy                    /* destroy */
 };
@@ -218,8 +221,7 @@ static struct job *get_job_obj( struct process *process, obj_handle_t handle, un
 
 static struct object_type *job_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'J','o','b'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Job, sizeof(type_Job) };
     return get_object_type( &str );
 };
 
@@ -577,7 +579,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
                                        : alloc_handle_table( process, 0 );
         /* Note: for security reasons, starting a new process does not attempt
          * to use the current impersonation token for the new process */
-        process->token = token_duplicate( parent->token, TRUE, 0, NULL );
+        process->token = token_duplicate( parent->token, TRUE, 0, NULL, NULL, 0, NULL, 0 );
         process->affinity = parent->affinity;
     }
     if (!process->handles || !process->token) goto error;
@@ -649,8 +651,7 @@ static void process_dump( struct object *obj, int verbose )
 
 static struct object_type *process_get_type( struct object *obj )
 {
-    static const WCHAR name[] = {'P','r','o','c','e','s','s'};
-    static const struct unicode_str str = { name, sizeof(name) };
+    static const struct unicode_str str = { type_Process, sizeof(type_Process) };
     return get_object_type( &str );
 }
 
@@ -893,7 +894,6 @@ static void process_killed( struct process *process )
 
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
-    if (!process->is_system) close_process_desktop( process );
     process->winstation = 0;
     process->desktop = 0;
     close_process_handles( process );

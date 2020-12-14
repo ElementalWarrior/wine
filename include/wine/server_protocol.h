@@ -296,6 +296,13 @@ struct hardware_msg_data
             int            y;
             unsigned int   data;
         } mouse;
+        struct
+        {
+            int            type;
+            obj_handle_t   device;
+            unsigned int   length;
+
+        } hid;
     } rawinput;
 };
 
@@ -342,7 +349,19 @@ typedef union
         unsigned int   msg;
         lparam_t       lparam;
     } hw;
+    struct
+    {
+        int            type;
+        obj_handle_t   device;
+        unsigned char  usage_page;
+        unsigned char  usage;
+        unsigned int   length;
+    } hid;
 } hw_input_t;
+#define HW_INPUT_MOUSE    0
+#define HW_INPUT_KEYBOARD 1
+#define HW_INPUT_HARDWARE 2
+#define HW_INPUT_HID      3
 
 typedef union
 {
@@ -1176,6 +1195,16 @@ struct close_handle_reply
 };
 
 
+struct socket_cleanup_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct socket_cleanup_reply
+{
+    struct reply_header __header;
+};
+
 
 struct set_handle_info_request
 {
@@ -1563,6 +1592,8 @@ struct get_handle_unix_name_request
 {
     struct request_header __header;
     obj_handle_t   handle;
+    int            nofollow;
+    char __pad_20[4];
 };
 struct get_handle_unix_name_reply
 {
@@ -1742,6 +1773,18 @@ struct accept_into_socket_reply
 
 
 
+struct reuse_socket_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct reuse_socket_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct set_socket_event_request
 {
     struct request_header __header;
@@ -1789,6 +1832,7 @@ struct get_socket_info_reply
     int type;
     int protocol;
     char __pad_20[4];
+    timeout_t connect_time;
 };
 
 
@@ -2833,6 +2877,7 @@ struct send_hardware_message_request
     user_handle_t   win;
     hw_input_t      input;
     unsigned int    flags;
+    /* VARARG(data,bytes); */
     char __pad_52[4];
 };
 struct send_hardware_message_reply
@@ -2847,6 +2892,8 @@ struct send_hardware_message_reply
     char __pad_28[4];
 };
 #define SEND_HWMSG_INJECTED    0x01
+#define SEND_HWMSG_RAWINPUT    0x02
+#define SEND_HWMSG_WINDOW      0x04
 
 
 
@@ -3525,6 +3572,19 @@ struct set_window_region_request
     char __pad_20[4];
 };
 struct set_window_region_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct set_layer_region_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    /* VARARG(region,rectangles); */
+};
+struct set_layer_region_reply
 {
     struct reply_header __header;
 };
@@ -4548,6 +4608,22 @@ struct duplicate_token_reply
     char __pad_12[4];
 };
 
+struct filter_token_request
+{
+    struct request_header __header;
+    obj_handle_t  handle;
+    unsigned int  flags;
+    data_size_t   privileges_size;
+    /* VARARG(privileges,LUID_AND_ATTRIBUTES,privileges_size); */
+    /* VARARG(disable_sids,SID); */
+};
+struct filter_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t  new_handle;
+    char __pad_12[4];
+};
+
 struct access_check_request
 {
     struct request_header __header;
@@ -4656,6 +4732,7 @@ struct handle_info
     process_id_t owner;
     obj_handle_t handle;
     unsigned int access;
+    unsigned int type;
 };
 
 
@@ -4832,6 +4909,21 @@ struct get_object_type_request
     obj_handle_t   handle;
 };
 struct get_object_type_reply
+{
+    struct reply_header __header;
+    unsigned int   index;
+    data_size_t    total;
+    /* VARARG(type,unicode_str); */
+};
+
+
+
+struct get_object_type_by_index_request
+{
+    struct request_header __header;
+    unsigned int   index;
+};
+struct get_object_type_by_index_reply
 {
     struct reply_header __header;
     data_size_t    total;
@@ -5197,6 +5289,19 @@ struct set_fd_name_info_reply
 
 
 
+struct set_fd_eof_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    file_pos_t   eof;
+};
+struct set_fd_eof_info_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct get_window_layered_info_request
 {
     struct request_header __header;
@@ -5495,6 +5600,7 @@ enum request
     REQ_queue_apc,
     REQ_get_apc_result,
     REQ_close_handle,
+    REQ_socket_cleanup,
     REQ_set_handle_info,
     REQ_dup_handle,
     REQ_make_temporary,
@@ -5529,6 +5635,7 @@ enum request
     REQ_create_socket,
     REQ_accept_socket,
     REQ_accept_into_socket,
+    REQ_reuse_socket,
     REQ_set_socket_event,
     REQ_get_socket_event,
     REQ_get_socket_info,
@@ -5636,6 +5743,7 @@ enum request
     REQ_get_surface_region,
     REQ_get_window_region,
     REQ_set_window_region,
+    REQ_set_layer_region,
     REQ_get_update_region,
     REQ_update_window_zorder,
     REQ_redraw_window,
@@ -5696,6 +5804,7 @@ enum request
     REQ_get_token_privileges,
     REQ_check_token_privileges,
     REQ_duplicate_token,
+    REQ_filter_token,
     REQ_access_check,
     REQ_get_token_sid,
     REQ_get_token_groups,
@@ -5714,6 +5823,7 @@ enum request
     REQ_query_symlink,
     REQ_get_object_info,
     REQ_get_object_type,
+    REQ_get_object_type_by_index,
     REQ_get_token_impersonation_level,
     REQ_allocate_locally_unique_id,
     REQ_create_device_manager,
@@ -5737,6 +5847,7 @@ enum request
     REQ_set_fd_completion_mode,
     REQ_set_fd_disp_info,
     REQ_set_fd_name_info,
+    REQ_set_fd_eof_info,
     REQ_get_window_layered_info,
     REQ_set_window_layered_info,
     REQ_alloc_user_handle,
@@ -5785,6 +5896,7 @@ union generic_request
     struct queue_apc_request queue_apc_request;
     struct get_apc_result_request get_apc_result_request;
     struct close_handle_request close_handle_request;
+    struct socket_cleanup_request socket_cleanup_request;
     struct set_handle_info_request set_handle_info_request;
     struct dup_handle_request dup_handle_request;
     struct make_temporary_request make_temporary_request;
@@ -5819,6 +5931,7 @@ union generic_request
     struct create_socket_request create_socket_request;
     struct accept_socket_request accept_socket_request;
     struct accept_into_socket_request accept_into_socket_request;
+    struct reuse_socket_request reuse_socket_request;
     struct set_socket_event_request set_socket_event_request;
     struct get_socket_event_request get_socket_event_request;
     struct get_socket_info_request get_socket_info_request;
@@ -5926,6 +6039,7 @@ union generic_request
     struct get_surface_region_request get_surface_region_request;
     struct get_window_region_request get_window_region_request;
     struct set_window_region_request set_window_region_request;
+    struct set_layer_region_request set_layer_region_request;
     struct get_update_region_request get_update_region_request;
     struct update_window_zorder_request update_window_zorder_request;
     struct redraw_window_request redraw_window_request;
@@ -5986,6 +6100,7 @@ union generic_request
     struct get_token_privileges_request get_token_privileges_request;
     struct check_token_privileges_request check_token_privileges_request;
     struct duplicate_token_request duplicate_token_request;
+    struct filter_token_request filter_token_request;
     struct access_check_request access_check_request;
     struct get_token_sid_request get_token_sid_request;
     struct get_token_groups_request get_token_groups_request;
@@ -6004,6 +6119,7 @@ union generic_request
     struct query_symlink_request query_symlink_request;
     struct get_object_info_request get_object_info_request;
     struct get_object_type_request get_object_type_request;
+    struct get_object_type_by_index_request get_object_type_by_index_request;
     struct get_token_impersonation_level_request get_token_impersonation_level_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
     struct create_device_manager_request create_device_manager_request;
@@ -6027,6 +6143,7 @@ union generic_request
     struct set_fd_completion_mode_request set_fd_completion_mode_request;
     struct set_fd_disp_info_request set_fd_disp_info_request;
     struct set_fd_name_info_request set_fd_name_info_request;
+    struct set_fd_eof_info_request set_fd_eof_info_request;
     struct get_window_layered_info_request get_window_layered_info_request;
     struct set_window_layered_info_request set_window_layered_info_request;
     struct alloc_user_handle_request alloc_user_handle_request;
@@ -6073,6 +6190,7 @@ union generic_reply
     struct queue_apc_reply queue_apc_reply;
     struct get_apc_result_reply get_apc_result_reply;
     struct close_handle_reply close_handle_reply;
+    struct socket_cleanup_reply socket_cleanup_reply;
     struct set_handle_info_reply set_handle_info_reply;
     struct dup_handle_reply dup_handle_reply;
     struct make_temporary_reply make_temporary_reply;
@@ -6107,6 +6225,7 @@ union generic_reply
     struct create_socket_reply create_socket_reply;
     struct accept_socket_reply accept_socket_reply;
     struct accept_into_socket_reply accept_into_socket_reply;
+    struct reuse_socket_reply reuse_socket_reply;
     struct set_socket_event_reply set_socket_event_reply;
     struct get_socket_event_reply get_socket_event_reply;
     struct get_socket_info_reply get_socket_info_reply;
@@ -6214,6 +6333,7 @@ union generic_reply
     struct get_surface_region_reply get_surface_region_reply;
     struct get_window_region_reply get_window_region_reply;
     struct set_window_region_reply set_window_region_reply;
+    struct set_layer_region_reply set_layer_region_reply;
     struct get_update_region_reply get_update_region_reply;
     struct update_window_zorder_reply update_window_zorder_reply;
     struct redraw_window_reply redraw_window_reply;
@@ -6274,6 +6394,7 @@ union generic_reply
     struct get_token_privileges_reply get_token_privileges_reply;
     struct check_token_privileges_reply check_token_privileges_reply;
     struct duplicate_token_reply duplicate_token_reply;
+    struct filter_token_reply filter_token_reply;
     struct access_check_reply access_check_reply;
     struct get_token_sid_reply get_token_sid_reply;
     struct get_token_groups_reply get_token_groups_reply;
@@ -6292,6 +6413,7 @@ union generic_reply
     struct query_symlink_reply query_symlink_reply;
     struct get_object_info_reply get_object_info_reply;
     struct get_object_type_reply get_object_type_reply;
+    struct get_object_type_by_index_reply get_object_type_by_index_reply;
     struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
     struct create_device_manager_reply create_device_manager_reply;
@@ -6315,6 +6437,7 @@ union generic_reply
     struct set_fd_completion_mode_reply set_fd_completion_mode_reply;
     struct set_fd_disp_info_reply set_fd_disp_info_reply;
     struct set_fd_name_info_reply set_fd_name_info_reply;
+    struct set_fd_eof_info_reply set_fd_eof_info_reply;
     struct get_window_layered_info_reply get_window_layered_info_reply;
     struct set_window_layered_info_reply set_window_layered_info_reply;
     struct alloc_user_handle_reply alloc_user_handle_reply;
@@ -6337,7 +6460,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 640
+#define SERVER_PROTOCOL_VERSION 641
 
 /* ### protocol_version end ### */
 

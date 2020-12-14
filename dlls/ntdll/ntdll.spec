@@ -208,7 +208,7 @@
 # @ stub NtEnumerateSystemEnvironmentValuesEx
 @ stdcall -syscall NtEnumerateValueKey(long long long ptr long ptr)
 @ stub NtExtendSection
-# @ stub NtFilterToken
+@ stdcall -syscall NtFilterToken(long long ptr ptr ptr ptr)
 @ stdcall -syscall NtFindAtom(ptr long ptr)
 @ stdcall -syscall NtFlushBuffersFile(long ptr)
 @ stdcall -syscall NtFlushInstructionCache(long ptr long)
@@ -886,6 +886,7 @@
 @ stub RtlQueryPropertyNames
 @ stub RtlQueryPropertySet
 @ stdcall RtlQueryRegistryValues(long ptr ptr ptr ptr)
+@ stdcall RtlQueryRegistryValuesEx(long ptr ptr ptr ptr)
 @ stub RtlQuerySecurityObject
 @ stub RtlQueryTagHeap
 @ stdcall RtlQueryTimeZoneInformation(ptr)
@@ -1113,6 +1114,7 @@
 @ stdcall WinSqmIsOptedIn()
 @ stdcall WinSqmSetDWORD(ptr long long)
 @ stdcall WinSqmStartSession(ptr long long)
+@ extern Wow64Transition
 @ stdcall -private -syscall ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
 @ stdcall -private -syscall ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
 @ stdcall -private -syscall ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
@@ -1582,6 +1584,7 @@
 
 # Server interface
 @ cdecl -syscall -norelay wine_server_call(ptr)
+@ cdecl -syscall wine_server_remove_fds_from_cache_by_type(long)
 @ cdecl -syscall wine_server_fd_to_handle(long long long ptr)
 @ cdecl -syscall wine_server_handle_to_fd(long long ptr ptr)
 @ cdecl -syscall wine_server_release_fd(long long)
