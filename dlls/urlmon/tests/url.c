@@ -32,6 +32,7 @@
 #include "urlmon.h"
 #include "wininet.h"
 #include "mshtml.h"
+#include "shlwapi.h"
 
 #include "wine/test.h"
 
@@ -191,6 +192,7 @@ static BOOL async_switch = FALSE;
 static BOOL strict_bsc_qi;
 static DWORD bindtest_flags;
 static const char *test_file;
+static const char *ftp_url;
 
 static WCHAR file_url[INTERNET_MAX_URL_LENGTH], current_url[INTERNET_MAX_URL_LENGTH];
 
@@ -2905,7 +2907,10 @@ static void init_bind_test(int protocol, DWORD flags, DWORD t)
         url_a = (flags & BINDTEST_INVALID_CN) ? "https://4.15.184.77/favicon.ico" : "https://test.winehq.org/tests/hello.html";
         break;
     case FTP_TEST:
-        url_a = "ftp://ftp.winehq.org/welcome.msg";
+        if(!ftp_url)
+            url_a = "ftp://ftp.winehq.org/welcome.msg";
+        else
+            url_a = ftp_url;
         break;
     default:
         url_a = "winetest:test";
@@ -2968,6 +2973,13 @@ static void test_BindToStorage(int protocol, DWORD flags, DWORD t)
     ok(hres == S_OK, "failed to create moniker: %08x\n", hres);
     if(FAILED(hres))
         return;
+
+    if(protocol == FTP_TEST)
+    {
+        /* FTP url dont have any escape characters, so convert the url to what is expected */
+        DWORD size = 0;
+        UrlUnescapeW(current_url, NULL, &size, URL_UNESCAPE_INPLACE);
+    }
 
     hres = IMoniker_QueryInterface(mon, &IID_IBinding, (void**)&bind);
     ok(hres == E_NOINTERFACE, "IMoniker should not have IBinding interface\n");
@@ -4142,6 +4154,9 @@ START_TEST(url)
         bindf |= BINDF_NOWRITECACHE;
 
         trace("ftp test...\n");
+        test_BindToStorage(FTP_TEST, 0, TYMED_ISTREAM);
+
+        ftp_url = "ftp://ftp.winehq.org/welcome%2emsg";
         test_BindToStorage(FTP_TEST, 0, TYMED_ISTREAM);
 
         trace("test failures...\n");

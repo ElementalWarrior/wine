@@ -3,6 +3,7 @@ IMPORTS   = advapi32 setupapi shell32 uuid user32
 
 C_SRCS = \
 	devinst.c \
+	dialog.c \
 	diskspace.c \
 	install.c \
 	misc.c \
