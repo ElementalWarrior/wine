@@ -96,6 +96,13 @@ typedef struct
     BYTE Reserved4[96];
 } XMM_SAVE_AREA32;
 
+#ifdef __GNUC__
+/* It is not valid to access %gs before init_handler has been called. */
+#define SIGNALFUNC __attribute__((__optimize__("-fno-stack-protector")))
+#else
+#define SIGNALFUNC
+#endif
+
 /***********************************************************************
  * signal context platform-specific definitions
  */
@@ -427,6 +434,48 @@ static size_t signal_stack_size;
 
 static wine_signal_handler handlers[256];
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+extern NTSTATUS WINAPI __syscall_NtGetContextThread( HANDLE handle, CONTEXT *context );
+
+/* convert from straight ASCII to Unicode without depending on the current codepage */
+static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
+
+static void* WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+    HMODULE base;
+    WCHAR *moduleW;
+    void *proc = NULL;
+    DWORD len = strlen(module);
+
+    TRACE( "(%s, %u)\n", debugstr_a(module), ord );
+
+    if (!(moduleW = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    ascii_to_unicode( moduleW, module, len );
+    moduleW[ len ] = 0;
+    RtlInitUnicodeString( &name, moduleW );
+
+    status = LdrGetDllHandle( NULL, 0, &name, &base );
+    if (status == STATUS_DLL_NOT_FOUND)
+        status = LdrLoadDll( NULL, 0, &name, &base );
+    if (status == STATUS_SUCCESS)
+        status = LdrAddRefDll( LDR_ADDREF_DLL_PIN, base );
+    if (status == STATUS_SUCCESS)
+        status = LdrGetProcedureAddress( base, NULL, ord, &proc );
+
+    if (status)
+        FIXME( "No procedure address found for %s.#%u, status %x\n", debugstr_a(module), ord, status );
+
+    RtlFreeHeap( GetProcessHeap(), 0, moduleW );
+    return proc;
+}
+
 enum i386_trap_code
 {
     TRAP_x86_UNKNOWN    = -1,  /* Unknown fault (TRAP_sig not defined) */
@@ -570,7 +619,7 @@ static inline int has_fpux(void)
  *
  * Get the current teb based on the stack pointer.
  */
-static inline TEB *get_current_teb(void)
+static inline TEB * SIGNALFUNC get_current_teb(void)
 {
     unsigned long esp;
     __asm__("movl %%esp,%0" : "=g" (esp) );
@@ -810,7 +859,7 @@ __ASM_GLOBAL_FUNC( clear_alignment_flag,
  * Handler initialization when the full context is not needed.
  * Return the stack pointer to use for pushing the exception data.
  */
-static inline void *init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *gs )
+static inline void * SIGNALFUNC init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *gs )
 {
     TEB *teb = get_current_teb();
 
@@ -846,7 +895,7 @@ static inline void *init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *
          * SS is still non-system segment. This is why both CS and SS
          * are checked.
          */
-        return teb->WOW32Reserved;
+        return teb->SystemReserved1[0];
     }
     return (void *)(ESP_sig(sigcontext) & ~3);
 }
@@ -1140,12 +1189,16 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
                    "movl 0xc4(%ecx),%eax\n\t" /* Esp */
                    "leal -4*4(%eax),%eax\n\t"
                    "movl 0xc0(%ecx),%edx\n\t" /* EFlags */
+                   ".byte 0x36\n\t"
                    "movl %edx,3*4(%eax)\n\t"
                    "movl 0xbc(%ecx),%edx\n\t" /* SegCs */
+                   ".byte 0x36\n\t"
                    "movl %edx,2*4(%eax)\n\t"
                    "movl 0xb8(%ecx),%edx\n\t" /* Eip */
+                   ".byte 0x36\n\t"
                    "movl %edx,1*4(%eax)\n\t"
                    "movl 0xb0(%ecx),%edx\n\t" /* Eax */
+                   ".byte 0x36\n\t"
                    "movl %edx,0*4(%eax)\n\t"
                    "pushl 0x98(%ecx)\n\t"     /* SegDs */
                    "movl 0xa8(%ecx),%edx\n\t" /* Edx */
@@ -1448,7 +1501,7 @@ NTSTATUS CDECL DECLSPEC_HIDDEN __regs_NtGetContextThread( DWORD edi, DWORD esi, 
         {
             context->Ebp    = ebp;
             context->Esp    = (DWORD)&retaddr;
-            context->Eip    = *(&edi - 1);
+            context->Eip    = (DWORD)__syscall_NtGetContextThread + 18;
             context->SegCs  = wine_get_cs();
             context->SegSs  = wine_get_ss();
             context->EFlags = eflags;
@@ -1594,6 +1647,14 @@ static inline BOOL handle_interrupt( unsigned int interrupt, EXCEPTION_RECORD *r
         rec->ExceptionInformation[0] = context->Eax;
         rec->ExceptionInformation[1] = context->Ecx;
         rec->ExceptionInformation[2] = context->Edx;
+        return TRUE;
+    case 0x2e:
+        context->Eip += 2;
+        rec->ExceptionCode = EXCEPTION_WINE_SYSCALL;
+        rec->ExceptionAddress = (void *)context->Eip;
+        rec->NumberParameters = 2;
+        rec->ExceptionInformation[0] = context->Eax;
+        rec->ExceptionInformation[1] = context->Edx;
         return TRUE;
     default:
         return FALSE;
@@ -1880,7 +1941,7 @@ static EXCEPTION_RECORD *setup_exception_record( ucontext_t *sigcontext, void *s
  * sigcontext so that the return from the signal handler will call
  * the raise function.
  */
-static EXCEPTION_RECORD *setup_exception( ucontext_t *sigcontext, raise_func func )
+static EXCEPTION_RECORD * SIGNALFUNC setup_exception( ucontext_t *sigcontext, raise_func func )
 {
     WORD fs, gs;
     void *stack = init_handler( sigcontext, &fs, &gs );
@@ -1982,6 +2043,11 @@ static void WINAPI raise_segv_exception( EXCEPTION_RECORD *rec, CONTEXT *context
             }
         }
         break;
+    case EXCEPTION_WINE_SYSCALL:
+        FIXME("unimplemented syscall handler for 0x%lx, stack 0x%lx\n",
+              rec->ExceptionInformation[0], rec->ExceptionInformation[1]);
+        context->Eax = STATUS_INVALID_SYSTEM_SERVICE;
+        goto done;
     }
     status = NtRaiseException( rec, context, TRUE );
     raise_status( status, rec );
@@ -2035,11 +2101,36 @@ static void WINAPI raise_generic_exception( EXCEPTION_RECORD *rec, CONTEXT *cont
 
 
 /**********************************************************************
+ *    segv_handler_early
+ *
+ * Handler for SIGSEGV and related errors. Used only during the initialization
+ * of the process to handle virtual faults.
+ */
+static void SIGNALFUNC segv_handler_early( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    WORD fs, gs;
+    ucontext_t *context = sigcontext;
+    init_handler( sigcontext, &fs, &gs );
+
+    switch(get_trap_code(context))
+    {
+    case TRAP_x86_PAGEFLT:  /* Page fault */
+        if (!virtual_handle_fault( siginfo->si_addr, (get_error_code(context) >> 1) & 0x09, TRUE ))
+            return;
+        /* fall-through */
+    default:
+        WINE_ERR( "Got unexpected trap %d during process initialization\n", get_trap_code(context) );
+        abort_thread(1);
+        break;
+    }
+}
+
+/**********************************************************************
  *		segv_handler
  *
  * Handler for SIGSEGV and related errors.
  */
-static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
     EXCEPTION_RECORD *rec;
@@ -2133,7 +2224,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGTRAP.
  */
-static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     ucontext_t *context = sigcontext;
     EXCEPTION_RECORD *rec = setup_exception( context, raise_trap_exception );
@@ -2162,7 +2253,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGFPE.
  */
-static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     CONTEXT *win_context;
     ucontext_t *context = sigcontext;
@@ -2211,7 +2302,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * FIXME: should not be calling external functions on the signal stack.
  */
-static void int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
     init_handler( sigcontext, &fs, &gs );
@@ -2227,7 +2318,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGABRT.
  */
-static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_generic_exception );
     rec->ExceptionCode  = EXCEPTION_WINE_ASSERTION;
@@ -2240,7 +2331,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGQUIT.
  */
-static void quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
     init_handler( sigcontext, &fs, &gs );
@@ -2253,7 +2344,7 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  *
  * Handler for SIGUSR1, used to signal a thread that it got suspended.
  */
-static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void SIGNALFUNC usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     CONTEXT context;
     WORD fs, gs;
@@ -2339,6 +2430,8 @@ NTSTATUS signal_alloc_thread( TEB **teb )
         *teb = addr;
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
+        (*teb)->Spare2 = __wine_fakedll_dispatcher;
         thread_data = (struct x86_thread_data *)(*teb)->SystemReserved2;
         if (!(thread_data->fs = wine_ldt_alloc_fs()))
         {
@@ -2447,6 +2540,34 @@ void signal_init_process(void)
     exit(1);
 }
 
+/**********************************************************************
+ *    signal_init_early
+ */
+void signal_init_early(void)
+{
+    struct sigaction sig_act;
+
+    sig_act.sa_mask = server_block_set;
+    sig_act.sa_flags = SA_SIGINFO | SA_RESTART;
+#ifdef SA_ONSTACK
+    sig_act.sa_flags |= SA_ONSTACK;
+#endif
+#ifdef __ANDROID__
+    sig_act.sa_flags |= SA_RESTORER;
+    sig_act.sa_restorer = rt_sigreturn;
+#endif
+    sig_act.sa_sigaction = segv_handler_early;
+    if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
+    if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
+#ifdef SIGBUS
+    if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
+#endif
+    return;
+
+error:
+    perror("sigaction");
+    exit(1);
+}
 
 /*******************************************************************
  *		RtlUnwind (NTDLL.@)
@@ -2536,6 +2657,7 @@ __ASM_STDCALL_FUNC( RtlUnwind, 16,
                     __ASM_CFI(".cfi_same_value %ebp\n\t")
                     "ret $16" )  /* actually never returns */
 
+NTSTATUS WINAPI __syscall_NtContinue( CONTEXT *context, BOOLEAN alert );
 
 /*******************************************************************
  *		NtRaiseException (NTDLL.@)
@@ -2543,7 +2665,7 @@ __ASM_STDCALL_FUNC( RtlUnwind, 16,
 NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
     NTSTATUS status = raise_exception( rec, context, first_chance );
-    if (status == STATUS_SUCCESS) NtSetContextThread( GetCurrentThread(), context );
+    if (status == STATUS_SUCCESS) __syscall_NtContinue(context, FALSE);
     return status;
 }
 
