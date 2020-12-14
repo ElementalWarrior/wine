@@ -1648,7 +1648,7 @@ static void test_tr2_sys__Stat(void)
         { "tr2_test_dir\\f1",  regular_file, ERROR_SUCCESS, FALSE },
         { "tr2_test_dir\\not_exist_file  ", file_not_found, ERROR_SUCCESS, FALSE },
         { "tr2_test_dir\\??invalid_name>>", file_not_found, ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1_link" ,   regular_file, ERROR_SUCCESS, TRUE },
+        { "tr2_test_dir\\f1_link" ,   regular_file, ERROR_SUCCESS, FALSE },
         { "tr2_test_dir\\dir_link", directory_file, ERROR_SUCCESS, TRUE },
     };
     WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r',0};
@@ -1718,7 +1718,7 @@ static void test_tr2_sys__Stat(void)
     ok(ERROR_SUCCESS == err_code, "tr2_sys__Lstat_wchar(): err_code expect ERROR_SUCCESS, got %d\n", err_code);
 
     if(ret) {
-        todo_wine ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
+        ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
         todo_wine ok(RemoveDirectoryA("tr2_test_dir/dir_link"), "expect tr2_test_dir/dir_link to exist\n");
     }
     ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
@@ -1954,14 +1954,14 @@ static void test_tr2_sys__Symlink(void)
         int last_error;
         MSVCP_bool is_todo;
     } tests[] = {
-        { "f1", "f1_link", ERROR_SUCCESS, FALSE },
-        { "f1", "tr2_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1_link", "tr2_test_dir\\f1_link_link", ERROR_SUCCESS, FALSE },
+        { "f1", "f1_link", ERROR_SUCCESS, TRUE },
+        { "f1", "tr2_test_dir\\f1_link", ERROR_SUCCESS, TRUE },
+        { "tr2_test_dir\\f1_link", "tr2_test_dir\\f1_link_link", ERROR_SUCCESS, TRUE },
         { "tr2_test_dir", "dir_link", ERROR_SUCCESS, FALSE },
         { NULL, "NULL_link", ERROR_INVALID_PARAMETER, FALSE },
         { "f1", NULL, ERROR_INVALID_PARAMETER, FALSE },
         { "not_exist",  "not_exist_link", ERROR_SUCCESS, FALSE },
-        { "f1", "not_exist_dir\\f1_link", ERROR_PATH_NOT_FOUND, TRUE }
+        { "f1", "not_exist_dir\\f1_link", ERROR_PATH_NOT_FOUND, FALSE }
     };
 
     ret = p_tr2_sys__Make_dir("tr2_test_dir");
@@ -1986,18 +1986,21 @@ static void test_tr2_sys__Symlink(void)
         }
 
         ok(errno == 0xdeadbeef, "tr2_sys__Symlink(): test %d errno expect 0xdeadbeef, got %d\n", i+1, errno);
-        todo_wine_if(tests[i].is_todo)
-            ok(ret == tests[i].last_error, "tr2_sys__Symlink(): test %d expect: %d, got %d\n", i+1, tests[i].last_error, ret);
+        ok(ret == tests[i].last_error, "tr2_sys__Symlink(): test %d expect: %d, got %d\n", i+1, tests[i].last_error, ret);
+
         if(ret == ERROR_SUCCESS)
-            ok(p_tr2_sys__File_size(tests[i].new_path) == 0, "tr2_sys__Symlink(): expect 0, got %s\n", wine_dbgstr_longlong(p_tr2_sys__File_size(tests[i].new_path)));
+        {
+            todo_wine_if(tests[i].is_todo)
+                ok(p_tr2_sys__File_size(tests[i].new_path) == 0, "tr2_sys__Symlink(): expect 0, got %s\n", wine_dbgstr_longlong(p_tr2_sys__File_size(tests[i].new_path)));
+        }
     }
 
-    ok(DeleteFileA("f1"), "expect f1 to exist\n");
-    todo_wine ok(DeleteFileA("f1_link"), "expect f1_link to exist\n");
-    todo_wine ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
-    todo_wine ok(DeleteFileA("tr2_test_dir/f1_link_link"), "expect tr2_test_dir/f1_link_link to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f1_link_link"), "expect tr2_test_dir/f1_link_link to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
+    ok(DeleteFileA("f1_link"), "expect f1_link to exist\n");
     todo_wine ok(DeleteFileA("not_exist_link"), "expect not_exist_link to exist\n");
-    todo_wine ok(DeleteFileA("dir_link"), "expect dir_link to exist\n");
+    todo_wine ok(DeleteFileA("dir_link"), "expect dir_link to exist, got %d\n", GetLastError());
+    ok(DeleteFileA("f1"), "expect f1 to exist\n");
     ret = p_tr2_sys__Remove_dir("tr2_test_dir");
     ok(ret == 1, "tr2_sys__Remove_dir(): expect 1 got %d\n", ret);
 }
@@ -2011,15 +2014,14 @@ static void test_tr2_sys__Unlink(void)
     struct {
         char const *path;
         int last_error;
-        MSVCP_bool is_todo;
     } tests[] = {
-        { "tr2_test_dir\\f1_symlink", ERROR_SUCCESS, TRUE },
-        { "tr2_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir\\f1", ERROR_SUCCESS, FALSE },
-        { "tr2_test_dir", ERROR_ACCESS_DENIED, FALSE },
-        { "not_exist", ERROR_FILE_NOT_FOUND, FALSE },
-        { "not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND, FALSE },
-        { NULL, ERROR_PATH_NOT_FOUND, FALSE }
+        { "tr2_test_dir\\f1_symlink", ERROR_SUCCESS },
+        { "tr2_test_dir\\f1_link", ERROR_SUCCESS },
+        { "tr2_test_dir\\f1", ERROR_SUCCESS },
+        { "tr2_test_dir", ERROR_ACCESS_DENIED },
+        { "not_exist", ERROR_FILE_NOT_FOUND },
+        { "not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND },
+        { NULL, ERROR_PATH_NOT_FOUND }
     };
 
     GetCurrentDirectoryA(MAX_PATH, current_path);
@@ -2048,9 +2050,8 @@ static void test_tr2_sys__Unlink(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = 0xdeadbeef;
         ret = p_tr2_sys__Unlink(tests[i].path);
-        todo_wine_if(tests[i].is_todo)
-            ok(ret == tests[i].last_error, "tr2_sys__Unlink(): test %d expect: %d, got %d\n",
-                    i+1, tests[i].last_error, ret);
+        ok(ret == tests[i].last_error, "tr2_sys__Unlink(): test %d expect: %d, got %d\n",
+                i+1, tests[i].last_error, ret);
         ok(errno == 0xdeadbeef, "tr2_sys__Unlink(): test %d errno expect: 0xdeadbeef, got %d\n", i+1, ret);
     }
 

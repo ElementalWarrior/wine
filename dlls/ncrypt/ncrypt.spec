@@ -9,7 +9,7 @@
 @ stub BCryptDeleteContext
 @ stub BCryptDeriveKey
 @ stub BCryptDeriveKeyCapi
-@ stub BCryptDeriveKeyPBKDF2
+@ stdcall BCryptDeriveKeyPBKDF2(ptr ptr long ptr long int64 ptr long long) bcrypt.BCryptDeriveKeyPBKDF2
 @ stdcall BCryptDestroyHash(ptr) bcrypt.BCryptDestroyHash
 @ stdcall BCryptDestroyKey(ptr) bcrypt.BCryptDestroyKey
 @ stub BCryptDestroySecret
@@ -23,11 +23,11 @@
 @ stub BCryptEnumProviders
 @ stub BCryptEnumRegisteredProviders
 @ stdcall BCryptExportKey(ptr ptr wstr ptr long ptr long) bcrypt.BCryptExportKey
-@ stub BCryptFinalizeKeyPair
+@ stdcall BCryptFinalizeKeyPair(ptr long) bcrypt.BCryptFinalizeKeyPair
 @ stdcall BCryptFinishHash(ptr ptr long long) bcrypt.BCryptFinishHash
 @ stub BCryptFreeBuffer
 @ stdcall BCryptGenRandom(ptr ptr long long) bcrypt.BCryptGenRandom
-@ stub BCryptGenerateKeyPair
+@ stdcall BCryptGenerateKeyPair(ptr ptr long long) bcrypt.BCryptGenerateKeyPair
 @ stdcall BCryptGenerateSymmetricKey(ptr ptr ptr long ptr long long) bcrypt.BCryptGenerateSymmetricKey
 @ stdcall BCryptGetFipsAlgorithmMode(ptr) bcrypt.BCryptGetFipsAlgorithmMode
 @ stdcall BCryptGetProperty(ptr wstr ptr long ptr long) bcrypt.BCryptGetProperty

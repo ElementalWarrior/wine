@@ -1211,6 +1211,8 @@ static GUID const * const tiff_decode_formats[] = {
     &GUID_WICPixelFormatBlackWhite,
     &GUID_WICPixelFormat4bppGray,
     &GUID_WICPixelFormat8bppGray,
+    &GUID_WICPixelFormat16bppGray,
+    &GUID_WICPixelFormat32bppGrayFloat,
     &GUID_WICPixelFormat1bppIndexed,
     &GUID_WICPixelFormat2bppIndexed,
     &GUID_WICPixelFormat4bppIndexed,
@@ -1222,6 +1224,9 @@ static GUID const * const tiff_decode_formats[] = {
     &GUID_WICPixelFormat48bppRGB,
     &GUID_WICPixelFormat64bppRGBA,
     &GUID_WICPixelFormat64bppPRGBA,
+    &GUID_WICPixelFormat32bppCMYK,
+    &GUID_WICPixelFormat64bppCMYK,
+    &GUID_WICPixelFormat128bppRGBAFloat,
     NULL
 };
 
@@ -1404,6 +1409,16 @@ static struct regsvr_encoder const encoder_list[] = {
 	".bmp,.dib,.rle",
 	bmp_encode_formats
     },
+    {   &CLSID_WICGifEncoder,
+	"The Wine Project",
+	"GIF Encoder",
+	"1.0.0.0",
+	&GUID_VendorMicrosoft,
+	&GUID_ContainerFormatGif,
+	"image/gif",
+	".gif",
+	gif_formats
+    },
     {   &CLSID_WICJpegEncoder,
 	"The Wine Project",
 	"JPEG Encoder",
@@ -1463,8 +1478,11 @@ static GUID const * const converter_formats[] = {
     &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat24bppRGB,
     &GUID_WICPixelFormat32bppBGR,
+    &GUID_WICPixelFormat32bppRGB,
     &GUID_WICPixelFormat32bppBGRA,
+    &GUID_WICPixelFormat32bppRGBA,
     &GUID_WICPixelFormat32bppPBGRA,
+    &GUID_WICPixelFormat32bppPRGBA,
     &GUID_WICPixelFormat32bppGrayFloat,
     &GUID_WICPixelFormat48bppRGB,
     &GUID_WICPixelFormat64bppRGBA,
@@ -1738,6 +1756,11 @@ static BYTE const channel_mask_16bit4[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 
 static BYTE const channel_mask_32bit[] = { 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 };
 
+static BYTE const channel_mask_128bit1[] = { 0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 };
+static BYTE const channel_mask_128bit2[] = { 0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 };
+static BYTE const channel_mask_128bit3[] = { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00 };
+static BYTE const channel_mask_128bit4[] = { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff };
+
 static BYTE const channel_mask_5bit[] = { 0x1f, 0x00 };
 static BYTE const channel_mask_5bit2[] = { 0xe0, 0x03 };
 static BYTE const channel_mask_5bit3[] = { 0x00, 0x7c };
@@ -1755,6 +1778,7 @@ static BYTE const * const channel_masks_16bit[] = { channel_mask_16bit,
     channel_mask_16bit2, channel_mask_16bit3, channel_mask_16bit4};
 
 static BYTE const * const channel_masks_32bit[] = { channel_mask_32bit };
+static BYTE const * const channel_masks_128bit[] = { channel_mask_128bit1, channel_mask_128bit2, channel_mask_128bit3, channel_mask_128bit4 };
 
 static BYTE const * const channel_masks_BGRA5551[] = { channel_mask_5bit,
     channel_mask_5bit2, channel_mask_5bit3, channel_mask_5bit4 };
@@ -1772,7 +1796,7 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         1, /* channel count */
         channel_masks_1bit,
         WICPixelFormatNumericRepresentationIndexed,
-        1
+        0
     },
     {   &GUID_WICPixelFormat2bppIndexed,
         "The Wine Project",
@@ -1783,7 +1807,7 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         1, /* channel count */
         channel_masks_2bit,
         WICPixelFormatNumericRepresentationIndexed,
-        1
+        0
     },
     {   &GUID_WICPixelFormat4bppIndexed,
         "The Wine Project",
@@ -1794,7 +1818,7 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         1, /* channel count */
         channel_masks_4bit,
         WICPixelFormatNumericRepresentationIndexed,
-        1
+        0
     },
     {   &GUID_WICPixelFormat8bppIndexed,
         "The Wine Project",
@@ -1805,7 +1829,7 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         1, /* channel count */
         channel_masks_8bit,
         WICPixelFormatNumericRepresentationIndexed,
-        1
+        0
     },
     {   &GUID_WICPixelFormatBlackWhite,
         "The Wine Project",
@@ -1928,9 +1952,31 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         WICPixelFormatNumericRepresentationUnsignedInteger,
         0
     },
+    {   &GUID_WICPixelFormat32bppRGB,
+        "The Wine Project",
+        "32bpp RGB",
+        NULL, /* no version */
+        &GUID_VendorMicrosoft,
+        32, /* bitsperpixel */
+        3, /* channel count */
+        channel_masks_8bit,
+        WICPixelFormatNumericRepresentationUnsignedInteger,
+        0
+    },
     {   &GUID_WICPixelFormat32bppBGRA,
         "The Wine Project",
         "32bpp BGRA",
+        NULL, /* no version */
+        &GUID_VendorMicrosoft,
+        32, /* bitsperpixel */
+        4, /* channel count */
+        channel_masks_8bit,
+        WICPixelFormatNumericRepresentationUnsignedInteger,
+        1
+    },
+    {   &GUID_WICPixelFormat32bppRGBA,
+        "The Wine Project",
+        "32bpp RGBA",
         NULL, /* no version */
         &GUID_VendorMicrosoft,
         32, /* bitsperpixel */
@@ -1950,6 +1996,17 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         WICPixelFormatNumericRepresentationUnsignedInteger,
         1
     },
+    {   &GUID_WICPixelFormat32bppPRGBA,
+        "The Wine Project",
+        "32bpp PRGBA",
+        NULL, /* no version */
+        &GUID_VendorMicrosoft,
+        32, /* bitsperpixel */
+        4, /* channel count */
+        channel_masks_8bit,
+        WICPixelFormatNumericRepresentationUnsignedInteger,
+        1
+    },
     {   &GUID_WICPixelFormat32bppGrayFloat,
         "The Wine Project",
         "32bpp GrayFloat",
@@ -1959,7 +2016,7 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         1, /* channel count */
         channel_masks_32bit,
         WICPixelFormatNumericRepresentationFloat,
-        1
+        0
     },
     {   &GUID_WICPixelFormat48bppRGB,
         "The Wine Project",
@@ -2004,6 +2061,28 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
         channel_masks_8bit,
         WICPixelFormatNumericRepresentationUnsignedInteger,
         0
+    },
+    {   &GUID_WICPixelFormat64bppCMYK,
+        "The Wine Project",
+        "64bpp CMYK",
+        NULL, /* no version */
+        &GUID_VendorMicrosoft,
+        64, /* bitsperpixel */
+        4, /* channel count */
+        channel_masks_16bit,
+        WICPixelFormatNumericRepresentationUnsignedInteger,
+        0
+    },
+    {   &GUID_WICPixelFormat128bppRGBAFloat,
+        "The Wine Project",
+        "128bpp RGBAFloat",
+        NULL, /* no version */
+        &GUID_VendorMicrosoft,
+        128, /* bitsperpixel */
+        4, /* channel count */
+        channel_masks_128bit,
+        WICPixelFormatNumericRepresentationFloat,
+        1
     },
     { NULL }			/* list terminator */
 };

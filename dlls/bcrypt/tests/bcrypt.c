@@ -26,32 +26,36 @@
 
 #include "wine/test.h"
 
-static NTSTATUS (WINAPI *pBCryptOpenAlgorithmProvider)(BCRYPT_ALG_HANDLE *, LPCWSTR, LPCWSTR, ULONG);
 static NTSTATUS (WINAPI *pBCryptCloseAlgorithmProvider)(BCRYPT_ALG_HANDLE, ULONG);
-static NTSTATUS (WINAPI *pBCryptGetFipsAlgorithmMode)(BOOLEAN *);
 static NTSTATUS (WINAPI *pBCryptCreateHash)(BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE *, PUCHAR, ULONG, PUCHAR,
-                                            ULONG, ULONG);
+                                             ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptDecrypt)(BCRYPT_KEY_HANDLE, PUCHAR, ULONG, VOID *, PUCHAR, ULONG, PUCHAR, ULONG,
+                                         ULONG *, ULONG);
+static NTSTATUS (WINAPI *pBCryptDeriveKeyPBKDF2)(BCRYPT_ALG_HANDLE, PUCHAR, ULONG, PUCHAR, ULONG,
+                                                 ULONGLONG, PUCHAR, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptDestroyHash)(BCRYPT_HASH_HANDLE);
+static NTSTATUS (WINAPI *pBCryptDestroyKey)(BCRYPT_KEY_HANDLE);
+static NTSTATUS (WINAPI *pBCryptDuplicateHash)(BCRYPT_HASH_HANDLE, BCRYPT_HASH_HANDLE *, UCHAR *, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptDuplicateKey)(BCRYPT_KEY_HANDLE, BCRYPT_KEY_HANDLE *, UCHAR *, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptEncrypt)(BCRYPT_KEY_HANDLE, PUCHAR, ULONG, VOID *, PUCHAR, ULONG, PUCHAR, ULONG,
+                                         ULONG *, ULONG);
+static NTSTATUS (WINAPI *pBCryptExportKey)(BCRYPT_KEY_HANDLE, BCRYPT_KEY_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG *, ULONG);
+static NTSTATUS (WINAPI *pBCryptFinalizeKeyPair)(BCRYPT_KEY_HANDLE, ULONG);
+static NTSTATUS (WINAPI *pBCryptFinishHash)(BCRYPT_HASH_HANDLE, PUCHAR, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptGenerateKeyPair)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE *, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptGenerateSymmetricKey)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE *, PUCHAR, ULONG,
+                                                       PUCHAR, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptGetFipsAlgorithmMode)(BOOLEAN *);
+static NTSTATUS (WINAPI *pBCryptGetProperty)(BCRYPT_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG *, ULONG);
+static NTSTATUS (WINAPI *pBCryptGenRandom)(BCRYPT_ALG_HANDLE, PUCHAR, ULONG, ULONG);
 static NTSTATUS (WINAPI *pBCryptHash)(BCRYPT_ALG_HANDLE, UCHAR *, ULONG, UCHAR *, ULONG, UCHAR *, ULONG);
 static NTSTATUS (WINAPI *pBCryptHashData)(BCRYPT_HASH_HANDLE, PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptDuplicateHash)(BCRYPT_HASH_HANDLE, BCRYPT_HASH_HANDLE *, UCHAR *, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptFinishHash)(BCRYPT_HASH_HANDLE, PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptDestroyHash)(BCRYPT_HASH_HANDLE);
-static NTSTATUS (WINAPI *pBCryptGenRandom)(BCRYPT_ALG_HANDLE, PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptGetProperty)(BCRYPT_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG *, ULONG);
-static NTSTATUS (WINAPI *pBCryptSetProperty)(BCRYPT_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptGenerateSymmetricKey)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE *, PUCHAR, ULONG,
-                                                      PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptEncrypt)(BCRYPT_KEY_HANDLE, PUCHAR, ULONG, VOID *, PUCHAR, ULONG, PUCHAR, ULONG,
-                                      ULONG *, ULONG);
-static NTSTATUS (WINAPI *pBCryptDecrypt)(BCRYPT_KEY_HANDLE, PUCHAR, ULONG, VOID *, PUCHAR, ULONG, PUCHAR, ULONG,
-                                      ULONG *, ULONG);
-static NTSTATUS (WINAPI *pBCryptDuplicateKey)(BCRYPT_KEY_HANDLE, BCRYPT_KEY_HANDLE *, UCHAR *, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptDestroyKey)(BCRYPT_KEY_HANDLE);
 static NTSTATUS (WINAPI *pBCryptImportKey)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE, LPCWSTR, BCRYPT_KEY_HANDLE *,
-                                           PUCHAR, ULONG, PUCHAR, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptExportKey)(BCRYPT_KEY_HANDLE, BCRYPT_KEY_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG *, ULONG);
-static NTSTATUS (WINAPI *pBCryptImportKeyPair)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE, LPCWSTR, BCRYPT_KEY_HANDLE *, UCHAR *, ULONG, ULONG);
-static NTSTATUS (WINAPI *pBCryptVerifySignature)(BCRYPT_KEY_HANDLE, VOID *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG);
+                                            PUCHAR, ULONG, PUCHAR, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptImportKeyPair)(BCRYPT_ALG_HANDLE, BCRYPT_KEY_HANDLE, LPCWSTR, BCRYPT_KEY_HANDLE *,
+                                               UCHAR *, ULONG, ULONG);
+static NTSTATUS (WINAPI *pBCryptOpenAlgorithmProvider)(BCRYPT_ALG_HANDLE *, LPCWSTR, LPCWSTR, ULONG);
+static NTSTATUS (WINAPI *pBCryptSetProperty)(BCRYPT_HANDLE, LPCWSTR, PUCHAR, ULONG, ULONG);static NTSTATUS (WINAPI *pBCryptVerifySignature)(BCRYPT_KEY_HANDLE, VOID *, UCHAR *, ULONG, UCHAR *, ULONG, ULONG);
 
 static void test_BCryptGenRandom(void)
 {
@@ -397,6 +401,81 @@ static void test_BcryptHash(void)
     ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
     format_hash( md5_hmac, sizeof(md5_hmac), str );
     ok(!strcmp(str, expected_hmac), "got %s\n", str);
+
+    ret = pBCryptCloseAlgorithmProvider(alg, 0);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+}
+
+/* Test vectors from RFC 6070 */
+static UCHAR password[] = "password";
+static UCHAR salt[] = "salt";
+static UCHAR long_password[] =
+    "passwordPASSWORDpassword";
+static UCHAR long_salt[] =
+    "saltSALTsaltSALTsaltSALTsaltSALTsalt";
+static UCHAR password_NUL[] = "pass\0word";
+static UCHAR salt_NUL[] = "sa\0lt";
+
+static UCHAR dk1[] =
+    "0c60c80f961f0e71f3a9b524af6012062fe037a6";
+static UCHAR dk2[] =
+    "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957";
+static UCHAR dk3[] =
+    "4b007901b765489abead49d926f721d065a429c1";
+static UCHAR dk4[] =
+    "eefe3d61cd4da4e4e9945b3d6ba2158c2634e984";
+static UCHAR dk5[] =
+    "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038";
+static UCHAR dk6[] =
+    "56fa6aa75548099dcc37d7f03425e0c3";
+
+static const struct {
+    ULONG password_length;
+    ULONG salt_length;
+    ULONGLONG iterations;
+    ULONG dklen;
+    UCHAR *password;
+    UCHAR *salt;
+    const UCHAR *dk;
+} rfc6070[] = {
+    {  8,  4,        1, 20, password,      salt,      dk1 },
+    {  8,  4,        2, 20, password,      salt,      dk2 },
+    {  8,  4,     4096, 20, password,      salt,      dk3 },
+    {  8,  4, 16777216, 20, password,      salt,      dk4 },
+    { 24, 36,     4096, 25, long_password, long_salt, dk5 },
+    {  9,  5,     4096, 16, password_NUL,  salt_NUL,  dk6 }
+};
+
+static void test_BcryptDeriveKeyPBKDF2(void)
+{
+    BCRYPT_ALG_HANDLE alg;
+    UCHAR dk[25];
+    char str[51];
+    NTSTATUS ret;
+    int i;
+
+    alg = NULL;
+    ret = pBCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, MS_PRIMITIVE_PROVIDER,
+                                       BCRYPT_ALG_HANDLE_HMAC_FLAG);
+    ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+    ok(alg != NULL, "alg not set\n");
+
+    test_hash_length(alg, 20);
+    test_alg_name(alg, "SHA1");
+
+    for (i = 0; i < ARRAY_SIZE(rfc6070); i++)
+    {
+        memset(dk, 0, sizeof(dk));
+        ret = pBCryptDeriveKeyPBKDF2(alg,
+                                     rfc6070[i].password, rfc6070[i].password_length,
+                                     rfc6070[i].salt, rfc6070[i].salt_length,
+                                     rfc6070[i].iterations,
+                                     dk, rfc6070[i].dklen,
+                                     0);
+        ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
+        format_hash( dk, rfc6070[i].dklen, str );
+        ok(!memcmp(str, rfc6070[i].dk, rfc6070[i].dklen), "got %s\n", str);
+    }
 
     ret = pBCryptCloseAlgorithmProvider(alg, 0);
     ok(ret == STATUS_SUCCESS, "got %08x\n", ret);
@@ -1654,6 +1733,53 @@ static void test_RSA(void)
     ok(!ret, "pBCryptCloseAlgorithmProvider failed: %08x\n", ret);
 }
 
+static void test_ECDH(void)
+{
+    BYTE *buf;
+    BCRYPT_ECCKEY_BLOB *ecckey;
+    BCRYPT_ALG_HANDLE alg;
+    BCRYPT_KEY_HANDLE key;
+    NTSTATUS status;
+    ULONG size;
+
+    status = pBCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDH_P256_ALGORITHM, NULL, 0);
+    if (status)
+    {
+        skip("Failed to open BCRYPT_ECDH_P256_ALGORITHM provider %08x\n", status);
+        return;
+    }
+
+    key = NULL;
+    status = pBCryptGenerateKeyPair(alg, &key, 256, 0);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
+    ok(key != NULL, "key not set\n");
+
+    status = pBCryptFinalizeKeyPair(key, 0);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
+
+    size = 0;
+    SetLastError(0xdeadbeef);
+    status = pBCryptExportKey(key, NULL, BCRYPT_ECCPUBLIC_BLOB, NULL, 0, &size, 0);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
+    ok(size, "size not set\n");
+
+    buf = HeapAlloc(GetProcessHeap(), 0, size);
+    status = pBCryptExportKey(key, NULL, BCRYPT_ECCPUBLIC_BLOB, buf, size, &size, 0);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
+    ecckey = (BCRYPT_ECCKEY_BLOB *)buf;
+    ok(ecckey->dwMagic == BCRYPT_ECDH_PUBLIC_P256_MAGIC, "got %08x\n", ecckey->dwMagic);
+    ok(ecckey->cbKey == 32, "got %u\n", ecckey->cbKey);
+    ok(size == sizeof(*ecckey) + ecckey->cbKey * 2, "got %u\n", size);
+    pBCryptDestroyKey(key);
+
+    status = BCryptImportKeyPair(alg, NULL, BCRYPT_ECCPUBLIC_BLOB, &key, buf, size, 0);
+    ok(status == STATUS_SUCCESS, "got %08x\n", status);
+    HeapFree(GetProcessHeap(), 0, buf);
+
+    pBCryptDestroyKey(key);
+    pBCryptCloseAlgorithmProvider(alg, 0);
+}
+
 START_TEST(bcrypt)
 {
     HMODULE module;
@@ -1674,6 +1800,7 @@ START_TEST(bcrypt)
     pBCryptDuplicateHash = (void *)GetProcAddress(module, "BCryptDuplicateHash");
     pBCryptFinishHash = (void *)GetProcAddress(module, "BCryptFinishHash");
     pBCryptDestroyHash = (void *)GetProcAddress(module, "BCryptDestroyHash");
+    pBCryptDeriveKeyPBKDF2 = (void *)GetProcAddress(module, "BCryptDeriveKeyPBKDF2");
     pBCryptGenRandom = (void *)GetProcAddress(module, "BCryptGenRandom");
     pBCryptGetProperty = (void *)GetProcAddress(module, "BCryptGetProperty");
     pBCryptSetProperty = (void *)GetProcAddress(module, "BCryptSetProperty");
@@ -1698,11 +1825,17 @@ START_TEST(bcrypt)
     test_key_import_export();
     test_ECDSA();
     test_RSA();
+    test_ECDH();
 
     if (pBCryptHash) /* >= Win 10 */
         test_BcryptHash();
     else
         win_skip("BCryptHash is not available\n");
+
+    if (pBCryptDeriveKeyPBKDF2) /* >= Win 7 */
+        test_BcryptDeriveKeyPBKDF2();
+    else
+        win_skip("BCryptDeriveKeyPBKDF2 is not available\n");
 
     FreeLibrary(module);
 }

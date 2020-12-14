@@ -25,6 +25,11 @@
 
 #include "wine/test.h"
 
+static inline int get_stride(int width, int depth)
+{
+    return ((depth * width + 31) >> 3) & ~3;
+}
+
 static void test_OpenCase(void)
 {
     HIC h;
@@ -88,6 +93,7 @@ static void test_Locate(void)
 {
     static BITMAPINFOHEADER bi = {sizeof(BITMAPINFOHEADER),32,8, 1,8, BI_RLE8, 0,100000,100000, 0,0};
     static BITMAPINFOHEADER bo = {sizeof(BITMAPINFOHEADER),32,8, 1,8, BI_RGB, 0,100000,100000, 0,0};
+    BITMAPINFOHEADER tmp = {sizeof(BITMAPINFOHEADER)};
     HIC h;
     DWORD err;
 
@@ -122,6 +128,45 @@ static void test_Locate(void)
         err = ICDecompressQuery(h, &bi, &bo);
         ok(err == ICERR_OK, "Query cvid->RGB32 height<0: %d\n", err);
         bo.biHeight = -bo.biHeight;
+
+        bi.biWidth = 17;
+
+        bi.biBitCount = 8;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query cvid output format: %d\n", err);
+        ok(tmp.biBitCount == 24, "Expected 24 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biSizeImage == get_stride(17, 24) * 8, "Expected size %d, got %d\n",
+           get_stride(17, 24) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 15;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query cvid output format: %d\n", err);
+        ok(tmp.biBitCount == 24, "Expected 24 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biSizeImage == get_stride(17, 24) * 8, "Expected size %d, got %d\n",
+           get_stride(17, 24) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 16;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query cvid output format: %d\n", err);
+        ok(tmp.biBitCount == 24, "Expected 24 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biSizeImage == get_stride(17, 24) * 8, "Expected size %d, got %d\n",
+           get_stride(17, 24) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 24;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query cvid output format: %d\n", err);
+        ok(tmp.biBitCount == 24, "Expected 24 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biSizeImage == get_stride(17, 24) * 8, "Expected size %d, got %d\n",
+           get_stride(17, 24) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 32;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query cvid output format: %d\n", err);
+        ok(tmp.biBitCount == 24, "Expected 24 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biSizeImage == get_stride(17, 24) * 8, "Expected size %d, got %d\n",
+           get_stride(17, 24) * 8, tmp.biSizeImage);
+
+        bi.biWidth = 32;
 
         ok(ICClose(h) == ICERR_OK,"ICClose failed\n");
 
@@ -201,6 +246,50 @@ static void test_Locate(void)
         err = ICDecompressQuery(h, &bi, &bo);
         todo_wine ok(err == ICERR_OK, "Query MSVC->RGB16 height<0: %d\n", err);
         bo.biHeight = -bo.biHeight;
+
+        bo.biBitCount = 24;
+        err = ICDecompressQuery(h, &bi, &bo);
+        ok(err == ICERR_OK, "Query MSVC 16->24: %d\n", err);
+        bo.biBitCount = 16;
+
+        bi.biWidth = 553;
+
+        bi.biBitCount = 8;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query MSVC output format: %d\n", err);
+        ok(tmp.biBitCount == 8, "Expected 8 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biWidth == 552, "Expected width 552, got %d\n", tmp.biWidth);
+        ok(tmp.biSizeImage == get_stride(552, 8) * 8, "Expected size %d, got %d\n",
+           get_stride(552, 8) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 15;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_BADFORMAT, "Query MSVC output format: %d\n", err);
+
+        bi.biBitCount = 16;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query MSVC output format: %d\n", err);
+        ok(tmp.biBitCount == 16, "Expected 16 bit, got %d bit\n", tmp.biBitCount);
+        ok(tmp.biWidth == 552, "Expected width 552, got %d\n", tmp.biWidth);
+        ok(tmp.biSizeImage == get_stride(552, 16) * 8, "Expected size %d, got %d\n",
+           get_stride(552, 16) * 8, tmp.biSizeImage);
+
+        bi.biBitCount = 24;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_BADFORMAT, "Query MSVC output format: %d\n", err);
+
+        bi.biBitCount = 32;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_BADFORMAT, "Query MSVC output format: %d\n", err);
+
+        bi.biHeight = 17;
+        bi.biBitCount = 8;
+        err = ICDecompressGetFormat(h, &bi, &tmp);
+        ok(err == ICERR_OK, "Query MSVC output format: %d\n", err);
+        ok(tmp.biHeight == 16, "Expected height 16, got %d\n", tmp.biHeight);
+        bi.biHeight = 8;
+
+        bi.biWidth = 32;
 
         bi.biCompression = mmioFOURCC('m','s','v','c');
         err = ICDecompressQuery(h, &bi, &bo);

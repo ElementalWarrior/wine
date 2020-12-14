@@ -114,6 +114,7 @@ alg_props[] =
     /* ALG_ID_SHA256 */ {  286,   32,  512, BCRYPT_SHA256_ALGORITHM, FALSE },
     /* ALG_ID_SHA384 */ {  382,   48, 1024, BCRYPT_SHA384_ALGORITHM, FALSE },
     /* ALG_ID_SHA512 */ {  382,   64, 1024, BCRYPT_SHA512_ALGORITHM, FALSE },
+    /* ALG_ID_ECDH_P256 */  { 0,   0,     0, BCRYPT_ECDH_P256_ALGORITHM, FALSE },
     /* ALG_ID_ECDSA_P256 */ { 0,   0,     0, BCRYPT_ECDSA_P256_ALGORITHM, FALSE  },
     /* ALG_ID_ECDSA_P384 */ { 0,   0,     0, BCRYPT_ECDSA_P384_ALGORITHM, FALSE  },
 };
@@ -184,6 +185,7 @@ NTSTATUS WINAPI BCryptOpenAlgorithmProvider( BCRYPT_ALG_HANDLE *handle, LPCWSTR 
     else if (!strcmpW( id, BCRYPT_SHA256_ALGORITHM )) alg_id = ALG_ID_SHA256;
     else if (!strcmpW( id, BCRYPT_SHA384_ALGORITHM )) alg_id = ALG_ID_SHA384;
     else if (!strcmpW( id, BCRYPT_SHA512_ALGORITHM )) alg_id = ALG_ID_SHA512;
+    else if (!strcmpW( id, BCRYPT_ECDH_P256_ALGORITHM )) alg_id = ALG_ID_ECDH_P256;
     else if (!strcmpW( id, BCRYPT_ECDSA_P256_ALGORITHM )) alg_id = ALG_ID_ECDSA_P256;
     else if (!strcmpW( id, BCRYPT_ECDSA_P384_ALGORITHM )) alg_id = ALG_ID_ECDSA_P384;
     else
@@ -811,6 +813,14 @@ static NTSTATUS key_export( struct key *key, const WCHAR *type, UCHAR *output, U
         memcpy( output + sizeof(len), key->u.s.secret, key->u.s.secret_len );
         return STATUS_SUCCESS;
     }
+    else if (!strcmpW( type, BCRYPT_ECCPUBLIC_BLOB ))
+    {
+        *size = key->u.a.pubkey_len;
+        if (output_len < key->u.a.pubkey_len) return STATUS_SUCCESS;
+
+        memcpy( output, key->u.a.pubkey, key->u.a.pubkey_len );
+        return STATUS_SUCCESS;
+    }
 
     FIXME( "unsupported key type %s\n", debugstr_w(type) );
     return STATUS_NOT_IMPLEMENTED;
@@ -1010,6 +1020,11 @@ static NTSTATUS key_import_pair( struct algorithm *alg, const WCHAR *type, BCRYP
 
         switch (alg->id)
         {
+        case ALG_ID_ECDH_P256:
+            key_size = 32;
+            magic = BCRYPT_ECDH_PUBLIC_P256_MAGIC;
+            break;
+
         case ALG_ID_ECDSA_P256:
             key_size = 32;
             magic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
@@ -1028,7 +1043,7 @@ static NTSTATUS key_import_pair( struct algorithm *alg, const WCHAR *type, BCRYP
         if (ecc_blob->dwMagic != magic) return STATUS_NOT_SUPPORTED;
         if (ecc_blob->cbKey != key_size) return STATUS_INVALID_PARAMETER;
 
-        if (!(key = heap_alloc( sizeof(*key) ))) return STATUS_NO_MEMORY;
+        if (!(key = heap_alloc_zero( sizeof(*key) ))) return STATUS_NO_MEMORY;
         key->hdr.magic = MAGIC_KEY;
         if ((status = key_asymmetric_init( key, alg, (BYTE *)ecc_blob, sizeof(*ecc_blob) + ecc_blob->cbKey * 2 )))
         {
@@ -1047,7 +1062,7 @@ static NTSTATUS key_import_pair( struct algorithm *alg, const WCHAR *type, BCRYP
         if (input_len < sizeof(*rsa_blob)) return STATUS_INVALID_PARAMETER;
         if (alg->id != ALG_ID_RSA || rsa_blob->Magic != BCRYPT_RSAPUBLIC_MAGIC) return STATUS_NOT_SUPPORTED;
 
-        if (!(key = heap_alloc( sizeof(*key) ))) return STATUS_NO_MEMORY;
+        if (!(key = heap_alloc_zero( sizeof(*key) ))) return STATUS_NO_MEMORY;
         key->hdr.magic = MAGIC_KEY;
 
         size = sizeof(*rsa_blob) + rsa_blob->cbPublicExp + rsa_blob->cbModulus;
@@ -1163,6 +1178,41 @@ NTSTATUS WINAPI BCryptGenerateSymmetricKey( BCRYPT_ALG_HANDLE algorithm, BCRYPT_
     return STATUS_SUCCESS;
 }
 
+NTSTATUS WINAPI BCryptGenerateKeyPair( BCRYPT_ALG_HANDLE algorithm, BCRYPT_KEY_HANDLE *handle, ULONG key_len,
+                                       ULONG flags )
+{
+    struct algorithm *alg = algorithm;
+    struct key *key;
+    NTSTATUS status;
+
+    TRACE( "%p, %p, %u, %08x\n", algorithm, handle, key_len, flags );
+
+    if (!alg || alg->hdr.magic != MAGIC_ALG) return STATUS_INVALID_HANDLE;
+    if (!handle) return STATUS_INVALID_PARAMETER;
+
+    if (!(key = heap_alloc_zero( sizeof(*key) ))) return STATUS_NO_MEMORY;
+    key->hdr.magic = MAGIC_KEY;
+
+    if ((status = key_asymmetric_init( key, alg, NULL, 0 )))
+    {
+        heap_free( key );
+        return status;
+    }
+
+    *handle = key;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI BCryptFinalizeKeyPair( BCRYPT_KEY_HANDLE handle, ULONG flags )
+{
+    struct key *key = handle;
+
+    TRACE( "%p, %08x\n", key, flags );
+    if (!key || key->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
+
+    return key_asymmetric_generate( key );
+}
+
 NTSTATUS WINAPI BCryptImportKey( BCRYPT_ALG_HANDLE algorithm, BCRYPT_KEY_HANDLE decrypt_key, LPCWSTR type,
                                  BCRYPT_KEY_HANDLE *key, PUCHAR object, ULONG object_len, PUCHAR input,
                                  ULONG input_len, ULONG flags )
@@ -1192,7 +1242,7 @@ NTSTATUS WINAPI BCryptExportKey( BCRYPT_KEY_HANDLE export_key, BCRYPT_KEY_HANDLE
     TRACE("%p, %p, %s, %p, %u, %p, %u\n", key, encrypt_key, debugstr_w(type), output, output_len, size, flags);
 
     if (!key || key->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
-    if (!output || !type || !size) return STATUS_INVALID_PARAMETER;
+    if (!type || !size) return STATUS_INVALID_PARAMETER;
 
     if (encrypt_key)
     {
@@ -1341,6 +1391,192 @@ NTSTATUS WINAPI BCryptSetProperty( BCRYPT_HANDLE handle, const WCHAR *prop, UCHA
         WARN( "unknown magic %08x\n", object->magic );
         return STATUS_INVALID_HANDLE;
     }
+}
+
+NTSTATUS PBKDF2_F( BCRYPT_ALG_HANDLE algorithm,
+                   UCHAR *password, ULONG password_length,
+                   UCHAR *salt, ULONG salt_length,
+                   ULONGLONG iterations, int i,
+                   UCHAR *res, int hash_length )
+{
+    BCRYPT_HASH_HANDLE handle;
+    NTSTATUS status = STATUS_NOT_SUPPORTED;
+    UCHAR bytes[4];
+    UCHAR *tmp;
+    int j;
+    int k;
+
+    if (!(tmp = heap_alloc( hash_length )))
+    {
+        return STATUS_NO_MEMORY;
+    }
+
+    for (j = 0; j < iterations; j++)
+    {
+        status = BCryptCreateHash( algorithm, &handle, NULL, 0,
+                                   password, password_length, 0 );
+        if (status != STATUS_SUCCESS)
+            goto done;
+
+        if (j == 0)
+        {
+            /* Use salt || INT(i) */
+            status = BCryptHashData( handle, salt, salt_length, 0 );
+            if (status != STATUS_SUCCESS)
+                goto done;
+            bytes[0] = (i >> 24) & 0xFF;
+            bytes[1] = (i >> 16) & 0xFF;
+            bytes[2] = (i >> 8) & 0xFF;
+            bytes[3] = i & 0xFF;
+            status = BCryptHashData( handle, bytes, 4, 0 );
+        }
+        else
+        {
+            /* Use U_j */
+            status = BCryptHashData( handle, tmp, hash_length, 0 );
+        }
+        if (status != STATUS_SUCCESS)
+            goto done;
+
+        status = BCryptFinishHash( handle, tmp, hash_length, 0 );
+        if (status != STATUS_SUCCESS)
+            goto done;
+
+        status = BCryptDestroyHash( handle );
+        if (status != STATUS_SUCCESS)
+            goto done;
+
+        handle = NULL;
+
+        if (j == 0)
+        {
+            /* Copy into res */
+            memcpy( res, tmp, hash_length );
+        }
+        else
+        {
+            /* XOR into res */
+            for (k = 0; k < hash_length; k++)
+                res[k] ^= tmp[k];
+        }
+    }
+
+done:
+    TRACE("<- status 0x%08x\n", status);
+    if(handle)
+        BCryptDestroyHash( handle );
+    heap_free( tmp );
+    return status;
+}
+
+/************************************************************
+ *            BCryptDeriveKeyPBKDF2   (BCRYPT.@)
+ *
+ * Derive a key from a password using the PBKDF2 function
+ * (RFC 2898).
+ *
+ * PARAMS
+ *   handle          [I] Pointer to the PRF provider
+ *   password        [I] Optional pointer to the beginning of the password
+ *   password_length [I] Length of the password
+ *   salt            [I] Optional pointer to the beginning of the salt
+ *   salt_length     [I] Length of the salt
+ *   iterations      [I] Iteration count
+ *   dk              [O] Pointer to the beginning of the buffer to store the
+ *                       derived key in, at least dklen in size
+ *   dklen           [I] Intended length of the derived key, at most
+ *                       (2^32 - 1) * (output length of PRF)
+ *   flags           [I] Reserved, must be zero
+ *
+ * RETURNS
+ *   Success: STATUS_SUCCESS.
+ *   Failure: - STATUS_INVALID_HANDLE
+ *            - STATUS_INVALID_PARAMETER
+ *            - STATUS_NO_MEMORY
+ */
+NTSTATUS WINAPI BCryptDeriveKeyPBKDF2( BCRYPT_ALG_HANDLE handle,
+                                       PUCHAR password, ULONG password_length,
+                                       PUCHAR salt, ULONG salt_length,
+                                       ULONGLONG iterations,
+                                       PUCHAR dk, ULONG dklen,
+                                       ULONG flags )
+{
+    struct algorithm *alg = handle;
+    int hlen = alg_props[alg->id].hash_length;
+    UCHAR *partial;
+    NTSTATUS status;
+    int l;
+    int r;
+    int i;
+
+    TRACE( "%p, %p, %u, %p, %u, %s, %p, %u, %08x - stub\n",
+           handle, password, password_length, salt, salt_length,
+           wine_dbgstr_longlong(iterations), dk, dklen, flags );
+
+    if (dklen <= 0 || dklen > ((((ULONGLONG) 1) << 32) - 1) * hlen)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    l = 1 + ((dklen - 1) / hlen); /* ceil(dklen/hlen) */
+    r = dklen - (l - 1) * hlen;
+
+    /* Full blocks */
+    for (i = 1; i < l; i++)
+    {
+        status = PBKDF2_F( handle,
+                           password, password_length,
+                           salt, salt_length,
+                           iterations, i,
+                           dk + ((i - 1) * hlen), hlen );
+        if (status != STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    /* Final partial block */
+    if (!(partial = heap_alloc( hlen )))
+    {
+        return STATUS_NO_MEMORY;
+    }
+    status = PBKDF2_F( handle,
+                       password, password_length,
+                       salt, salt_length,
+                       iterations, l,
+                       partial, hlen );
+    if (status != STATUS_SUCCESS)
+    {
+        heap_free( partial );
+        return status;
+    }
+    memcpy( dk + ((l - 1) * hlen), partial, r );
+    heap_free( partial );
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI BCryptSecretAgreement(BCRYPT_KEY_HANDLE handle, BCRYPT_KEY_HANDLE key, BCRYPT_SECRET_HANDLE *secret, ULONG flags)
+{
+    FIXME( "%p, %p, %p, %08x\n", handle, key, secret, flags );
+
+    if(secret)
+        *secret = (BCRYPT_SECRET_HANDLE *)0xDEADFEED;
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI BCryptDestroySecret(BCRYPT_SECRET_HANDLE secret)
+{
+    FIXME( "%p\n", secret );
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI BCryptDeriveKey(BCRYPT_SECRET_HANDLE secret, LPCWSTR kdf, BCryptBufferDesc *parameter,
+        PUCHAR derived, ULONG derived_size, ULONG *result, ULONG flags)
+{
+    FIXME( "%p, %s, %p, %p, %d, %p, %08x\n", secret, debugstr_w(kdf), parameter, derived, derived_size, result, flags );
+    return STATUS_INTERNAL_ERROR;
 }
 
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )

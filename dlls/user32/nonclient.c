@@ -315,8 +315,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectEx( LPRECT rect, DWORD style, BOOL
 {
     NONCLIENTMETRICSW ncm;
 
-    if (style & WS_MINIMIZE) return TRUE;
-
     TRACE("(%s) %08x %d %08x\n", wine_dbgstr_rect(rect), style, menu, exStyle );
 
     ncm.cbSize = sizeof(ncm);
@@ -334,8 +332,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectExForDpi( LPRECT rect, DWORD style
                                                         DWORD exStyle, UINT dpi )
 {
     NONCLIENTMETRICSW ncm;
-
-    if (style & WS_MINIMIZE) return TRUE;
 
     TRACE("(%s) %08x %d %08x %u\n", wine_dbgstr_rect(rect), style, menu, exStyle, dpi );
 
@@ -414,6 +410,11 @@ LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
         if (winRect->left > winRect->right)
             winRect->right = winRect->left;
     }
+    else
+    {
+        winRect->right = winRect->left;
+        winRect->bottom = winRect->top;
+    }
     return result;
 }
 
@@ -428,8 +429,6 @@ static void NC_GetInsideRect( HWND hwnd, enum coords_relative relative, RECT *re
                               DWORD style, DWORD ex_style )
 {
     WIN_GetRectangles( hwnd, relative, rect, NULL );
-
-    if (style & WS_MINIMIZE) return;
 
     /* Remove frame from rectangle */
     if (HAS_THICKFRAME( style, ex_style ))
@@ -474,7 +473,6 @@ LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt )
 
     style = GetWindowLongW( hwnd, GWL_STYLE );
     ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
-    if (style & WS_MINIMIZE) return HTCAPTION;
 
     if (PtInRect( &rcClient, pt )) return HTCLIENT;
 
@@ -954,9 +952,6 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
     flags = wndPtr->flags;
     WIN_ReleasePtr( wndPtr );
 
-    if ( dwStyle & WS_MINIMIZE ||
-         !WIN_IsWindowDrawable( hwnd, 0 )) return; /* Nothing to do */
-
     active  = flags & WIN_NCACTIVATED;
 
     TRACE("%p %d\n", hwnd, active );
@@ -1064,10 +1059,7 @@ LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip)
 
     if( dwStyle & WS_VISIBLE )
     {
-	if( dwStyle & WS_MINIMIZE )
-	    WINPOS_RedrawIconTitle( hwnd );
-	else
-	    NC_DoNCPaint( hwnd, clip );
+        NC_DoNCPaint( hwnd, clip );
 
         if (parent == GetDesktopWindow())
             PostMessageW( parent, WM_PARENTNOTIFY, WM_NCPAINT, (LPARAM)hwnd );
@@ -1096,10 +1088,7 @@ LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam )
      */
     if (lParam != -1)
     {
-        if (IsIconic(hwnd))
-            WINPOS_RedrawIconTitle( hwnd );
-        else
-            NC_DoNCPaint( hwnd, (HRGN)1 );
+        NC_DoNCPaint( hwnd, (HRGN)1 );
 
         if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
@@ -1371,17 +1360,14 @@ LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
         }
 
     case HTSYSMENU:
-         if( style & WS_SYSMENU )
-         {
-             if( !(style & WS_MINIMIZE) )
-             {
-                HDC hDC = GetWindowDC(hwnd);
-                NC_DrawSysButton( hwnd, hDC, TRUE );
-                ReleaseDC( hwnd, hDC );
-             }
-             SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lParam );
-         }
-         break;
+        if (style & WS_SYSMENU)
+        {
+            HDC hDC = GetWindowDC( hwnd );
+            NC_DrawSysButton( hwnd, hDC, TRUE );
+            ReleaseDC( hwnd, hDC );
+            SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lParam );
+        }
+        break;
 
     case HTMENU:
         SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU, lParam );

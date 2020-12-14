@@ -1963,13 +1963,13 @@ static void test_CompareStringA(void)
     todo_wine ok(ret != CSTR_EQUAL, "\\2 vs \\1 expected unequal\n");
 
     ret = CompareStringA(lcid, NORM_IGNORECASE | LOCALE_USE_CP_ACP, "#", -1, ".", -1);
-    todo_wine ok(ret == CSTR_LESS_THAN, "\"#\" vs \".\" expected CSTR_LESS_THAN, got %d\n", ret);
+    ok(ret == CSTR_LESS_THAN, "\"#\" vs \".\" expected CSTR_LESS_THAN, got %d\n", ret);
 
     ret = CompareStringA(lcid, NORM_IGNORECASE, "_", -1, ".", -1);
-    todo_wine ok(ret == CSTR_GREATER_THAN, "\"_\" vs \".\" expected CSTR_GREATER_THAN, got %d\n", ret);
+    ok(ret == CSTR_GREATER_THAN, "\"_\" vs \".\" expected CSTR_GREATER_THAN, got %d\n", ret);
 
     ret = lstrcmpiA("#", ".");
-    todo_wine ok(ret == -1, "\"#\" vs \".\" expected -1, got %d\n", ret);
+    ok(ret == -1, "\"#\" vs \".\" expected -1, got %d\n", ret);
 
     lcid = MAKELCID(MAKELANGID(LANG_POLISH, SUBLANG_DEFAULT), SORT_DEFAULT);
 
@@ -5725,10 +5725,8 @@ static void test_NormalizeString(void)
         return;
     }
 
-    todo_wine {
-        dstlen = pNormalizeString( NormalizationD, ptest->str, -1, dst, 1 );
-        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Should have failed with ERROR_INSUFFICIENT_BUFFER\n");
-    }
+    dstlen = pNormalizeString( NormalizationD, ptest->str, -1, dst, 1 );
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Should have failed with ERROR_INSUFFICIENT_BUFFER");
 
     /*
      * For each string, first test passing -1 as srclen to NormalizeString,
@@ -5742,26 +5740,24 @@ static void test_NormalizeString(void)
 
         for (i = 0; i < 4; i++)
         {
-            todo_wine {
-                dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, NULL, 0 );
-                if (dstlen)
-                {
-                    dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, dst, dstlen );
-                    ok(dstlen == strlenW( ptest->expected[i] )+1, "Copied length differed: was %d, should be %d\n",
-                       dstlen, strlenW( ptest->expected[i] )+1);
-                    str_cmp = strncmpW( ptest->expected[i], dst, dstlen+1 );
-                    ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
-                }
+            dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, NULL, 0 );
+            if (dstlen)
+            {
+                dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, dst, dstlen );
+                ok(dstlen == strlenW( ptest->expected[i] )+1, "Copied length differed: was %d, should be %d\n",
+                   dstlen, strlenW( ptest->expected[i] )+1);
+                str_cmp = strncmpW( ptest->expected[i], dst, dstlen+1 );
+                ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
+            }
 
-                dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), NULL, 0 );
-                if (dstlen)
-                {
-                    dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), dst, dstlen );
-                    ok(dstlen == strlenW( ptest->expected[i] ), "Copied length differed: was %d, should be %d\n",
-                       dstlen, strlenW( ptest->expected[i] ));
-                    str_cmp = strncmpW( ptest->expected[i], dst, dstlen );
-                    ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
-                }
+            dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), NULL, 0 );
+            if (dstlen)
+            {
+                dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), dst, dstlen );
+                ok(dstlen == strlenW( ptest->expected[i] ), "Copied length differed: was %d, should be %d\n",
+                   dstlen, strlenW( ptest->expected[i] ));
+                str_cmp = strncmpW( ptest->expected[i], dst, dstlen );
+                ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
             }
         }
         ptest++;
@@ -5818,6 +5814,5 @@ START_TEST(locale)
   test_FindStringOrdinal();
   test_SetThreadUILanguage();
   test_NormalizeString();
-  /* this requires collation table patch to make it MS compatible */
-  if (0) test_sorting();
+  test_sorting();
 }

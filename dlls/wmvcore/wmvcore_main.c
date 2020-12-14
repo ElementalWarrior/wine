@@ -48,6 +48,16 @@ HRESULT WINAPI DllRegisterServer(void)
     return S_OK;
 }
 
+HRESULT WINAPI WMCheckURLExtension(const WCHAR *url)
+{
+    FIXME("(%s): stub\n", wine_dbgstr_w(url));
+
+    if (!url)
+        return E_INVALIDARG;
+
+    return NS_E_INVALID_NAME;
+}
+
 HRESULT WINAPI WMCheckURLScheme(const WCHAR *scheme)
 {
     FIXME("(%s): stub\n", wine_dbgstr_w(scheme));
@@ -2110,6 +2120,11 @@ HRESULT WINAPI WMCreateSyncReader(IUnknown *pcert, DWORD rights, IWMSyncReader *
     *syncreader = NULL;
 
     return E_NOTIMPL;
+}
+
+HRESULT WINAPI WMCreateSyncReaderPriv(IWMSyncReader **syncreader)
+{
+    return WMCreateSyncReader(NULL, 0, syncreader);
 }
 
 typedef struct {

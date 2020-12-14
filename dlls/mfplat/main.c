@@ -248,6 +248,23 @@ HRESULT WINAPI MFTUnregisterLocal(IClassFactory *factory)
     return S_OK;
 }
 
+MFTIME WINAPI MFGetSystemTime()
+{
+    SYSTEMTIME st;
+    FILETIME ft;
+    MFTIME mf;
+
+    TRACE("()\n");
+
+    GetSystemTime(&st);
+
+    SystemTimeToFileTime(&st, &ft);
+
+    memcpy(&mf, &ft, sizeof(FILETIME));
+
+    return mf;
+}
+
 static BOOL match_type(const WCHAR *clsid_str, const WCHAR *type_str, MFT_REGISTER_TYPE_INFO *type)
 {
     HKEY htransform, hfilter;

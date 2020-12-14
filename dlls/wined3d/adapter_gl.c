@@ -225,6 +225,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_NV_vertex_program2",               NV_VERTEX_PROGRAM2            },
     {"GL_NV_vertex_program2_option",        NV_VERTEX_PROGRAM2_OPTION     },
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3            },
+    {"GL_NVX_gpu_memory_info",              NVX_GPU_MEMORY_INFO           },
 };
 
 static const struct wined3d_extension_map wgl_extension_map[] =
@@ -1007,6 +1008,15 @@ static const struct wined3d_gpu_description *query_gpu_description(const struct 
         TRACE("Card reports vendor PCI ID 0x%04x, device PCI ID 0x%04x, 0x%s bytes of video memory.\n",
                 vendor, device, wine_dbgstr_longlong(*vram_bytes));
     }
+    else if (gl_info->supported[NVX_GPU_MEMORY_INFO])
+    {
+        GLint vram_kb;
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &vram_kb);
+
+        *vram_bytes = (UINT64)vram_kb * 1024;
+        TRACE("Got 0x%s as video memory from NVX_GPU_MEMORY_INFO extension.\n",
+                wine_dbgstr_longlong(*vram_bytes));
+    }
 
     if (wined3d_settings.pci_vendor_id != PCI_VENDOR_NONE)
     {
@@ -1187,6 +1197,7 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(const struct wined3d_gl_in
         return GL_VENDOR_FGLRX;
 
     if (strstr(gl_vendor_string, "Mesa")
+            || strstr(gl_vendor_string, "Brian Paul")
             || strstr(gl_vendor_string, "X.Org")
             || strstr(gl_vendor_string, "Advanced Micro Devices, Inc.")
             || strstr(gl_vendor_string, "DRI R300 Project")
@@ -1261,8 +1272,14 @@ static enum wined3d_feature_level feature_level_from_caps(const struct wined3d_g
     shader_model = min(shader_model, max(shader_caps->hs_version, 4));
     shader_model = min(shader_model, max(shader_caps->ds_version, 4));
 
+    /*
+     * Legacy nVidia driver doesn't the the ARB_POLYGON_OFFSET_CLAMP support.
+     * There is an implied support for Depth Bias Clamping in DirectX 10 but no real documenation for either case
+     * On the same hardware, on windows, it supports DirectX 10 without the need for this extension, So
+     *  removing this check and users can deal with the fact they might have minor artifacts from time to time.
+     */
     if (gl_info->supported[WINED3D_GL_VERSION_3_2]
-            && gl_info->supported[ARB_POLYGON_OFFSET_CLAMP]
+/*            && gl_info->supported[ARB_POLYGON_OFFSET_CLAMP]*/
             && gl_info->supported[ARB_SAMPLER_OBJECTS])
     {
         if (shader_model >= 5
@@ -2910,6 +2927,12 @@ static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info, struct 
         gl_info->limits.buffers = min(MAX_RENDER_TARGET_VIEWS, gl_max);
         TRACE("Max draw buffers: %u.\n", gl_max);
     }
+    if (gl_info->supported[ARB_BLEND_FUNC_EXTENDED])
+    {
+        gl_info->gl_ops.gl.p_glGetIntegerv(GL_MAX_DUAL_SOURCE_DRAW_BUFFERS, &gl_max);
+        gl_info->limits.dual_buffers = gl_max;
+        TRACE("Max dual source draw buffers: %u.\n", gl_max);
+    }
     if (gl_info->supported[ARB_MULTITEXTURE])
     {
         if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
@@ -3735,6 +3758,10 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter,
     d3d_info->valid_rt_mask = 0;
     for (i = 0; i < gl_info->limits.buffers; ++i)
         d3d_info->valid_rt_mask |= (1u << i);
+
+    d3d_info->valid_dual_rt_mask = 0;
+    for (i = 0; i < gl_info->limits.dual_buffers; ++i)
+        d3d_info->valid_dual_rt_mask |= (1u << i);
 
     if (!d3d_info->shader_color_key)
     {
