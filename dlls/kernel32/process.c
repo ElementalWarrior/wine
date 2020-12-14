@@ -58,6 +58,7 @@
 #include "winbase.h"
 #include "wincon.h"
 #include "kernel_private.h"
+#include "winreg.h"
 #include "psapi.h"
 #include "wine/exception.h"
 #include "wine/library.h"
@@ -68,6 +69,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifdef __APPLE__
 extern char **__wine_get_main_environment(void);
@@ -115,6 +117,8 @@ static WCHAR winevdm[] = {'C',':','\\','w','i','n','d','o','w','s',
                           '\\','w','i','n','e','v','d','m','.','e','x','e',0};
 
 static const char * const cpu_names[] = { "x86", "x86_64", "PowerPC", "ARM", "ARM64" };
+
+static DEP_SYSTEM_POLICY_TYPE system_DEP_policy = OptIn;
 
 static void exec_process( LPCWSTR name );
 
@@ -442,9 +446,17 @@ static HANDLE open_exe_file( const WCHAR *name, BOOL *is_64bit )
  */
 static BOOL find_exe_file( const WCHAR *name, WCHAR *buffer, int buflen, HANDLE *handle )
 {
+    WCHAR cur_dir[MAX_PATH];
+
     TRACE("looking for %s\n", debugstr_w(name) );
 
-    if (!SearchPathW( NULL, name, exeW, buflen, buffer, NULL ) &&
+    /* The working directory takes precedence over other locations for CreateProcess unless the
+     * 'NoDefaultCurrentDirectoryInExePath' environment variable is set (and the executable name
+     * does not contain a backslash). */
+    if ((NeedCurrentDirectoryForExePathW( name ) && GetCurrentDirectoryW( MAX_PATH, cur_dir) &&
+         !SearchPathW( cur_dir, name, exeW, buflen, buffer, NULL )) &&
+        /* not found in the working directory, try the system search path */
+        !SearchPathW( NULL, name, exeW, buflen, buffer, NULL ) &&
         /* no builtin found, try native without extension in case it is a Unix app */
         !SearchPathW( NULL, name, NULL, buflen, buffer, NULL )) return FALSE;
 
@@ -1236,12 +1248,19 @@ __ASM_GLOBAL_FUNC( call_process_entry,
                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
                     "movl %esp,%ebp\n\t"
                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "pushl %ebx\n\t"
+                    __ASM_CFI(".cfi_rel_offset %ebx,-4\n\t")
+                    "subl $12,%esp\n\t"
                     "pushl 4(%ebp)\n\t"  /* deliberately mis-align the stack by 8, Doom 3 needs this */
                     "pushl 4(%ebp)\n\t"  /* Driller expects readable address at this offset */
                     "pushl 4(%ebp)\n\t"
                     "pushl 8(%ebp)\n\t"
+                    "movl 8(%ebp),%ebx\n\t"
                     "call *12(%ebp)\n\t"
-                    "leave\n\t"
+                    "leal -4(%ebp),%esp\n\t"
+                    "popl %ebx\n\t"
+                    __ASM_CFI(".cfi_same_value %ebx\n\t")
+                    "popl %ebp\n\t"
                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                     __ASM_CFI(".cfi_same_value %ebp\n\t")
                     "ret" )
@@ -1287,6 +1306,15 @@ void WINAPI start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
 
     __TRY
     {
+        if (CreateEventA(0, 0, 0, "__winestaging_warn_event") && GetLastError() != ERROR_ALREADY_EXISTS)
+        {
+            FIXME_(winediag)("Wine Staging %s is a testing version containing experimental patches.\n", wine_get_version());
+            FIXME_(winediag)("Please mention your exact version when filing bug reports on winehq.org.\n");
+        }
+        else
+            WARN_(winediag)("Wine Staging %s is a testing version containing experimental patches.\n", wine_get_version());
+
+
         if (!CheckRemoteDebuggerPresent( GetCurrentProcess(), &being_debugged ))
             being_debugged = FALSE;
 
@@ -2331,7 +2359,7 @@ static BOOL replace_process( HANDLE handle, const RTL_USER_PROCESS_PARAMETERS *p
  * Create a new process. If hFile is a valid handle we have an exe
  * file, otherwise it is a Winelib app.
  */
-static BOOL create_process( HANDLE hFile, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
+static BOOL create_process( HANDLE token, HANDLE hFile, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                             BOOL inherit, DWORD flags, const RTL_USER_PROCESS_PARAMETERS *params,
                             LPPROCESS_INFORMATION info, LPCSTR unixdir, const pe_image_info_t *pe_info )
 {
@@ -2398,6 +2426,7 @@ static BOOL create_process( HANDLE hFile, LPSECURITY_ATTRIBUTES psa, LPSECURITY_
         req->access         = PROCESS_ALL_ACCESS;
         req->cpu            = pe_info->cpu;
         req->info_size      = startup_info_size;
+        req->token          = wine_server_obj_handle( token );
         wine_server_add_data( req, objattr, attr_len );
         wine_server_add_data( req, startup_info, startup_info_size );
         wine_server_add_data( req, params->Environment, (env_end - params->Environment) * sizeof(WCHAR) );
@@ -2557,7 +2586,7 @@ static RTL_USER_PROCESS_PARAMETERS *get_vdm_params( const RTL_USER_PROCESS_PARAM
  *
  * Create a new VDM process for a 16-bit or DOS application.
  */
-static BOOL create_vdm_process( LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
+static BOOL create_vdm_process( HANDLE token, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                                 BOOL inherit, DWORD flags, const RTL_USER_PROCESS_PARAMETERS *params,
                                 LPPROCESS_INFORMATION info, LPCSTR unixdir )
 {
@@ -2567,7 +2596,7 @@ static BOOL create_vdm_process( LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES
 
     if (!(new_params = get_vdm_params( params, &pe_info ))) return FALSE;
 
-    ret = create_process( 0, psa, tsa, inherit, flags, new_params, info, unixdir, &pe_info );
+    ret = create_process( token, 0, psa, tsa, inherit, flags, new_params, info, unixdir, &pe_info );
     RtlDestroyProcessParameters( new_params );
     return ret;
 }
@@ -2578,7 +2607,7 @@ static BOOL create_vdm_process( LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES
  *
  * Create a new cmd shell process for a .BAT file.
  */
-static BOOL create_cmd_process( LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
+static BOOL create_cmd_process( HANDLE token, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                                 BOOL inherit, DWORD flags, LPSTARTUPINFOW startup,
                                 const RTL_USER_PROCESS_PARAMETERS *params,
                                 LPPROCESS_INFORMATION info )
@@ -2608,9 +2637,9 @@ static BOOL create_cmd_process( LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES
     strcatW( newcmdline, params->CommandLine.Buffer );
     strcatW( newcmdline, quotW );
     if (params->CurrentDirectory.DosPath.Length) cur_dir = params->CurrentDirectory.DosPath.Buffer;
-    ret = CreateProcessW( comspec, newcmdline, psa, tsa, inherit,
+    ret = CreateProcessInternalW( token, comspec, newcmdline, psa, tsa, inherit,
                           flags | CREATE_UNICODE_ENVIRONMENT, params->Environment, cur_dir,
-                          startup, info );
+                          startup, info, NULL );
     HeapFree( GetProcessHeap(), 0, newcmdline );
     return ret;
 }
@@ -2724,7 +2753,9 @@ BOOL WINAPI CreateProcessInternalW( HANDLE token, LPCWSTR app_name, LPWSTR cmd_l
 
     TRACE("app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
 
-    if (token) FIXME("Creating a process with a token is not yet implemented\n");
+    /* FIXME: Starting a process which requires admin rights should fail
+     * with ERROR_ELEVATION_REQUIRED when no token is passed. */
+
     if (new_token) FIXME("No support for returning created process token\n");
 
     if (!(tidy_cmdline = get_file_name( app_name, cmd_line, name, ARRAY_SIZE( name ), &hFile, &is_64bit )))
@@ -2792,17 +2823,17 @@ BOOL WINAPI CreateProcessInternalW( HANDLE token, LPCWSTR app_name, LPWSTR cmd_l
                debugstr_w(name), is_64bit_arch(pe_info.cpu) ? 64 : 32,
                wine_dbgstr_longlong(pe_info.base), wine_dbgstr_longlong(pe_info.base + pe_info.map_size),
                cpu_names[pe_info.cpu] );
-        retv = create_process( hFile, process_attr, thread_attr,
+        retv = create_process( token, hFile, process_attr, thread_attr,
                                inherit, flags, params, info, unixdir, &pe_info );
         break;
     case BINARY_WIN16:
         TRACE( "starting %s as Win16/DOS binary\n", debugstr_w(name) );
-        retv = create_vdm_process( process_attr, thread_attr, inherit, flags, params, info, unixdir );
+        retv = create_vdm_process( token, process_attr, thread_attr, inherit, flags, params, info, unixdir );
         break;
     case BINARY_UNIX_LIB:
         TRACE( "starting %s as %d-bit Winelib app\n",
                debugstr_w(name), is_64bit_arch(pe_info.cpu) ? 64 : 32 );
-        retv = create_process( hFile, process_attr, thread_attr,
+        retv = create_process( token, hFile, process_attr, thread_attr,
                                inherit, flags, params, info, unixdir, &pe_info );
         break;
     case BINARY_UNKNOWN:
@@ -2812,14 +2843,14 @@ BOOL WINAPI CreateProcessInternalW( HANDLE token, LPCWSTR app_name, LPWSTR cmd_l
             if (!strcmpiW( p, comW ) || !strcmpiW( p, pifW ))
             {
                 TRACE( "starting %s as DOS binary\n", debugstr_w(name) );
-                retv = create_vdm_process( process_attr, thread_attr,
+                retv = create_vdm_process( token, process_attr, thread_attr,
                                            inherit, flags, params, info, unixdir );
                 break;
             }
             if (!strcmpiW( p, batW ) || !strcmpiW( p, cmdW ) )
             {
                 TRACE( "starting %s as batch binary\n", debugstr_w(name) );
-                retv = create_cmd_process( process_attr, thread_attr,
+                retv = create_cmd_process( token, process_attr, thread_attr,
                                            inherit, flags, startup_info, params, info );
                 break;
             }
@@ -4405,8 +4436,73 @@ DWORD WINAPI WTSGetActiveConsoleSessionId(void)
  */
 DEP_SYSTEM_POLICY_TYPE WINAPI GetSystemDEPPolicy(void)
 {
-    FIXME("stub\n");
-    return OptIn;
+    char buffer[MAX_PATH+10];
+    DWORD size = sizeof(buffer);
+    HKEY hkey = 0;
+    HKEY appkey = 0;
+    DWORD len, tmpvalue;
+    WINADVAPI LSTATUS   (WINAPI *pRegOpenKeyA)(HKEY,LPCSTR,PHKEY);
+    WINADVAPI LSTATUS   (WINAPI *pRegQueryValueExA)(HKEY,LPCSTR,LPDWORD,LPDWORD,LPBYTE,LPDWORD);
+    WINADVAPI LSTATUS   (WINAPI *pRegCloseKey)(HKEY);
+
+    TRACE("()\n");
+
+    pRegOpenKeyA = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegOpenKeyA");
+    pRegQueryValueExA = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegQueryValueExA");
+    pRegCloseKey = (void*)GetProcAddress(GetModuleHandleA("advapi32"), "RegCloseKey");
+    if ( !pRegOpenKeyA || !pRegQueryValueExA || !pRegCloseKey ) return OptIn;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\Boot.ini */
+    if ( pRegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Boot.ini", &hkey ) ) hkey = 0;
+
+    len = GetModuleFileNameA( 0, buffer, MAX_PATH );
+    if (len && len < MAX_PATH)
+    {
+        HKEY tmpkey;
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\Boot.ini */
+        if (!pRegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
+        {
+            char *p, *appname = buffer;
+            if ((p = strrchr( appname, '/' ))) appname = p + 1;
+            if ((p = strrchr( appname, '\\' ))) appname = p + 1;
+            strcat( appname, "\\Boot.ini" );
+            TRACE("appname = [%s]\n", appname);
+            if (pRegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
+            pRegCloseKey( tmpkey );
+        }
+    }
+
+    if (hkey || appkey)
+    {
+        if ((appkey && !pRegQueryValueExA(appkey, "NoExecute", 0, NULL, (BYTE *)buffer, &size)) ||
+            (hkey && !pRegQueryValueExA(hkey, "NoExecute", 0, NULL, (BYTE *)buffer, &size)))
+        {
+            if (!strcmp(buffer,"OptIn"))
+            {
+                TRACE("System DEP policy set to OptIn\n");
+                system_DEP_policy = OptIn;
+            }
+            else if (!strcmp(buffer,"OptOut"))
+            {
+                TRACE("System DEP policy set to OptOut\n");
+                system_DEP_policy = OptIn;
+            }
+            else if (!strcmp(buffer,"AlwaysOn"))
+            {
+                TRACE("System DEP policy set to AlwaysOn\n");
+                system_DEP_policy = AlwaysOn;
+            }
+            else if (!strcmp(buffer,"AlwaysOff"))
+            {
+                TRACE("System DEP policy set to AlwaysOff\n");
+                system_DEP_policy = AlwaysOff;
+            }
+        }
+    }
+
+    if (appkey) pRegCloseKey( appkey );
+    if (hkey) pRegCloseKey( hkey );
+    return system_DEP_policy;
 }
 
 /**********************************************************************
@@ -4414,9 +4510,35 @@ DEP_SYSTEM_POLICY_TYPE WINAPI GetSystemDEPPolicy(void)
  */
 BOOL WINAPI SetProcessDEPPolicy(DWORD newDEP)
 {
-    FIXME("(%d): stub\n", newDEP);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    ULONG dep_flags = 0;
+    NTSTATUS status;
+
+    TRACE("(%d)\n", newDEP);
+
+    if (is_wow64 || system_DEP_policy != OptIn && system_DEP_policy != OptOut )
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+
+    if (!newDEP)
+        dep_flags = MEM_EXECUTE_OPTION_ENABLE;
+    else if (newDEP & PROCESS_DEP_ENABLE)
+        dep_flags = MEM_EXECUTE_OPTION_DISABLE|MEM_EXECUTE_OPTION_PERMANENT;
+    else
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+
+    if (newDEP & PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION)
+        dep_flags |= MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION;
+
+    status = NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags,
+                                        &dep_flags, sizeof(dep_flags) );
+
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
 }
 
 /**********************************************************************
@@ -4573,14 +4695,21 @@ BOOL WINAPI GetProcessDEPPolicy(HANDLE process, LPDWORD flags, PBOOL permanent)
         if (flags)
         {
             *flags = 0;
-            if (dep_flags & MEM_EXECUTE_OPTION_DISABLE)
-                *flags |= PROCESS_DEP_ENABLE;
-            if (dep_flags & MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION)
-                *flags |= PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION;
+            if (system_DEP_policy != AlwaysOff)
+            {
+                if (dep_flags & MEM_EXECUTE_OPTION_DISABLE || system_DEP_policy == AlwaysOn)
+                    *flags |= PROCESS_DEP_ENABLE;
+                if (dep_flags & MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION)
+                    *flags |= PROCESS_DEP_DISABLE_ATL_THUNK_EMULATION;
+            }
         }
 
         if (permanent)
+        {
             *permanent = (dep_flags & MEM_EXECUTE_OPTION_PERMANENT) != 0;
+            if (system_DEP_policy == AlwaysOn || system_DEP_policy == AlwaysOff)
+                *permanent = TRUE;
+        }
 
     }
     if (status) SetLastError( RtlNtStatusToDosError(status) );
