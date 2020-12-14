@@ -2338,15 +2338,15 @@ static void d2d_geometry_cleanup(struct d2d_geometry *geometry)
     heap_free(geometry->fill.bezier_vertices);
     heap_free(geometry->fill.faces);
     heap_free(geometry->fill.vertices);
-    ID2D1Factory_Release(geometry->factory);
+    ID2D1Factory1_Release(geometry->factory);
 }
 
-static void d2d_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory,
+static void d2d_geometry_init(struct d2d_geometry *geometry, ID2D1Factory1 *factory,
         const D2D1_MATRIX_3X2_F *transform, const struct ID2D1GeometryVtbl *vtbl)
 {
     geometry->ID2D1Geometry_iface.lpVtbl = vtbl;
     geometry->refcount = 1;
-    ID2D1Factory_AddRef(geometry->factory = factory);
+    ID2D1Factory1_AddRef(geometry->factory = factory);
     geometry->transform = *transform;
 }
 
@@ -2982,7 +2982,7 @@ static const struct ID2D1GeometrySinkVtbl d2d_geometry_sink_vtbl =
 
 static inline struct d2d_geometry *impl_from_ID2D1PathGeometry(ID2D1PathGeometry *iface)
 {
-    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_QueryInterface(ID2D1PathGeometry *iface, REFIID iid, void **out)
@@ -3035,10 +3035,14 @@ static ULONG STDMETHODCALLTYPE d2d_path_geometry_Release(ID2D1PathGeometry *ifac
 static void STDMETHODCALLTYPE d2d_path_geometry_GetFactory(ID2D1PathGeometry *iface, ID2D1Factory **factory)
 {
     struct d2d_geometry *geometry = impl_from_ID2D1PathGeometry(iface);
+    HRESULT hr;
 
     TRACE("iface %p, factory %p.\n", iface, factory);
 
-    ID2D1Factory_AddRef(*factory = geometry->factory);
+    if (FAILED(hr = ID2D1Factory1_QueryInterface(geometry->factory, &IID_ID2D1Factory, (void **)factory)))
+    {
+        WARN("Unable to query ID2D1Factory interface %#x", hr);
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_GetBounds(ID2D1PathGeometry *iface,
@@ -3486,7 +3490,7 @@ static const struct ID2D1PathGeometryVtbl d2d_path_geometry_vtbl =
     d2d_path_geometry_GetFigureCount,
 };
 
-void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory)
+void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory1 *factory)
 {
     d2d_geometry_init(geometry, factory, &identity, (ID2D1GeometryVtbl *)&d2d_path_geometry_vtbl);
     geometry->u.path.ID2D1GeometrySink_iface.lpVtbl = &d2d_geometry_sink_vtbl;
@@ -3498,7 +3502,7 @@ void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory
 
 static inline struct d2d_geometry *impl_from_ID2D1RectangleGeometry(ID2D1RectangleGeometry *iface)
 {
-    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_QueryInterface(ID2D1RectangleGeometry *iface,
@@ -3551,10 +3555,14 @@ static ULONG STDMETHODCALLTYPE d2d_rectangle_geometry_Release(ID2D1RectangleGeom
 static void STDMETHODCALLTYPE d2d_rectangle_geometry_GetFactory(ID2D1RectangleGeometry *iface, ID2D1Factory **factory)
 {
     struct d2d_geometry *geometry = impl_from_ID2D1RectangleGeometry(iface);
+    HRESULT hr;
 
     TRACE("iface %p, factory %p.\n", iface, factory);
 
-    ID2D1Factory_AddRef(*factory = geometry->factory);
+    if (FAILED(hr = ID2D1Factory1_QueryInterface(geometry->factory, &IID_ID2D1Factory, (void **)factory)))
+    {
+        WARN("Unable to query ID2D1Factory interface %#x", hr);
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_GetBounds(ID2D1RectangleGeometry *iface,
@@ -3774,7 +3782,7 @@ static const struct ID2D1RectangleGeometryVtbl d2d_rectangle_geometry_vtbl =
     d2d_rectangle_geometry_GetRect,
 };
 
-HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory, const D2D1_RECT_F *rect)
+HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry, ID2D1Factory1 *factory, const D2D1_RECT_F *rect)
 {
     struct d2d_face *f;
     D2D1_POINT_2F *v;
@@ -3833,7 +3841,7 @@ fail:
 
 static inline struct d2d_geometry *impl_from_ID2D1TransformedGeometry(ID2D1TransformedGeometry *iface)
 {
-    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_QueryInterface(ID2D1TransformedGeometry *iface,
@@ -3895,10 +3903,14 @@ static void STDMETHODCALLTYPE d2d_transformed_geometry_GetFactory(ID2D1Transform
         ID2D1Factory **factory)
 {
     struct d2d_geometry *geometry = impl_from_ID2D1TransformedGeometry(iface);
+    HRESULT hr;
 
     TRACE("iface %p, factory %p.\n", iface, factory);
 
-    ID2D1Factory_AddRef(*factory = geometry->factory);
+    if (FAILED(hr = ID2D1Factory1_QueryInterface(geometry->factory, &IID_ID2D1Factory, (void **)factory)))
+    {
+        WARN("Unable to query ID2D1Factory interface %#x", hr);
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_GetBounds(ID2D1TransformedGeometry *iface,
@@ -4091,7 +4103,7 @@ static const struct ID2D1TransformedGeometryVtbl d2d_transformed_geometry_vtbl =
     d2d_transformed_geometry_GetTransform,
 };
 
-void d2d_transformed_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory,
+void d2d_transformed_geometry_init(struct d2d_geometry *geometry, ID2D1Factory1 *factory,
         ID2D1Geometry *src_geometry, const D2D_MATRIX_3X2_F *transform)
 {
     struct d2d_geometry *src_impl;

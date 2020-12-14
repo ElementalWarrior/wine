@@ -49,27 +49,49 @@ WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
 static const WCHAR backslashW[] = {'\\',0};
 
+struct product_desc
+{
+    WORD vid;
+    WORD pid;
+    const WCHAR* manufacturer;
+    const WCHAR* product;
+    const WCHAR* serialnumber;
+};
+
 #define VID_MICROSOFT 0x045e
 
-static const WORD PID_XBOX_CONTROLLERS[] =  {
-    0x0202, /* Xbox Controller */
-    0x0285, /* Xbox Controller S */
-    0x0289, /* Xbox Controller S */
-    0x028e, /* Xbox360 Controller */
-    0x028f, /* Xbox360 Wireless Controller */
-    0x02d1, /* Xbox One Controller */
-    0x02dd, /* Xbox One Controller (Covert Forces/Firmware 2015) */
-    0x02e0, /* Xbox One X Controller */
-    0x02e3, /* Xbox One Elite Controller */
-    0x02e6, /* Wireless XBox Controller Dongle */
-    0x02ea, /* Xbox One S Controller */
-    0x02fd, /* Xbox One S Controller (Firmware 2017) */
-    0x0719, /* Xbox 360 Wireless Adapter */
+static const WCHAR xbox360_product_string[] = {
+    'C','o','n','t','r','o','l','l','e','r',' ','(','X','B','O','X',' ','3','6','0',' ','F','o','r',' ','W','i','n','d','o','w','s',')',0
+};
+
+static const WCHAR xboxone_product_string[] = {
+    'C','o','n','t','r','o','l','l','e','r',' ','(','X','B','O','X',' ','O','n','e',' ','F','o','r',' ','W','i','n','d','o','w','s',')',0
+};
+
+static const struct product_desc XBOX_CONTROLLERS[] = {
+    {VID_MICROSOFT, 0x0202, NULL, NULL, NULL}, /* Xbox Controller */
+    {VID_MICROSOFT, 0x0285, NULL, NULL, NULL}, /* Xbox Controller S */
+    {VID_MICROSOFT, 0x0289, NULL, NULL, NULL}, /* Xbox Controller S */
+    {VID_MICROSOFT, 0x028e, NULL, xbox360_product_string, NULL}, /* Xbox360 Controller */
+    {VID_MICROSOFT, 0x028f, NULL, xbox360_product_string, NULL}, /* Xbox360 Wireless Controller */
+    {VID_MICROSOFT, 0x02d1, NULL, xboxone_product_string, NULL}, /* Xbox One Controller */
+    {VID_MICROSOFT, 0x02dd, NULL, xboxone_product_string, NULL}, /* Xbox One Controller (Covert Forces/Firmware 2015) */
+    {VID_MICROSOFT, 0x02e0, NULL, NULL, NULL}, /* Xbox One X Controller */
+    {VID_MICROSOFT, 0x02e3, NULL, xboxone_product_string, NULL}, /* Xbox One Elite Controller */
+    {VID_MICROSOFT, 0x02e6, NULL, NULL, NULL}, /* Wireless XBox Controller Dongle */
+    {VID_MICROSOFT, 0x02ea, NULL, xboxone_product_string, NULL}, /* Xbox One S Controller */
+    {VID_MICROSOFT, 0x02fd, NULL, xboxone_product_string, NULL}, /* Xbox One S Controller (Firmware 2017) */
+    {VID_MICROSOFT, 0x0719, NULL, xbox360_product_string, NULL}, /* Xbox 360 Wireless Adapter */
 };
 
 static DRIVER_OBJECT *driver_obj;
 
+
 static DEVICE_OBJECT *mouse_obj;
+
+/* The root-enumerated device stack. */
+DEVICE_OBJECT *bus_pdo;
+static DEVICE_OBJECT *bus_fdo;
 
 HANDLE driver_key;
 
@@ -469,18 +491,57 @@ static NTSTATUS handle_IRP_MN_QUERY_ID(DEVICE_OBJECT *device, IRP *irp)
     return status;
 }
 
-static NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
+static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
+{
+    static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
+    static const UNICODE_STRING SDL_enabled = {sizeof(SDL_enabledW) - sizeof(WCHAR), sizeof(SDL_enabledW), (WCHAR*)SDL_enabledW};
+    IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
+    NTSTATUS ret;
+
+    switch (irpsp->MinorFunction)
+    {
+    case IRP_MN_QUERY_DEVICE_RELATIONS:
+        irp->IoStatus.u.Status = handle_IRP_MN_QUERY_DEVICE_RELATIONS(irp);
+        break;
+    case IRP_MN_START_DEVICE:
+        if (check_bus_option(&SDL_enabled, 1))
+        {
+            if (sdl_driver_init() == STATUS_SUCCESS)
+                return STATUS_SUCCESS;
+        }
+        udev_driver_init();
+        iohid_driver_init();
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
+        break;
+    case IRP_MN_SURPRISE_REMOVAL:
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
+        break;
+    case IRP_MN_REMOVE_DEVICE:
+        udev_driver_unload();
+        iohid_driver_unload();
+        sdl_driver_unload();
+
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
+        IoSkipCurrentIrpStackLocation(irp);
+        ret = IoCallDriver(bus_pdo, irp);
+        IoDetachDevice(bus_pdo);
+        IoDeleteDevice(device);
+        return ret;
+    default:
+        FIXME("Unhandled minor function %#x.\n", irpsp->MinorFunction);
+    }
+
+    IoSkipCurrentIrpStackLocation(irp);
+    return IoCallDriver(bus_pdo, irp);
+}
+
+static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     NTSTATUS status = irp->IoStatus.u.Status;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
 
     switch (irpsp->MinorFunction)
     {
-        case IRP_MN_QUERY_DEVICE_RELATIONS:
-            TRACE("IRP_MN_QUERY_DEVICE_RELATIONS\n");
-            status = handle_IRP_MN_QUERY_DEVICE_RELATIONS(irp);
-            irp->IoStatus.u.Status = status;
-            break;
         case IRP_MN_QUERY_ID:
             TRACE("IRP_MN_QUERY_ID\n");
             status = handle_IRP_MN_QUERY_ID(device, irp);
@@ -496,6 +557,13 @@ static NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
     IoCompleteRequest(irp, IO_NO_INCREMENT);
     return status;
+}
+
+static NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
+{
+    if (device == bus_fdo)
+        return fdo_pnp_dispatch(device, irp);
+    return pdo_pnp_dispatch(device, irp);
 }
 
 static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE* buffer, ULONG_PTR *out_length)
@@ -514,6 +582,51 @@ static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_l
     }
 }
 
+static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    int i;
+
+    if (ext->vid == VID_MICROSOFT)
+    {
+        for (i = 0; i < ARRAY_SIZE(XBOX_CONTROLLERS); i++)
+        {
+            if (ext->pid == XBOX_CONTROLLERS[i].pid)
+                break;
+        }
+
+        if (i >= ARRAY_SIZE(XBOX_CONTROLLERS))
+            return STATUS_UNSUCCESSFUL;
+
+        switch (index)
+        {
+        case HID_STRING_ID_IPRODUCT:
+            if (XBOX_CONTROLLERS[i].product)
+            {
+                strcpyW(buffer, XBOX_CONTROLLERS[i].product);
+                return STATUS_SUCCESS;
+            }
+            break;
+        case HID_STRING_ID_IMANUFACTURER:
+            if (XBOX_CONTROLLERS[i].manufacturer)
+            {
+                strcpyW(buffer, XBOX_CONTROLLERS[i].manufacturer);
+                return STATUS_SUCCESS;
+            }
+            break;
+        case HID_STRING_ID_ISERIALNUMBER:
+            if (XBOX_CONTROLLERS[i].serialnumber)
+            {
+                strcpyW(buffer, XBOX_CONTROLLERS[i].serialnumber);
+                return STATUS_SUCCESS;
+            }
+            break;
+        }
+    }
+
+    return STATUS_UNSUCCESSFUL;
+}
+
 static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     NTSTATUS status = irp->IoStatus.u.Status;
@@ -521,6 +634,12 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
 
     TRACE("(%p, %p)\n", device, irp);
+
+    if (device == bus_fdo)
+    {
+        IoSkipCurrentIrpStackLocation(irp);
+        return IoCallDriver(bus_pdo, irp);
+    }
 
     switch (irpsp->Parameters.DeviceIoControl.IoControlCode)
     {
@@ -593,7 +712,9 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             DWORD index = (ULONG_PTR)irpsp->Parameters.DeviceIoControl.Type3InputBuffer;
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
-            irp->IoStatus.u.Status = status = ext->vtbl->get_string(device, index, (WCHAR *)irp->UserBuffer, length);
+            irp->IoStatus.u.Status = status = hid_get_native_string(device, index, (WCHAR *)irp->UserBuffer, length);
+            if (status != STATUS_SUCCESS)
+                irp->IoStatus.u.Status = status = ext->vtbl->get_string(device, index, (WCHAR *)irp->UserBuffer, length);
             if (status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
@@ -758,17 +879,34 @@ BOOL is_xbox_gamepad(WORD vid, WORD pid)
     if (vid != VID_MICROSOFT)
         return FALSE;
 
-    for (i = 0; i < ARRAY_SIZE(PID_XBOX_CONTROLLERS); i++)
-        if (pid == PID_XBOX_CONTROLLERS[i]) return TRUE;
+    for (i = 0; i < ARRAY_SIZE(XBOX_CONTROLLERS); i++)
+        if (pid == XBOX_CONTROLLERS[i].pid) return TRUE;
 
     return FALSE;
 }
 
+static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *pdo)
+{
+    NTSTATUS ret;
+
+    TRACE("driver %p, pdo %p.\n", driver, pdo);
+
+    if ((ret = IoCreateDevice(driver, 0, NULL, FILE_DEVICE_BUS_EXTENDER, 0, FALSE, &bus_fdo)))
+    {
+        ERR("Failed to create FDO, status %#x.\n", ret);
+        return ret;
+    }
+
+    IoAttachDeviceToDeviceStack(bus_fdo, pdo);
+    bus_pdo = pdo;
+
+    bus_fdo->Flags &= ~DO_DEVICE_INITIALIZING;
+
+    return STATUS_SUCCESS;
+}
+
 static void WINAPI driver_unload(DRIVER_OBJECT *driver)
 {
-    udev_driver_unload();
-    iohid_driver_unload();
-    sdl_driver_unload();
     NtClose(driver_key);
 }
 
@@ -844,8 +982,6 @@ static void mouse_device_create(void)
 
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 {
-    static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
-    static const UNICODE_STRING SDL_enabled = {sizeof(SDL_enabledW) - sizeof(WCHAR), sizeof(SDL_enabledW), (WCHAR*)SDL_enabledW};
     OBJECT_ATTRIBUTES attr = {0};
     NTSTATUS ret;
 
@@ -861,17 +997,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     driver->MajorFunction[IRP_MJ_PNP] = common_pnp_dispatch;
     driver->MajorFunction[IRP_MJ_INTERNAL_DEVICE_CONTROL] = hid_internal_dispatch;
+    driver->DriverExtension->AddDevice = driver_add_device;
     driver->DriverUnload = driver_unload;
-
-    mouse_device_create();
-
-    if (check_bus_option(&SDL_enabled, 1))
-    {
-        if (sdl_driver_init() == STATUS_SUCCESS)
-            return STATUS_SUCCESS;
-    }
-    udev_driver_init();
-    iohid_driver_init();
 
     return STATUS_SUCCESS;
 }

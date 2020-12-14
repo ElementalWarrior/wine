@@ -1,10 +1,21 @@
 MODULE    = qedit.dll
-IMPORTS   = strmiids strmbase uuid oleaut32 ole32 advapi32
+IMPORTS   = strmiids uuid oleaut32 ole32 advapi32
+PARENTSRC = ../strmbase
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
+	dispatch.c \
+	enumpins.c \
+	filter.c \
 	main.c \
 	mediadet.c \
+	mediatype.c \
 	nullrenderer.c \
+	pin.c \
+	pospass.c \
+	qualitycontrol.c \
+	renderer.c \
 	samplegrabber.c \
 	timeline.c
 

@@ -1,8 +1,19 @@
 MODULE    = evr.dll
-IMPORTS   = mfuuid strmiids strmbase uuid ole32 oleaut32
+IMPORTS   = mfuuid strmiids uuid ole32 oleaut32
+PARENTSRC = ../strmbase
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
+	dispatch.c \
+	enumpins.c \
 	evr.c \
-	main.c
+	filter.c \
+	main.c \
+	mediatype.c \
+	pin.c \
+	pospass.c \
+	qualitycontrol.c \
+	renderer.c
 
 IDL_SRCS = evr_classes.idl
