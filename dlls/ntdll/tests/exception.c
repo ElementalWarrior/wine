@@ -3893,7 +3893,7 @@ static LONG CALLBACK outputdebugstring_vectored_handler(EXCEPTION_POINTERS *Exce
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static void test_outputdebugstring(DWORD numexc, BOOL todo)
+static void test_outputdebugstring(DWORD numexc)
 {
     PVOID vectored_handler;
 
@@ -3909,7 +3909,6 @@ static void test_outputdebugstring(DWORD numexc, BOOL todo)
     outputdebugstring_exceptions = 0;
     OutputDebugStringA("Hello World");
 
-    todo_wine_if(todo)
     ok(outputdebugstring_exceptions == numexc, "OutputDebugStringA generated %d exceptions, expected %d\n",
        outputdebugstring_exceptions, numexc);
 
@@ -4509,9 +4508,9 @@ START_TEST(exception)
             run_rtlraiseexception_test(EXCEPTION_BREAKPOINT);
             run_rtlraiseexception_test(EXCEPTION_INVALID_HANDLE);
             test_stage = 3;
-            test_outputdebugstring(0, FALSE);
+            test_outputdebugstring(0);
             test_stage = 4;
-            test_outputdebugstring(2, TRUE); /* is this a Windows bug? */
+            test_outputdebugstring(2);
             test_stage = 5;
             test_ripevent(0);
             test_stage = 6;
@@ -4588,7 +4587,7 @@ START_TEST(exception)
 #endif
 
     test_thread_context();
-    test_outputdebugstring(1, FALSE);
+    test_outputdebugstring(1);
     test_ripevent(1);
     test_breakpoint(1);
     test_closehandle(0, (HANDLE)0xdeadbeef);
