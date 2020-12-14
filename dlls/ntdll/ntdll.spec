@@ -131,7 +131,7 @@
 @ stdcall NtCompleteConnectPort(ptr)
 # @ stub NtCompressKey
 @ stdcall NtConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr)
-@ stub NtContinue
+@ stdcall NtContinue(ptr long)
 # @ stub NtCreateDebugObject
 @ stdcall NtCreateDirectoryObject(ptr long ptr)
 @ stdcall NtCreateEvent(ptr long ptr long long)
@@ -155,7 +155,7 @@
 @ stdcall NtCreateSection(ptr long ptr ptr long long long)
 @ stdcall NtCreateSemaphore(ptr long ptr long long)
 @ stdcall NtCreateSymbolicLinkObject(ptr long ptr ptr)
-@ stub NtCreateThread
+@ stdcall NtCreateThread(ptr long ptr long ptr ptr ptr long)
 @ stdcall NtCreateThreadEx(ptr long ptr long ptr ptr long long long long ptr)
 @ stdcall NtCreateTimer(ptr long ptr long)
 @ stub NtCreateToken
@@ -180,7 +180,7 @@
 # @ stub NtEnumerateSystemEnvironmentValuesEx
 @ stdcall NtEnumerateValueKey(long long long ptr long ptr)
 @ stub NtExtendSection
-# @ stub NtFilterToken
+@ stdcall NtFilterToken(long long ptr ptr ptr ptr)
 @ stdcall NtFindAtom(ptr long ptr)
 @ stdcall NtFlushBuffersFile(long ptr)
 @ stdcall NtFlushInstructionCache(long ptr long)
@@ -1050,6 +1050,7 @@
 @ stdcall WinSqmIsOptedIn()
 @ stdcall WinSqmSetDWORD(ptr long long)
 @ stdcall WinSqmStartSession(ptr long long)
+@ extern Wow64Transition
 @ stdcall -private ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
 @ stdcall -private ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
 @ stdcall -private ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
@@ -1083,7 +1084,7 @@
 @ stdcall -private ZwCompleteConnectPort(ptr) NtCompleteConnectPort
 # @ stub ZwCompressKey
 @ stdcall -private ZwConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr) NtConnectPort
-@ stub ZwContinue
+@ stdcall -private ZwContinue(ptr long) NtContinue
 # @ stub ZwCreateDebugObject
 @ stdcall -private ZwCreateDirectoryObject(ptr long ptr) NtCreateDirectoryObject
 @ stdcall -private ZwCreateEvent(ptr long ptr long long) NtCreateEvent
@@ -1499,8 +1500,11 @@
 # All functions must be prefixed with '__wine_' (for internal functions)
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
+@ cdecl __wine_esync_set_queue_fd(long)
+
 # Server interface
 @ cdecl -norelay wine_server_call(ptr)
+@ cdecl wine_server_close_fds_by_type(long)
 @ cdecl wine_server_fd_to_handle(long long long ptr)
 @ cdecl wine_server_handle_to_fd(long long ptr ptr)
 @ cdecl wine_server_release_fd(long long)
@@ -1516,8 +1520,12 @@
 # Virtual memory
 @ cdecl __wine_locked_recvmsg(long ptr long)
 
+# Token
+@ cdecl __wine_create_default_token(long)
+
 # Version
 @ cdecl wine_get_version() NTDLL_wine_get_version
+@ cdecl wine_get_patches() NTDLL_wine_get_patches
 @ cdecl wine_get_build_id() NTDLL_wine_get_build_id
 @ cdecl wine_get_host_version(ptr ptr) NTDLL_wine_get_host_version
 
@@ -1530,3 +1538,6 @@
 # Filesystem
 @ cdecl wine_nt_to_unix_file_name(ptr ptr long long)
 @ cdecl wine_unix_to_nt_file_name(ptr ptr)
+
+# User shared data
+@ cdecl __wine_user_shared_data()
