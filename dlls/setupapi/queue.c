@@ -338,7 +338,7 @@ static void get_source_info( HINF hinf, const WCHAR *src_file, SP_FILE_COPY_PARA
  *
  * Retrieve the destination dir for a given section.
  */
-static WCHAR *get_destination_dir( HINF hinf, const WCHAR *section )
+WCHAR *get_destination_dir( HINF hinf, const WCHAR *section )
 {
     static const WCHAR Dest[] = {'D','e','s','t','i','n','a','t','i','o','n','D','i','r','s',0};
     static const WCHAR Def[]  = {'D','e','f','a','u','l','t','D','e','s','t','D','i','r',0};
@@ -1135,7 +1135,7 @@ static BOOL do_file_copyW( LPCWSTR source, LPCWSTR target, DWORD style,
         }
     }
     if (style & (SP_COPY_NODECOMP | SP_COPY_LANGUAGEAWARE | SP_COPY_FORCE_IN_USE |
-                 SP_COPY_IN_USE_NEEDS_REBOOT | SP_COPY_NOSKIP | SP_COPY_WARNIFSKIP))
+                 SP_COPY_NOSKIP | SP_COPY_WARNIFSKIP))
     {
         ERR("Unsupported style(s) 0x%x\n",style);
     }
@@ -1144,6 +1144,24 @@ static BOOL do_file_copyW( LPCWSTR source, LPCWSTR target, DWORD style,
     {
         rc = CopyFileW(source,target,FALSE);
         TRACE("Did copy... rc was %i\n",rc);
+
+        if (!rc && GetLastError() == ERROR_SHARING_VIOLATION &&
+            (style & SP_COPY_IN_USE_NEEDS_REBOOT))
+        {
+            static const WCHAR prefixW[] = {'S','E','T',0};
+            WCHAR temp_file[MAX_PATH];
+            WCHAR temp[MAX_PATH];
+
+            if (GetTempPathW(MAX_PATH, temp) &&
+                GetTempFileNameW(temp, prefixW, 0, temp_file))
+            {
+                rc = CopyFileW(source, temp_file, FALSE);
+                if (rc)
+                    rc = MoveFileExW(temp_file, target, MOVEFILE_DELAY_UNTIL_REBOOT);
+                else
+                    DeleteFileW(temp_file);
+            }
+        }
     }
     else
         SetLastError(ERROR_SUCCESS);

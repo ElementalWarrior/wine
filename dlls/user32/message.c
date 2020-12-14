@@ -2295,54 +2295,14 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
     rawinput->header.dwType = msg_data->rawinput.type;
     if (msg_data->rawinput.type == RIM_TYPEMOUSE)
     {
-        static const unsigned int button_flags[] =
-        {
-            0,                              /* MOUSEEVENTF_MOVE */
-            RI_MOUSE_LEFT_BUTTON_DOWN,      /* MOUSEEVENTF_LEFTDOWN */
-            RI_MOUSE_LEFT_BUTTON_UP,        /* MOUSEEVENTF_LEFTUP */
-            RI_MOUSE_RIGHT_BUTTON_DOWN,     /* MOUSEEVENTF_RIGHTDOWN */
-            RI_MOUSE_RIGHT_BUTTON_UP,       /* MOUSEEVENTF_RIGHTUP */
-            RI_MOUSE_MIDDLE_BUTTON_DOWN,    /* MOUSEEVENTF_MIDDLEDOWN */
-            RI_MOUSE_MIDDLE_BUTTON_UP,      /* MOUSEEVENTF_MIDDLEUP */
-        };
-        unsigned int i;
-
         rawinput->header.dwSize  = FIELD_OFFSET(RAWINPUT, data) + sizeof(RAWMOUSE);
         rawinput->header.hDevice = WINE_MOUSE_HANDLE;
         rawinput->header.wParam  = 0;
 
-        rawinput->data.mouse.usFlags           = MOUSE_MOVE_RELATIVE;
-        rawinput->data.mouse.u.s.usButtonFlags = 0;
-        rawinput->data.mouse.u.s.usButtonData  = 0;
-        for (i = 1; i < ARRAY_SIZE(button_flags); ++i)
-        {
-            if (msg_data->flags & (1 << i))
-                rawinput->data.mouse.u.s.usButtonFlags |= button_flags[i];
-        }
-        if (msg_data->flags & MOUSEEVENTF_WHEEL)
-        {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
-        }
-        if (msg_data->flags & MOUSEEVENTF_HWHEEL)
-        {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_HORIZONTAL_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
-        }
-        if (msg_data->flags & MOUSEEVENTF_XDOWN)
-        {
-            if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_DOWN;
-            else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_DOWN;
-        }
-        if (msg_data->flags & MOUSEEVENTF_XUP)
-        {
-            if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_UP;
-            else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_UP;
-        }
+        rawinput->data.mouse.usFlags            = msg_data->rawinput.mouse.flags;
+
+        rawinput->data.mouse.u.s.usButtonFlags = msg_data->rawinput.mouse.button_flags;
+        rawinput->data.mouse.u.s.usButtonData = msg_data->rawinput.mouse.button_data;
 
         rawinput->data.mouse.ulRawButtons       = 0;
         rawinput->data.mouse.lLastX             = msg_data->rawinput.mouse.x;
@@ -2508,7 +2468,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     {
         HWND orig = msg->hwnd;
 
-        msg->hwnd = WINPOS_WindowFromPoint( msg->hwnd, msg->pt, &hittest );
+        msg->hwnd = WINPOS_WindowFromPoint( 0, msg->pt, &hittest );
         if (!msg->hwnd) /* As a heuristic, try the next window if it's the owner of orig */
         {
             HWND next = GetWindow( orig, GW_HWNDNEXT );
@@ -2756,6 +2716,18 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
     size_t buffer_size = 256;
+    shmlocal_t *shm = wine_get_shmlocal();
+
+    /* From time to time we are forced to do a wineserver call in
+     * order to update last_msg_time stored for each server thread. */
+    if (shm && GetTickCount() - thread_info->last_get_msg < 500)
+    {
+        int filter = flags >> 16;
+        if (!filter) filter = QS_ALLINPUT;
+        filter |= QS_SENDMESSAGE;
+        if (filter & QS_INPUT) filter |= QS_INPUT;
+        if (!(shm->queue_bits & filter)) return FALSE;
+    }
 
     if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return -1;
 
@@ -2769,6 +2741,8 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         const message_data_t *msg_data = buffer;
 
         thread_info->msg_source = prev_source;
+
+        if (shm) thread_info->last_get_msg = GetTickCount();
 
         SERVER_START_REQ( get_message )
         {
@@ -4496,7 +4470,7 @@ UINT_PTR WINAPI SetCoalescableTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMER
 
     if (proc) winproc = WINPROC_AllocProc( (WNDPROC)proc, FALSE );
 
-    timeout = min( max( USER_TIMER_MINIMUM, timeout ), USER_TIMER_MAXIMUM );
+    timeout = min( max( 5, timeout ), USER_TIMER_MAXIMUM );
 
     SERVER_START_REQ( set_win_timer )
     {
