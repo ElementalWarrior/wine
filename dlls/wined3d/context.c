@@ -3059,7 +3059,7 @@ void wined3d_context_gl_apply_blit_state(struct wined3d_context_gl *context_gl, 
     const struct wined3d_gl_info *gl_info;
     uint32_t rt_mask, *cur_mask;
     struct wined3d_texture *rt;
-    unsigned int sampler;
+    unsigned int i, sampler;
     SIZE rt_size;
 
     TRACE("Setting up context %p for blitting.\n", context);
@@ -3166,10 +3166,8 @@ void wined3d_context_gl_apply_blit_state(struct wined3d_context_gl *context_gl, 
         context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE));
     }
     gl_info->gl_ops.gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE1));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE2));
-    context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITEENABLE3));
+    for (i = 0; i < MAX_RENDER_TARGETS; ++i)
+        context_invalidate_state(context, STATE_RENDER(WINED3D_RS_COLORWRITE(i)));
 
     context->last_was_rhw = TRUE;
     context_invalidate_state(context, STATE_VDECL); /* because of last_was_rhw = TRUE */
@@ -3447,10 +3445,23 @@ static uint32_t find_draw_buffers_mask(const struct wined3d_context_gl *context_
     else if (!context_gl->c.render_offscreen)
         return context_generate_rt_mask_from_resource(rts[0]->resource);
 
+    /* If we attach more buffers than supported in dual blend mode, the NVIDIA
+     * driver generates the following error:
+     *      GL_INVALID_OPERATION error generated. State(s) are invalid: blend.
+     * DX11 does not treat this configuration as invalid, so disable the unused ones.
+     */
     rt_mask = ps ? ps->reg_maps.rt_mask : 1;
-    rt_mask &= (1u << gl_info->limits.buffers) - 1;
+
+    if (wined3d_dualblend_enabled(state, gl_info) && ps)
+    {
+        const struct wined3d_d3d_info *d3d_info = &ps->device->adapter->d3d_info;
+        rt_mask &= d3d_info->valid_dual_rt_mask;
+    }
+    else
+        rt_mask &= (1u << gl_info->limits.buffers) - 1;
 
     mask = rt_mask;
+    i = 0;
     while (mask)
     {
         i = wined3d_bit_scan(&mask);
@@ -5159,7 +5170,7 @@ void draw_primitive(struct wined3d_device *device, const struct wined3d_state *s
         if (!(rtv = fb->render_targets[i]) || rtv->format->id == WINED3DFMT_NULL)
             continue;
 
-        if (state->render_states[WINED3D_RS_COLORWRITEENABLE])
+        if (state->render_states[WINED3D_RS_COLORWRITE(i)])
         {
             wined3d_rendertarget_view_load_location(rtv, context, rtv->resource->draw_binding);
             wined3d_rendertarget_view_invalidate_location(rtv, ~rtv->resource->draw_binding);

@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "wine/test.h"
+#include "ddk/wdm.h"
 
 static unsigned int page_size;
 
@@ -513,6 +514,20 @@ static void test_NtMapViewOfSection(void)
     CloseHandle(process);
 }
 
+static void test_user_shared_data(void)
+{
+    const KSHARED_USER_DATA *user_shared_data = (void *)0x7ffe0000;
+    SYSTEM_BASIC_INFORMATION sbi;
+    NTSTATUS status;
+
+    memset(&sbi, 0, sizeof(sbi));
+    status = NtQuerySystemInformation(SystemBasicInformation, &sbi, sizeof(sbi), NULL);
+    ok(status == STATUS_SUCCESS, "Unexpected status %#x.\n", status);
+    ok(sbi.MmNumberOfPhysicalPages && sbi.MmNumberOfPhysicalPages == user_shared_data->NumberOfPhysicalPages,
+            "Unexpected number of physical pages %#x, NtQuerySystemInformation() reported %#x.\n",
+            user_shared_data->NumberOfPhysicalPages, sbi.MmNumberOfPhysicalPages);
+}
+
 START_TEST(virtual)
 {
     SYSTEM_BASIC_INFORMATION sbi;
@@ -546,4 +561,5 @@ START_TEST(virtual)
     test_NtAllocateVirtualMemory();
     test_RtlCreateUserStack();
     test_NtMapViewOfSection();
+    test_user_shared_data();
 }
