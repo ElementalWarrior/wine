@@ -1790,11 +1790,31 @@ HCURSOR WINAPI DECLSPEC_HOTPATCH SetCursor( HCURSOR hCursor /* [in] Handle of cu
  */
 INT WINAPI DECLSPEC_HOTPATCH ShowCursor( BOOL bShow )
 {
+    volatile struct desktop_shared_memory *desktop = get_desktop_shared_memory();
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
+    struct user_thread_info *thread_info = get_user_thread_info();
     HCURSOR cursor;
+    BOOL need_request;
     int increment = bShow ? 1 : -1;
     int count;
 
-    SERVER_START_REQ( set_cursor )
+    thread_info->cursor_show_count += increment;
+    if (!shared || !desktop) return thread_info->cursor_show_count;
+
+    SHARED_READ_BEGIN( &shared->seq )
+    {
+        SHARED_READ_BEGIN( &desktop->seq )
+        {
+            cursor = thread_info->cursor_show_count >= 0 ? wine_server_ptr_handle( shared->cursor ) : 0;
+            increment = thread_info->cursor_show_count - shared->cursor_count;
+            need_request = wine_server_ptr_handle( desktop->cursor.handle ) != cursor;
+        }
+        SHARED_READ_END( &desktop->seq );
+    }
+    SHARED_READ_END( &shared->seq );
+
+    if (!need_request) count = thread_info->cursor_show_count;
+    else SERVER_START_REQ( set_cursor )
     {
         req->flags = SET_CURSOR_COUNT;
         req->show_count = increment;
@@ -1803,6 +1823,8 @@ INT WINAPI DECLSPEC_HOTPATCH ShowCursor( BOOL bShow )
         count = reply->prev_count + increment;
     }
     SERVER_END_REQ;
+
+    if (need_request) ERR("ShowCursor needed request, show %d, count %d, thread %d, shared %d\n", bShow, count, thread_info->cursor_show_count, shared->cursor_count );
 
     TRACE("%d, count=%d\n", bShow, count );
 

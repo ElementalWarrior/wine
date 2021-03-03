@@ -193,6 +193,7 @@ struct user_thread_info
     WORD                          hook_unicode;           /* Is current hook unicode? */
     HHOOK                         hook;                   /* Current hook */
     UINT                          active_hooks;           /* Bitmap of active hooks */
+    INT                           cursor_show_count;      /* ShowCursor internal counter */
     DPI_AWARENESS                 dpi_awareness;          /* DPI awareness */
     INPUT_MESSAGE_SOURCE          msg_source;             /* Message source for current message */
     struct received_message_info *receive_info;           /* Message being currently received */
