@@ -87,6 +87,10 @@ static pthread_mutex_t addr_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define __NR_clock_gettime64 403
 #endif
 
+#ifndef __NR_clock_gettime
+#define __NR_clock_gettime 113
+#endif
+
 struct timespec64
 {
     long long tv_sec;
@@ -134,14 +138,14 @@ static inline long CDECL __syscall_ret(unsigned long r)
 #define syscall6(n, a1, a2, a3, a4, a5, a6) syscall(n, a1, a2, a3, a4, a5, a6)
 #endif
 
-static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
+static inline int CDECL do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
 {
     static int clock_gettime64_supported = -1;
     struct timespec64 ts64;
     struct timespec ts;
     int ret;
 
-    if (clock_gettime64_supported < 0)
+    if (__builtin_expect(clock_gettime64_supported < 0, 0))
     {
         if (!syscall2( __NR_clock_gettime64, clock_id, (long)&ts64 ))
         {
@@ -152,20 +156,25 @@ static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
         clock_gettime64_supported = 0;
     }
 
-    if (clock_gettime64_supported)
+    if (__builtin_expect(clock_gettime64_supported, 1))
     {
         if (!(ret = syscall2( __NR_clock_gettime64, clock_id, (long)&ts64 )))
             *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
         return ret;
     }
 
-    if (!(ret = clock_gettime( clock_id, &ts )))
+    if (!(ret = syscall2( __NR_clock_gettime, clock_id, (long)&ts )))
         *ticks = ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
     return ret;
 }
 
+static __attribute__((noinline)) void CDECL __msabi_gettimeofday(struct timeval *now)
+{
+    gettimeofday( now, 0 );
+}
+
 /* return a monotonic time counter, in Win32 ticks */
-static inline ULONGLONG monotonic_counter(void)
+static inline ULONGLONG CDECL monotonic_counter(void)
 {
     struct timeval now;
 #ifdef __APPLE__
@@ -186,7 +195,7 @@ static inline ULONGLONG monotonic_counter(void)
     if (!do_clock_gettime( CLOCK_MONOTONIC, &ticks ))
         return ticks;
 #endif
-    gettimeofday( &now, 0 );
+    __msabi_gettimeofday( &now );
     return ticks_from_time_t( now.tv_sec ) + now.tv_usec * 10 - server_start_time;
 }
 
