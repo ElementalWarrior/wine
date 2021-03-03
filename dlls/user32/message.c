@@ -42,6 +42,7 @@
 #include "controls.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msg);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
@@ -2655,6 +2656,22 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
                    callback, hwnd, SPY_GetMsgName( msg, hwnd ), data, result );
 }
 
+struct posted_message
+{
+    struct send_message_info info;
+    struct list entry;
+};
+
+static CRITICAL_SECTION posted_cs;
+static CRITICAL_SECTION_DEBUG posted_cs_debug = {
+    0, 0, &posted_cs,
+    { &posted_cs_debug.ProcessLocksList,
+      &posted_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": posted_cs") }
+};
+static CRITICAL_SECTION posted_cs = { &posted_cs_debug, -1, 0, 0, 0, 0 };
+static struct list posted_messages = LIST_INIT( posted_messages );
+static HANDLE posted_event;
 
 /***********************************************************************
  *           peek_message
@@ -2670,6 +2687,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
     struct user_thread_info *thread_info = get_user_thread_info();
     INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     struct received_message_info info, *old_info;
+    struct posted_message *post, *next;
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
     size_t buffer_size = 256;
@@ -2714,7 +2732,42 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         }
         SHARED_READ_END( &shared->seq );
 
-        if (skip) res = STATUS_PENDING;
+        if (first == WM_USER && last == WM_USER)
+        {
+            post = NULL;
+            EnterCriticalSection( &posted_cs );
+            LIST_FOR_EACH_ENTRY_SAFE( post, next, &posted_messages, struct posted_message, entry )
+            {
+                if (post->info.dest_tid == GetCurrentThreadId())
+                {
+                    list_remove( &post->entry );
+                    if (list_empty( &posted_messages )) ResetEvent( posted_event );
+                    break;
+                }
+            }
+            LeaveCriticalSection( &posted_cs );
+
+            if (post && post->info.dest_tid == GetCurrentThreadId())
+            {
+                info.type        = post->info.type;
+                info.msg.hwnd    = post->info.hwnd;
+                info.msg.message = post->info.msg;
+                info.msg.wParam  = post->info.wparam;
+                info.msg.lParam  = post->info.lparam;
+                info.msg.time    = GetTickCount();
+                info.msg.pt.x    = 0;
+                info.msg.pt.y    = 0;
+                HeapFree( GetProcessHeap(), 0, post );
+                res = STATUS_SUCCESS;
+            }
+            else res = STATUS_PENDING;
+        }
+        else if (skip)
+        {
+            /* force refreshing hooks */
+            thread_info->active_hooks = 0;
+            res = STATUS_PENDING;
+        }
         else SERVER_START_REQ( get_message )
         {
             req->flags     = flags;
@@ -3664,6 +3717,7 @@ BOOL WINAPI PostThreadMessageA( DWORD thread, UINT msg, WPARAM wparam, LPARAM lp
 BOOL WINAPI PostThreadMessageW( DWORD thread, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     struct send_message_info info;
+    struct posted_message *post;
 
     if (is_pointer_message( msg, wparam ))
     {
@@ -3679,6 +3733,19 @@ BOOL WINAPI PostThreadMessageW( DWORD thread, UINT msg, WPARAM wparam, LPARAM lp
     info.wparam   = wparam;
     info.lparam   = lparam;
     info.flags    = 0;
+
+    if (msg == WM_USER)
+    {
+        post = HeapAlloc( GetProcessHeap(), 0, sizeof(struct posted_message) );
+        post->info = info;
+        EnterCriticalSection( &posted_cs );
+        if (!posted_event) posted_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+        list_add_tail( &posted_messages, &post->entry );
+        SetEvent( posted_event );
+        LeaveCriticalSection( &posted_cs );
+        return TRUE;
+    }
+
     return put_message_in_queue( &info, NULL );
 }
 
@@ -3791,6 +3858,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT
     HANDLE server_queue = get_server_queue_handle();
     unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
     int ret;
+
+    EnterCriticalSection( &posted_cs );
+    if (!posted_event) posted_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    if (first == WM_USER && last == WM_USER) server_queue = posted_event;
+    LeaveCriticalSection( &posted_cs );
 
     USER_CheckNotLock();
     check_for_driver_events( 0 );
