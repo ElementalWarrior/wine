@@ -2966,7 +2966,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                     continue;  /* ignore it */
 	    }
             *msg = info.msg;
-            msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
+            if (!post) msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
             thread_info->GetMessagePosVal = MAKELONG( msg->pt.x, msg->pt.y );
             thread_info->GetMessageTimeVal = info.msg.time;
             thread_info->GetMessageExtraInfoVal = 0;
