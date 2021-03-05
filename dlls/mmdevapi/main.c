@@ -150,6 +150,18 @@ static BOOL WINAPI init_driver(INIT_ONCE *once, void *param, void **context)
             *next = ',';
     }
 
+    if (!drvs.module)
+    {
+        drvs.module = instance;
+        lstrcpyW(drvs.module_name, L"nulldrv");
+        drvs.pGetPriority = nulldrv_GetPriority;
+        drvs.pGetEndpointIDs = nulldrv_GetEndpointIDs;
+        drvs.pGetAudioEndpoint = nulldrv_GetAudioEndpoint;
+        drvs.pGetAudioSessionManager = nulldrv_GetAudioSessionManager;
+        drvs.pGetPropValue = nulldrv_GetPropValue;
+        drvs.priority = drvs.pGetPriority();
+    }
+
     return drvs.module != 0;
 }
 
