@@ -182,16 +182,53 @@ static HRESULT STDMETHODCALLTYPE audio_client_GetCurrentPadding(IAudioClient3 *i
 static HRESULT STDMETHODCALLTYPE audio_client_IsFormatSupported(IAudioClient3 *iface,
         AUDCLNT_SHAREMODE mode, const WAVEFORMATEX *format, WAVEFORMATEX **closest_match)
 {
-    FIXME("iface %p, mode %x, format %p, closest_match %p stub!\n",
+    TRACE("iface %p, mode %x, format %p, closest_match %p.\n",
           iface, mode, format, closest_match);
-    return E_NOTIMPL;
+
+    if (!format) return E_POINTER;
+    if (!closest_match) return E_POINTER;
+    if (!(*closest_match = CoTaskMemAlloc(sizeof(*format) + format->cbSize))) return E_OUTOFMEMORY;
+    memcpy(*closest_match, format, sizeof(*format) + format->cbSize);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_GetMixFormat(IAudioClient3 *iface,
         WAVEFORMATEX **format)
 {
-    FIXME("iface %p, format %p stub!\n", iface, format);
-    return E_NOTIMPL;
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
+    WAVEFORMATEXTENSIBLE *ext;
+
+    TRACE("iface %p, format %p.\n", iface, format);
+
+    if (!format) return E_POINTER;
+    *format = NULL;
+
+    if (!(ext = CoTaskMemAlloc(sizeof(*ext)))) return E_OUTOFMEMORY;
+
+    ext->Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    ext->Format.nSamplesPerSec = 44100;
+    ext->Format.wBitsPerSample = 16;
+    ext->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    ext->Samples.wValidBitsPerSample = 16;
+    ext->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+
+    if (impl->dataflow == eRender)
+    {
+        ext->Format.nChannels = 2;
+        ext->Format.nBlockAlign = 4;
+        ext->Format.nAvgBytesPerSec = 176400;
+        ext->dwChannelMask = KSAUDIO_SPEAKER_STEREO;
+    }
+    else
+    {
+        ext->Format.nChannels = 1;
+        ext->Format.nBlockAlign = 2;
+        ext->Format.nAvgBytesPerSec = 88200;
+        ext->dwChannelMask = KSAUDIO_SPEAKER_DIRECTOUT;
+    }
+
+    *format = &ext->Format;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_GetDevicePeriod(IAudioClient3 *iface,
