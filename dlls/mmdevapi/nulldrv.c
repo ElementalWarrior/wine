@@ -234,9 +234,13 @@ static HRESULT STDMETHODCALLTYPE audio_client_GetMixFormat(IAudioClient3 *iface,
 static HRESULT STDMETHODCALLTYPE audio_client_GetDevicePeriod(IAudioClient3 *iface,
         REFERENCE_TIME *default_period, REFERENCE_TIME *minimum_period)
 {
-    FIXME("iface %p, default_period %p, minimum_period %p stub!\n",
+    TRACE("iface %p, default_period %p, minimum_period %p.\n",
           iface, default_period, minimum_period);
-    return E_NOTIMPL;
+
+    if (!default_period && !minimum_period) return E_POINTER;
+    if (minimum_period) *minimum_period = 30000;
+    if (default_period) *default_period = 100000;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_Start(IAudioClient3 *iface)
