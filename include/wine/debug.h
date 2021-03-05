@@ -148,6 +148,8 @@ extern const char * __cdecl __wine_dbg_strdup( const char *str );
 extern int __cdecl __wine_dbg_output( const char *str );
 extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
                                       const char *function );
+extern int __cdecl __wine_dbg_vprintf( const char *format, __ms_va_list args );
+extern const char * __cdecl __wine_dbg_vsprintf( const char *format, __ms_va_list args );
 
 /*
  * Exported definitions and macros
@@ -157,51 +159,37 @@ extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine
    quotes.  The string will be valid for some time, but not indefinitely
    as strings are re-used.  */
 
-#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
-# define __wine_dbg_cdecl __cdecl
-# define __wine_dbg_va_list __builtin_ms_va_list
-# define __wine_dbg_va_start(list,arg) __builtin_ms_va_start(list,arg)
-# define __wine_dbg_va_end(list) __builtin_ms_va_end(list)
-#else
-# define __wine_dbg_cdecl
-# define __wine_dbg_va_list va_list
-# define __wine_dbg_va_start(list,arg) va_start(list,arg)
-# define __wine_dbg_va_end(list) va_end(list)
-#endif
-
-static const char * __wine_dbg_cdecl wine_dbg_sprintf( const char *format, ... ) __WINE_PRINTF_ATTR(1,2);
-static inline const char * __wine_dbg_cdecl wine_dbg_sprintf( const char *format, ... )
+static const char * __cdecl wine_dbg_sprintf( const char *format, ... ) __WINE_PRINTF_ATTR(1,2);
+static inline const char * __cdecl wine_dbg_sprintf( const char *format, ... )
 {
-    char buffer[200];
-    __wine_dbg_va_list args;
+    const char *ret;
+    __ms_va_list args;
 
-    __wine_dbg_va_start( args, format );
-    vsnprintf( buffer, sizeof(buffer), format, args );
-    __wine_dbg_va_end( args );
-    return __wine_dbg_strdup( buffer );
+    __ms_va_start( args, format );
+    ret = __wine_dbg_vsprintf( format, args );
+    __ms_va_end( args );
+    return ret;
 }
 
-static int __wine_dbg_cdecl wine_dbg_printf( const char *format, ... ) __WINE_PRINTF_ATTR(1,2);
-static inline int __wine_dbg_cdecl wine_dbg_printf( const char *format, ... )
+static int __cdecl wine_dbg_printf( const char *format, ... ) __WINE_PRINTF_ATTR(1,2);
+static inline int __cdecl wine_dbg_printf( const char *format, ... )
 {
-    char buffer[1024];
-    __wine_dbg_va_list args;
-
-    __wine_dbg_va_start( args, format );
-    vsnprintf( buffer, sizeof(buffer), format, args );
-    __wine_dbg_va_end( args );
-    return __wine_dbg_output( buffer );
+    __ms_va_list args;
+    int ret;
+    __ms_va_start( args, format );
+    ret = __wine_dbg_vprintf( format, args );
+    __ms_va_end( args );
+    return ret;
 }
 
-static int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                          struct __wine_debug_channel *channel, const char *func,
-                                          const char *format, ... ) __WINE_PRINTF_ATTR(4,5);
-static inline int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                                 struct __wine_debug_channel *channel,
-                                                 const char *function, const char *format, ... )
+static int __cdecl wine_dbg_log( enum __wine_debug_class cls,
+                                 struct __wine_debug_channel *channel, const char *func,
+                                 const char *format, ... ) __WINE_PRINTF_ATTR(4,5);
+static inline int __cdecl wine_dbg_log( enum __wine_debug_class cls,
+                                        struct __wine_debug_channel *channel,
+                                        const char *function, const char *format, ... )
 {
-    char buffer[1024];
-    __wine_dbg_va_list args;
+    __ms_va_list args;
     int ret;
 
     if (*format == '\1')  /* special magic to avoid standard prefix */
@@ -211,14 +199,13 @@ static inline int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
     }
     if ((ret = __wine_dbg_header( cls, channel, function )) == -1) return ret;
 
-    __wine_dbg_va_start( args, format );
-    vsnprintf( buffer, sizeof(buffer), format, args );
-    __wine_dbg_va_end( args );
-    ret += __wine_dbg_output( buffer );
+    __ms_va_start( args, format );
+    ret += __wine_dbg_vprintf( format, args );
+    __ms_va_end( args );
     return ret;
 }
 
-static inline const char *wine_dbgstr_an( const char *str, int n )
+static inline const char *__cdecl wine_dbgstr_an( const char *str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
     char buffer[300], *dst = buffer;
@@ -262,7 +249,7 @@ static inline const char *wine_dbgstr_an( const char *str, int n )
     return __wine_dbg_strdup( buffer );
 }
 
-static inline const char *wine_dbgstr_wn( const WCHAR *str, int n )
+static inline const char *__cdecl wine_dbgstr_wn( const WCHAR *str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
     char buffer[300], *dst = buffer;
@@ -308,17 +295,17 @@ static inline const char *wine_dbgstr_wn( const WCHAR *str, int n )
     return __wine_dbg_strdup( buffer );
 }
 
-static inline const char *wine_dbgstr_a( const char *s )
+static inline const char *__cdecl wine_dbgstr_a( const char *s )
 {
     return wine_dbgstr_an( s, -1 );
 }
 
-static inline const char *wine_dbgstr_w( const WCHAR *s )
+static inline const char *__cdecl wine_dbgstr_w( const WCHAR *s )
 {
     return wine_dbgstr_wn( s, -1 );
 }
 
-static inline const char *wine_dbgstr_guid( const GUID *id )
+static inline const char *__cdecl wine_dbgstr_guid( const GUID *id )
 {
     if (!id) return "(null)";
     if (!((ULONG_PTR)id >> 16)) return wine_dbg_sprintf( "<guid-0x%04hx>", (WORD)(ULONG_PTR)id );
@@ -328,20 +315,20 @@ static inline const char *wine_dbgstr_guid( const GUID *id )
                              id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7] );
 }
 
-static inline const char *wine_dbgstr_point( const POINT *pt )
+static inline const char *__cdecl wine_dbgstr_point( const POINT *pt )
 {
     if (!pt) return "(null)";
     return wine_dbg_sprintf( "(%d,%d)", pt->x, pt->y );
 }
 
-static inline const char *wine_dbgstr_rect( const RECT *rect )
+static inline const char *__cdecl wine_dbgstr_rect( const RECT *rect )
 {
     if (!rect) return "(null)";
     return wine_dbg_sprintf( "(%d,%d)-(%d,%d)", rect->left, rect->top,
                              rect->right, rect->bottom );
 }
 
-static inline const char *wine_dbgstr_longlong( ULONGLONG ll )
+static inline const char *__cdecl wine_dbgstr_longlong( ULONGLONG ll )
 {
     if (sizeof(ll) > sizeof(unsigned long) && ll >> 32)
         return wine_dbg_sprintf( "%lx%08lx", (unsigned long)(ll >> 32), (unsigned long)ll );
@@ -350,7 +337,7 @@ static inline const char *wine_dbgstr_longlong( ULONGLONG ll )
 
 #if defined(__oaidl_h__) && defined(V_VT)
 
-static inline const char *wine_dbgstr_vt( VARTYPE vt )
+static inline const char *__cdecl wine_dbgstr_vt( VARTYPE vt )
 {
     static const char *const variant_types[] =
     {
@@ -398,7 +385,7 @@ static inline const char *wine_dbgstr_vt( VARTYPE vt )
     return wine_dbg_sprintf( "vt(invalid %x)", vt );
 }
 
-static inline const char *wine_dbgstr_variant( const VARIANT *v )
+static inline const char *__cdecl wine_dbgstr_variant( const VARIANT *v )
 {
     if (!v)
         return "(null)";
@@ -505,15 +492,15 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
 #ifdef __WINESRC__
 /* Wine uses shorter names that are very likely to conflict with other software */
 
-static inline const char *debugstr_an( const char * s, int n ) { return wine_dbgstr_an( s, n ); }
-static inline const char *debugstr_wn( const WCHAR *s, int n ) { return wine_dbgstr_wn( s, n ); }
-static inline const char *debugstr_guid( const struct _GUID *id ) { return wine_dbgstr_guid(id); }
-static inline const char *debugstr_a( const char *s )  { return wine_dbgstr_an( s, -1 ); }
-static inline const char *debugstr_w( const WCHAR *s ) { return wine_dbgstr_wn( s, -1 ); }
+static inline const char *__cdecl debugstr_an( const char * s, int n ) { return wine_dbgstr_an( s, n ); }
+static inline const char *__cdecl debugstr_wn( const WCHAR *s, int n ) { return wine_dbgstr_wn( s, n ); }
+static inline const char *__cdecl debugstr_guid( const struct _GUID *id ) { return wine_dbgstr_guid(id); }
+static inline const char *__cdecl debugstr_a( const char *s )  { return wine_dbgstr_an( s, -1 ); }
+static inline const char *__cdecl debugstr_w( const WCHAR *s ) { return wine_dbgstr_wn( s, -1 ); }
 
 #if defined(__oaidl_h__) && defined(V_VT)
-static inline const char *debugstr_vt( VARTYPE vt ) { return wine_dbgstr_vt( vt ); }
-static inline const char *debugstr_variant( const VARIANT *v ) { return wine_dbgstr_variant( v ); }
+static inline const char *__cdecl debugstr_vt( VARTYPE vt ) { return wine_dbgstr_vt( vt ); }
+static inline const char *__cdecl debugstr_variant( const VARIANT *v ) { return wine_dbgstr_variant( v ); }
 #endif
 
 #define TRACE                      WINE_TRACE
