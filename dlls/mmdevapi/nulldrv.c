@@ -279,6 +279,11 @@ struct audio_client
     IAudioSessionControl2 *session_control;
     IMMDevice *parent;
     IUnknown *marshal;
+
+    LARGE_INTEGER last_ticks;
+    WAVEFORMATEX format;
+    UINT32 frames, total_frames;
+    BYTE *buffer;
 };
 
 struct audio_client *impl_from_IAudioClient3(IAudioClient3 *iface)
@@ -341,6 +346,7 @@ static ULONG STDMETHODCALLTYPE audio_client_Release(
         audio_session_control_Release(impl->session_control);
         IMMDevice_Release(impl->parent);
         IUnknown_Release(impl->marshal);
+        if (impl->buffer) free(impl->buffer);
         free(impl);
     }
 
@@ -351,30 +357,66 @@ static HRESULT STDMETHODCALLTYPE audio_client_Initialize(
         IAudioClient3 *iface, AUDCLNT_SHAREMODE mode, DWORD flags, REFERENCE_TIME duration,
         REFERENCE_TIME period, const WAVEFORMATEX *format, const GUID *session_guid)
 {
-    FIXME("iface %p, mode %x, flags %x, duration %I64x, period %I64x, format %p, session_guid %s stub!\n",
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
+    FIXME("iface %p, mode %x, flags %x, duration %I64d, period %I64d, format %p, session_guid %s stub!\n",
           iface, mode, flags, duration, period, format, wine_dbgstr_guid(session_guid) );
-    return E_NOTIMPL;
+
+    impl->total_frames = format->nAvgBytesPerSec / format->nBlockAlign;
+    impl->total_frames = impl->total_frames * duration / 10000000 + 1;
+    if (impl->total_frames < 1024) impl->total_frames = 1024;
+
+    if (impl->buffer) free(impl->buffer);
+    impl->buffer = malloc(impl->total_frames * format->nBlockAlign);
+    impl->format = *format;
+    impl->frames = 0;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_GetBufferSize(IAudioClient3 *iface,
         UINT32 *frame_count)
 {
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
     FIXME("iface %p, frame_count %p stub!\n", iface, frame_count);
-    return E_NOTIMPL;
+    if (!frame_count) return E_POINTER;
+    *frame_count = impl->total_frames;
+    TRACE("returning frame_count %d\n", *frame_count);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_GetStreamLatency(IAudioClient3 *iface,
         REFERENCE_TIME *latency)
 {
     FIXME("iface %p, latency %p stub!\n", iface, latency);
-    return E_NOTIMPL;
+    if (!latency) return E_POINTER;
+    *latency = 100000;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_GetCurrentPadding(IAudioClient3 *iface,
         UINT32 *frame_count)
 {
-    FIXME("iface %p, frame_count %p stub!\n", iface, frame_count);
-    return E_NOTIMPL;
+    static LARGE_INTEGER freq;
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
+    LARGE_INTEGER ticks;
+    UINT32 frames;
+
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+
+    TRACE("iface %p, frame_count %p semi-stub!\n", iface, frame_count);
+
+    if (!frame_count) return E_POINTER;
+
+    QueryPerformanceCounter(&ticks);
+    frames = impl->format.nAvgBytesPerSec / impl->format.nBlockAlign;
+    frames = frames * (ticks.QuadPart - impl->last_ticks.QuadPart) / freq.QuadPart;
+
+    impl->last_ticks = ticks;
+    impl->frames -= frames;
+
+    *frame_count = impl->frames;
+    TRACE("returning frame_count %d\n", *frame_count);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_IsFormatSupported(IAudioClient3 *iface,
@@ -443,14 +485,16 @@ static HRESULT STDMETHODCALLTYPE audio_client_GetDevicePeriod(IAudioClient3 *ifa
 
 static HRESULT STDMETHODCALLTYPE audio_client_Start(IAudioClient3 *iface)
 {
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
     FIXME("iface %p stub!\n", iface);
-    return E_NOTIMPL;
+    QueryPerformanceCounter(&impl->last_ticks);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_Stop(IAudioClient3 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
-    return E_NOTIMPL;
+    TRACE("iface %p.\n", iface);
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_Reset(IAudioClient3 *iface)
@@ -612,15 +656,20 @@ static ULONG WINAPI audio_render_client_Release(IAudioRenderClient *iface)
 static HRESULT STDMETHODCALLTYPE audio_render_client_GetBuffer(IAudioRenderClient *iface,
         UINT32 frame_count, BYTE **out)
 {
-    FIXME("iface %p, frame_count %d, out %p stub!\n", iface, frame_count, out);
-    return E_NOTIMPL;
+    struct audio_client *impl = impl_from_IAudioRenderClient(iface);
+    TRACE("iface %p, frame_count %d, out %p semi-stub!\n", iface, frame_count, out);
+    if (!out) return E_POINTER;
+    *out = impl->buffer;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_render_client_ReleaseBuffer(IAudioRenderClient *iface,
         UINT32 frame_count, DWORD flags)
 {
-    FIXME("iface %p, frame_count %d, flags %x stub!\n", iface, frame_count, flags);
-    return E_NOTIMPL;
+    struct audio_client *impl = impl_from_IAudioRenderClient(iface);
+    TRACE("iface %p, frame_count %d, flags %x semi-stub!\n", iface, frame_count, flags);
+    impl->frames += frame_count;
+    return S_OK;
 }
 
 static const IAudioRenderClientVtbl audio_render_client_vtbl =
@@ -653,6 +702,7 @@ HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient
     impl->refcount = 1;
     impl->dataflow = dataflow;
     impl->parent = dev;
+    impl->buffer = NULL;
 
     if (FAILED(hr = audio_session_control_create(&impl->session_control)))
     {
