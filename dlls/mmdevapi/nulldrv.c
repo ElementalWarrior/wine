@@ -23,6 +23,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
 
+DEFINE_GUID(nulldrv_render_guid,0x093cc70f,0xd22c,0x46ca,0x82,0x07,0xf5,0xfe,0xab,0x10,0x78,0x70);
+DEFINE_GUID(nulldrv_capture_guid,0x4dab6710,0x0396,0x447a,0xb8,0x36,0x77,0x18,0x96,0x59,0xe0,0xce);
+
 int WINAPI nulldrv_GetPriority(void)
 {
     return Priority_Low;
@@ -30,8 +33,34 @@ int WINAPI nulldrv_GetPriority(void)
 
 HRESULT WINAPI nulldrv_GetEndpointIDs(EDataFlow flow, WCHAR ***ids, GUID **guids, UINT *num, UINT *default_index)
 {
-    FIXME("flow %x, ids %p, guids %p, num %p, default_index %p stub!\n", flow, ids, guids, num, default_index);
-    return E_NOTIMPL;
+    static const WCHAR endpoint_name[] = L"null";
+    WCHAR **id = NULL;
+    GUID *guid = NULL;
+
+    TRACE("flow %x, ids %p, guids %p, num %p, default_index %p.\n", flow, ids, guids, num, default_index);
+
+    *num = 1;
+    *default_index = 0;
+    *ids = NULL;
+    *guids = NULL;
+
+    if (!(id = malloc(sizeof(*id)))) goto error;
+    if (!(guid = malloc(sizeof(*guid)))) goto error;
+    if (!(id[0] = malloc(sizeof(endpoint_name)))) goto error;
+
+    memcpy(id[0], endpoint_name, sizeof(endpoint_name));
+    if (flow == eRender) *guid = nulldrv_render_guid;
+    else *guid = nulldrv_capture_guid;
+
+    *ids = id;
+    *guids = guid;
+    return S_OK;
+
+error:
+    if (id && id[0]) free(id[0]);
+    if (guid) free(guid);
+    if (id) free(id);
+    return E_OUTOFMEMORY;
 }
 
 HRESULT WINAPI nulldrv_GetAudioEndpoint(void *key, IMMDevice *dev, IAudioClient **out)
