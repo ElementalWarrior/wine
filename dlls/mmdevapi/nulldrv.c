@@ -63,9 +63,9 @@ error:
     return E_OUTOFMEMORY;
 }
 
-HRESULT WINAPI nulldrv_GetAudioEndpoint(void *key, IMMDevice *dev, IAudioClient **out)
+HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient **out)
 {
-    FIXME("key %p, dev %p, out %p stub!\n", key, dev, out);
+    FIXME("guid %s, dev %p, out %p stub!\n", wine_dbgstr_guid(guid), dev, out);
     return E_NOTIMPL;
 }
 
