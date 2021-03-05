@@ -1821,6 +1821,10 @@ static struct unix_funcs unix_funcs =
     __wine_dbg_header,
     __wine_dbg_vprintf,
     __wine_dbg_vsprintf,
+    __wine_prof_data_alloc,
+    __wine_prof_start,
+    __wine_prof_stop,
+    __wine_prof_frame,
     steamclient_setup_trampolines,
 };
 

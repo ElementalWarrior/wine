@@ -52,6 +52,7 @@ C_SRCS = \
 	unix/fsync.c \
 	unix/loader.c \
 	unix/process.c \
+	unix/prof.c \
 	unix/registry.c \
 	unix/security.c \
 	unix/serial.c \

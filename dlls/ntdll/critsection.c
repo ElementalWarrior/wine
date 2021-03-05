@@ -29,6 +29,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/prof.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
@@ -48,6 +49,35 @@ static void *no_debug_info_marker = (void *)(ULONG_PTR)-1;
 static BOOL crit_section_has_debuginfo(const RTL_CRITICAL_SECTION *crit)
 {
     return crit->DebugInfo != NULL && crit->DebugInfo != no_debug_info_marker;
+}
+
+static struct __wine_prof_data *crit_section_prof_data(RTL_CRITICAL_SECTION *crit)
+{
+    struct __wine_prof_data *data;
+
+    if (!crit_section_has_debuginfo( crit ))
+        return NULL;
+
+    if (crit->DebugInfo->Spare[0] & 1)
+        return (void*)(crit->DebugInfo->Spare[0] & ~1);
+
+    data = __wine_prof_data_alloc();
+    data->name = (char*)crit->DebugInfo->Spare[0];
+    data->print_ticks = 0;
+    data->accum_ticks = 0;
+    data->limit_ns = 0;
+
+    crit->DebugInfo->Spare[0] = (DWORD_PTR)data|1;
+    return data;
+}
+
+static const char *crit_section_winedbg_name(RTL_CRITICAL_SECTION *crit)
+{
+    if (!crit_section_has_debuginfo(crit))
+        return NULL;
+    if (!(crit->DebugInfo->Spare[0] & 1))
+        return (char*)crit->DebugInfo->Spare[0];
+    return crit_section_prof_data(crit)->name;
 }
 
 /***********************************************************************
@@ -248,7 +278,7 @@ NTSTATUS WINAPI RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
     if (crit_section_has_debuginfo( crit ))
     {
         /* only free the ones we made in here */
-        if (!crit->DebugInfo->Spare[0])
+        if (!crit_section_winedbg_name( crit ))
         {
             RtlFreeHeap( GetProcessHeap(), 0, crit->DebugInfo );
             crit->DebugInfo = NULL;
@@ -303,8 +333,7 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 
         if ( status == STATUS_TIMEOUT )
         {
-            const char *name = NULL;
-            if (crit_section_has_debuginfo( crit )) name = (char *)crit->DebugInfo->Spare[0];
+            const char *name = crit_section_winedbg_name( crit );
             if (!name) name = "?";
             ERR( "section %p %s wait timed out in thread %04x, blocked by %04x, retrying (60 sec)\n",
                  crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
@@ -322,7 +351,7 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
         if (status == STATUS_WAIT_0) break;
 
         /* Throw exception only for Wine internal locks */
-        if (!crit_section_has_debuginfo( crit ) || !crit->DebugInfo->Spare[0]) continue;
+        if (!crit_section_winedbg_name( crit )) continue;
 
         /* only throw deadlock exception if configured timeout is reached */
         if (timeout > 0) continue;
@@ -398,11 +427,14 @@ NTSTATUS WINAPI RtlpUnWaitCriticalSection( RTL_CRITICAL_SECTION *crit )
  */
 NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
+    struct __wine_prof_data *prof = crit_section_prof_data( crit );
+    size_t start_ns = __wine_prof_start( prof );
+
     if (crit->SpinCount)
     {
         ULONG count;
 
-        if (RtlTryEnterCriticalSection( crit )) return STATUS_SUCCESS;
+        if (RtlTryEnterCriticalSection( crit )) goto success;
         for (count = crit->SpinCount; count > 0; count--)
         {
             if (crit->LockCount > 0) break;  /* more than one waiter, don't bother spinning */
@@ -419,7 +451,7 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
         if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
         {
             crit->RecursionCount++;
-            return STATUS_SUCCESS;
+            goto success;
         }
 
         /* Now wait for it */
@@ -428,6 +460,13 @@ NTSTATUS WINAPI RtlEnterCriticalSection( RTL_CRITICAL_SECTION *crit )
 done:
     crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
     crit->RecursionCount = 1;
+
+success:
+    if (!crit_section_has_debuginfo( crit )) return STATUS_SUCCESS;
+    crit->DebugInfo->EntryCount++;
+
+    __wine_prof_stop( prof, start_ns );
+
     return STATUS_SUCCESS;
 }
 

@@ -82,6 +82,7 @@ struct thread_wait
 {
     struct thread_wait     *next;       /* next wait structure for this thread */
     struct thread          *thread;     /* owner thread */
+    int                     capacity;   /* size of objects */
     int                     count;      /* count of objects */
     int                     flags;
     int                     abandoned;
@@ -283,7 +284,10 @@ static inline void init_thread_structure( struct thread *thread )
     thread->wait            = NULL;
     thread->error           = 0;
     thread->req_data        = NULL;
+    thread->req_data_size   = 0;
     thread->req_toread      = 0;
+    thread->rep_data        = NULL;
+    thread->rep_data_size   = 0;
     thread->reply_data      = NULL;
     thread->reply_towrite   = 0;
     thread->request_fd      = NULL;
@@ -534,7 +538,8 @@ static void cleanup_thread( struct thread *thread )
     clear_apc_queue( &thread->system_apc );
     clear_apc_queue( &thread->user_apc );
     free( thread->req_data );
-    free( thread->reply_data );
+    free( thread->rep_data );
+    if (thread->reply_data != thread->rep_data) free( thread->reply_data );
     if (thread->request_fd) release_object( thread->request_fd );
     if (thread->reply_fd) release_object( thread->reply_fd );
     if (thread->wait_fd) release_object( thread->wait_fd );
@@ -556,6 +561,7 @@ static void cleanup_thread( struct thread *thread )
     if (thread->input_shared_mapping) release_object( thread->input_shared_mapping );
     thread->input_shared_mapping = NULL;
     thread->req_data = NULL;
+    thread->rep_data = NULL;
     thread->reply_data = NULL;
     thread->request_fd = NULL;
     thread->reply_fd = NULL;
@@ -956,6 +962,47 @@ void make_wait_abandoned( struct wait_queue_entry *entry )
     entry->wait->abandoned = 1;
 }
 
+static struct thread_wait *wait_free_pool;
+
+static struct thread_wait *thread_wait_alloc(unsigned int count)
+{
+    struct thread_wait *wait, *pool;
+    unsigned int i;
+
+    if (count > 2)
+        return mem_alloc( FIELD_OFFSET(struct thread_wait, queues[count]) );
+
+    if (!(wait = wait_free_pool))
+    {
+        unsigned int size = FIELD_OFFSET( struct thread_wait, queues[2] );
+        if (!(pool = calloc( 64, size )))
+            return NULL;
+
+        for (i = 0; i < 64; ++i)
+        {
+            wait = (struct thread_wait *)((char*)pool + size * i);
+            wait->next = wait_free_pool;
+            wait_free_pool = wait;
+        }
+    }
+
+    wait_free_pool = wait->next;
+    assert(wait);
+    return wait;
+}
+
+static void thread_wait_free(struct thread_wait *wait)
+{
+    if (wait->capacity > 2)
+    {
+        free(wait);
+        return;
+    }
+
+    wait->next = wait_free_pool;
+    wait_free_pool = wait;
+}
+
 /* finish waiting */
 static unsigned int end_wait( struct thread *thread, unsigned int status )
 {
@@ -983,7 +1030,7 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
     for (i = 0, entry = wait->queues; i < wait->count; i++, entry++)
         entry->obj->ops->remove_queue( entry->obj, entry );
     if (wait->user) remove_timeout_user( wait->user );
-    free( wait );
+    thread_wait_free( wait );
     return status;
 }
 
@@ -995,9 +1042,10 @@ static int wait_on( const select_op_t *select_op, unsigned int count, struct obj
     struct wait_queue_entry *entry;
     unsigned int i;
 
-    if (!(wait = mem_alloc( FIELD_OFFSET(struct thread_wait, queues[count]) ))) return 0;
+    if (!(wait = thread_wait_alloc( count ))) { assert(0); return 0; }
     wait->next    = current->wait;
     wait->thread  = current;
+    wait->capacity = count;
     wait->count   = count;
     wait->flags   = flags;
     wait->select  = select_op->op;
