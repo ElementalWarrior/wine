@@ -18,6 +18,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -354,6 +355,44 @@ static inline const char *wine_dbgstr_propertykey(const PROPERTYKEY *key)
 
 HRESULT WINAPI nulldrv_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARIANT *out)
 {
+    if (IsEqualGUID(guid, &nulldrv_render_guid))
+    {
+        if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_FormFactor))
+        {
+            out->vt = VT_UI4;
+            out->u.ulVal = Speakers;
+            return S_OK;
+        }
+
+        if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_PhysicalSpeakers))
+        {
+            out->vt = VT_UI4;
+            out->u.ulVal = SPEAKER_FRONT_LEFT|SPEAKER_FRONT_RIGHT;
+            return S_OK;
+        }
+    }
+    else if (IsEqualGUID(guid, &nulldrv_capture_guid))
+    {
+        if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_FormFactor))
+        {
+            out->vt = VT_UI4;
+            out->u.ulVal = Microphone;
+            return S_OK;
+        }
+
+        if (IsEqualPropertyKey(*prop, PKEY_AudioEndpoint_PhysicalSpeakers))
+        {
+            out->vt = VT_UI4;
+            out->u.ulVal = SPEAKER_FRONT_CENTER;
+            return S_OK;
+        }
+    }
+    else
+    {
+        WARN("Unknown interface %s\n", debugstr_guid(guid));
+        return E_NOINTERFACE;
+    }
+
     FIXME("guid %s, prop %s, out %p stub!\n", wine_dbgstr_guid(guid), wine_dbgstr_propertykey(prop), out);
     return E_NOTIMPL;
 }
