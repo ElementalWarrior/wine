@@ -22,6 +22,7 @@
 #define __NTDLL_UNIXLIB_H
 
 #include "wine/debug.h"
+#include "wine/prof.h"
 
 struct _DISPATCHER_CONTEXT;
 
@@ -94,6 +95,11 @@ struct unix_funcs
                                        const char *function );
     int           (CDECL *dbg_vprintf)( const char *format, __ms_va_list args );
     const char *  (CDECL *dbg_vsprintf)( const char *format, __ms_va_list args );
+
+    /* profiling functions */
+    struct __wine_prof_data *(CDECL *prof_data_alloc)(void);
+    size_t        (CDECL *prof_start)( struct __wine_prof_data *data );
+    void          (CDECL *prof_stop)( struct __wine_prof_data *data, size_t start_ns );
 
     /* steamclient HACK */
     void          (CDECL *steamclient_setup_trampolines)( HMODULE src_mod, HMODULE tgt_mod );

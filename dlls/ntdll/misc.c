@@ -546,3 +546,18 @@ BOOL WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING *namespace, BOOLEAN *
         *present = TRUE;
     return TRUE;
 }
+
+struct __wine_prof_data *__cdecl __wine_prof_data_alloc(void)
+{
+    return unix_funcs->prof_data_alloc();
+}
+
+size_t __cdecl __wine_prof_start( struct __wine_prof_data *data )
+{
+    return unix_funcs->prof_start( data );
+}
+
+void __cdecl __wine_prof_stop( struct __wine_prof_data *data, size_t start_ns )
+{
+    unix_funcs->prof_stop( data, start_ns );
+}
