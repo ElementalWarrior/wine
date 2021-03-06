@@ -203,16 +203,21 @@ static void init_options(void)
     parse_options( wine_debug );
 }
 
+BOOL is_debugproc DECLSPEC_HIDDEN;
+
 BOOL __cdecl __wine_dbg_start_debugger( unsigned int code, BOOL start_debugger )
 {
+    static const char gdbwait[] = "grep 'TracerPid:' /proc/%d/status|grep -v '0$'";
     static const char gdbdump[] = "gdb -batch -nx -p %d "
                                       "-ex \"source ~/Code/proton/wine/tools/gdbinit.py\" "
                                       "-ex \"update-symbols\" "
                                       "-ex \"thread apply all bt\" "
                                       "-ex \"kill\" 1>&2";
     char buffer[1024];
-    sprintf(buffer, gdbdump, getpid());
-    if (start_debugger) system(buffer);
+    if (is_debugproc) sprintf(buffer, gdbwait, getpid());
+    else if (start_debugger) sprintf(buffer, gdbdump, getpid());
+    else return TRUE;
+    while (system(buffer));
     return TRUE;
 }
 
