@@ -1612,6 +1612,7 @@
 @ extern -arch=i386 __wine_ldt_copy
 
 # Debugging
+@ cdecl -norelay __wine_dbg_start_debugger(long long)
 @ cdecl -norelay __wine_dbg_get_channel_flags(ptr)
 @ cdecl -norelay __wine_dbg_header(long long str)
 @ cdecl -norelay __wine_dbg_output(str)

@@ -35,6 +35,12 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#ifdef HAVE_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_WAIT_H
+# include <sys/wait.h>
+#endif
 
 #include "windef.h"
 #include "winnt.h"
@@ -195,6 +201,19 @@ static void init_options(void)
     if (!wine_debug) return;
     if (!strcmp( wine_debug, "help" )) debug_usage();
     parse_options( wine_debug );
+}
+
+BOOL __cdecl __wine_dbg_start_debugger( unsigned int code, BOOL start_debugger )
+{
+    static const char gdbdump[] = "gdb -batch -nx -p %d "
+                                      "-ex \"source ~/Code/proton/wine/tools/gdbinit.py\" "
+                                      "-ex \"update-symbols\" "
+                                      "-ex \"thread apply all bt\" "
+                                      "-ex \"kill\" 1>&2";
+    char buffer[1024];
+    sprintf(buffer, gdbdump, getpid());
+    if (start_debugger) system(buffer);
+    return TRUE;
 }
 
 /***********************************************************************

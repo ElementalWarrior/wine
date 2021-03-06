@@ -86,6 +86,7 @@ struct unix_funcs
                                                CONTEXT *context );
 
     /* debugging functions */
+    BOOL          (CDECL *dbg_start_debugger)( unsigned int code, BOOL start_debugger );
     unsigned char (CDECL *dbg_get_channel_flags)( struct __wine_debug_channel *channel );
     const char *  (CDECL *dbg_strdup)( const char *str );
     int           (CDECL *dbg_output)( const char *str );

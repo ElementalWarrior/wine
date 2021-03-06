@@ -1770,6 +1770,7 @@ static double CDECL ntdll_sin( double d )   { return sin( d ); }
 static double CDECL ntdll_sqrt( double d )  { return sqrt( d ); }
 static double CDECL ntdll_tan( double d )   { return tan( d ); }
 
+extern BOOL __cdecl __wine_dbg_start_debugger( unsigned int code, BOOL start_debugger ) DECLSPEC_HIDDEN;
 
 /***********************************************************************
  *           unix_funcs
@@ -1813,6 +1814,7 @@ static struct unix_funcs unix_funcs =
     unload_builtin_dll,
     init_builtin_dll,
     unwind_builtin_dll,
+    __wine_dbg_start_debugger,
     __wine_dbg_get_channel_flags,
     __wine_dbg_strdup,
     __wine_dbg_output,
