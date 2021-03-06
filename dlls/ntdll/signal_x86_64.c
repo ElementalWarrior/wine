@@ -565,6 +565,8 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
               context->R8, context->R9, context->R10, context->R11 );
         TRACE(" r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
               context->R12, context->R13, context->R14, context->R15 );
+
+        unix_funcs->dbg_start_debugger( rec->ExceptionCode, FALSE );
     }
 
     if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)

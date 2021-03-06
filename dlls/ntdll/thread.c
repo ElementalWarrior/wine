@@ -37,6 +37,10 @@ WINE_DECLARE_DEBUG_CHANNEL(thread);
 
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 
+BOOL __cdecl __wine_dbg_start_debugger( unsigned int code, BOOL start_debugger )
+{
+    return unix_funcs->dbg_start_debugger( code, start_debugger );
+}
 
 /***********************************************************************
  *		__wine_dbg_get_channel_flags  (NTDLL.@)
