@@ -318,7 +318,7 @@ static int try_grab_pointer( Display *display )
 
     /* if we are already clipping the cursor in the current thread, we should not
      * call XGrabPointer here or it would change the confine-to window. */
-    if (clipping_cursor && x11drv_thread_data()->clip_hwnd)
+    if (clipping_cursor)
         return 1;
 
     if (XGrabPointer( display, root_window, False, 0, GrabModeAsync, GrabModeAsync,
@@ -326,6 +326,7 @@ static int try_grab_pointer( Display *display )
         return 0;
 
     XUngrabPointer( display, CurrentTime );
+    XFlush( display );
     return 1;
 }
 
@@ -631,8 +632,8 @@ static void set_focus( XEvent *xev, HWND hwnd, Time time )
 
     if (!try_grab_pointer( xev->xany.display ))
     {
-        /* ask the foreground window to release its grab before trying to get ours */
-        SendMessageW( GetForegroundWindow(), WM_X11DRV_RELEASE_CURSOR, 0, 0 );
+        /* ask the desktop window to release its grab before trying to get ours */
+        SendMessageW( GetDesktopWindow(), WM_X11DRV_DESKTOP_CLIP_CURSOR_RELEASE, 0, 0 );
         XSendEvent( xev->xany.display, xev->xany.window, False, 0, xev );
         return;
     }
@@ -825,8 +826,16 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if (event->mode == NotifyUngrab && wm_is_mutter(event->display))
         Sleep(100);
 
-    /* ask the foreground window to re-apply the current ClipCursor rect */
-    SendMessageW( GetForegroundWindow(), WM_X11DRV_CLIP_CURSOR_REQUEST, 0, 0 );
+    if (!try_grab_pointer( event->display ))
+    {
+        /* ask the desktop window to release its grab before trying to get ours */
+        SendMessageW( GetDesktopWindow(), WM_X11DRV_DESKTOP_CLIP_CURSOR_RELEASE, 0, 0 );
+        XSendEvent( event->display, event->window, False, 0, xev );
+        return FALSE;
+    }
+
+    /* ask the desktop window to re-apply the current ClipCursor rect */
+    SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_DESKTOP_CLIP_CURSOR, FALSE, FALSE );
 
     /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
     if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
@@ -834,7 +843,7 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if ((xic = X11DRV_get_ic( hwnd ))) XSetICFocus( xic );
     if (use_take_focus)
     {
-        if (hwnd == GetForegroundWindow()) clip_fullscreen_window( hwnd, FALSE );
+        if (hwnd == GetForegroundWindow()) SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_DESKTOP_CLIP_CURSOR, TRUE, FALSE );
         return TRUE;
     }
 
@@ -846,11 +855,6 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
         if (!hwnd) hwnd = x11drv_thread_data()->last_focus;
         if (hwnd && can_activate_window(hwnd)) set_focus( xev, hwnd, CurrentTime );
         return TRUE;
-    }
-    else if (!try_grab_pointer( event->display ))
-    {
-        XSendEvent( event->display, event->window, False, 0, xev );
-        return FALSE;
     }
 
     SetForegroundWindow( hwnd );
@@ -940,7 +944,7 @@ static BOOL X11DRV_FocusOut( HWND hwnd, XEvent *xev )
     }
     if (!hwnd) return FALSE;
 
-    if (hwnd == GetForegroundWindow()) ungrab_clipping_window();
+    if (hwnd == GetForegroundWindow()) SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_DESKTOP_CLIP_CURSOR_RELEASE, 0, 0 );
 
     /* ignore wm specific NotifyUngrab / NotifyGrab events w.r.t focus */
     if (event->mode == NotifyGrab || event->mode == NotifyUngrab) return FALSE;
