@@ -79,6 +79,196 @@ error:
     return E_OUTOFMEMORY;
 }
 
+struct audio_session_control
+{
+    IAudioSessionControl2 IAudioSessionControl2_iface;
+    LONG refcount;
+};
+
+struct audio_session_control *impl_from_IAudioSessionControl2(IAudioSessionControl2 *iface)
+{
+    return CONTAINING_RECORD(iface, struct audio_session_control, IAudioSessionControl2_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_QueryInterface(
+        IAudioSessionControl2 *iface, REFIID iid, void **object)
+{
+    TRACE("iface %p, iid %p, object %p.\n", iface, iid, object);
+
+    if (!object) return E_POINTER;
+
+    if (IsEqualIID(iid, &IID_IUnknown) ||
+        IsEqualIID(iid, &IID_IAudioSessionControl) ||
+        IsEqualIID(iid, &IID_IAudioSessionControl2))
+    {
+        IAudioSessionControl2_AddRef(iface);
+        *object = iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+    *object = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE audio_session_control_AddRef(
+        IAudioSessionControl2 *iface)
+{
+    struct audio_session_control *impl = impl_from_IAudioSessionControl2(iface);
+    ULONG rc = InterlockedIncrement(&impl->refcount);
+    TRACE("%p increasing refcount to %u.\n", impl, rc);
+    return rc;
+}
+
+static ULONG STDMETHODCALLTYPE audio_session_control_Release(
+        IAudioSessionControl2 *iface)
+{
+    struct audio_session_control *impl = impl_from_IAudioSessionControl2(iface);
+    ULONG rc = InterlockedDecrement(&impl->refcount);
+    TRACE("%p decreasing refcount to %u.\n", impl, rc);
+    if (!rc) free(impl);
+    return rc;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetState(IAudioSessionControl2 *iface,
+        AudioSessionState *state)
+{
+    FIXME("iface %p, state %p stub!\n", iface, state);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetDisplayName(
+        IAudioSessionControl2 *iface, WCHAR **name)
+{
+    FIXME("iface %p, name %p stub!\n", iface, name);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_SetDisplayName(
+        IAudioSessionControl2 *iface, const WCHAR *name, const GUID *session)
+{
+    FIXME("iface %p, name %p, session %p stub!\n", iface, name, session);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetIconPath(
+        IAudioSessionControl2 *iface, WCHAR **path)
+{
+    FIXME("iface %p, path %p stub!\n", iface, path);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_SetIconPath(
+        IAudioSessionControl2 *iface, const WCHAR *path, const GUID *session)
+{
+    FIXME("iface %p, path %s, session %s stub!\n", iface, debugstr_w(path), debugstr_guid(session));
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetGroupingParam(
+        IAudioSessionControl2 *iface, GUID *group)
+{
+    FIXME("iface %p, group %s stub!\n", iface, debugstr_guid(group));
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_SetGroupingParam(
+        IAudioSessionControl2 *iface, const GUID *group, const GUID *session)
+{
+    FIXME("iface %p, group %s, session %s stub!\n", iface, debugstr_guid(group), debugstr_guid(session));
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_RegisterAudioSessionNotification(
+        IAudioSessionControl2 *iface, IAudioSessionEvents *events)
+{
+    FIXME("iface %p, events %p stub!\n", iface, events);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_UnregisterAudioSessionNotification(
+        IAudioSessionControl2 *iface, IAudioSessionEvents *events)
+{
+    FIXME("iface %p, events %p stub!\n", iface, events);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetSessionIdentifier(
+        IAudioSessionControl2 *iface, WCHAR **id)
+{
+    FIXME("iface %p, id %p stub!\n", iface, id);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetSessionInstanceIdentifier(
+        IAudioSessionControl2 *iface, WCHAR **id)
+{
+    FIXME("iface %p, id %p stub!\n", iface, id);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_GetProcessId(
+        IAudioSessionControl2 *iface, DWORD *pid)
+{
+    TRACE("iface %p, pid %p stub!\n", iface, pid);
+    if (!pid) return E_POINTER;
+    *pid = GetCurrentProcessId();
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_IsSystemSoundsSession(
+        IAudioSessionControl2 *iface)
+{
+    TRACE("iface %p.\n", iface);
+    return S_FALSE;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_session_control_SetDuckingPreference(
+        IAudioSessionControl2 *iface, BOOL optout)
+{
+    TRACE("iface %p, optout %d.\n", iface, optout);
+    return S_OK;
+}
+
+static const IAudioSessionControl2Vtbl audio_session_control_vtbl =
+{
+    audio_session_control_QueryInterface,
+    audio_session_control_AddRef,
+    audio_session_control_Release,
+    /*** IAudioSessionControl methods ***/
+    audio_session_control_GetState,
+    audio_session_control_GetDisplayName,
+    audio_session_control_SetDisplayName,
+    audio_session_control_GetIconPath,
+    audio_session_control_SetIconPath,
+    audio_session_control_GetGroupingParam,
+    audio_session_control_SetGroupingParam,
+    audio_session_control_RegisterAudioSessionNotification,
+    audio_session_control_UnregisterAudioSessionNotification,
+    /*** IAudioSessionControl2 methods ***/
+    audio_session_control_GetSessionIdentifier,
+    audio_session_control_GetSessionInstanceIdentifier,
+    audio_session_control_GetProcessId,
+    audio_session_control_IsSystemSoundsSession,
+    audio_session_control_SetDuckingPreference
+};
+
+static HRESULT audio_session_control_create(IAudioSessionControl2 **out)
+{
+    struct audio_session_control *impl;
+
+    TRACE("out %p.\n", out);
+
+    *out = NULL;
+    if (!(impl = calloc(1, sizeof(*impl)))) return E_OUTOFMEMORY;
+
+    impl->IAudioSessionControl2_iface.lpVtbl = &audio_session_control_vtbl;
+    impl->refcount = 1;
+
+    *out = &impl->IAudioSessionControl2_iface;
+    return S_OK;
+}
+
 struct audio_client
 {
     IAudioClient3 IAudioClient3_iface;
@@ -86,6 +276,7 @@ struct audio_client
     LONG refcount;
 
     EDataFlow dataflow;
+    IAudioSessionControl2 *session_control;
     IMMDevice *parent;
     IUnknown *marshal;
 };
@@ -147,6 +338,7 @@ static ULONG STDMETHODCALLTYPE audio_client_Release(
     if (!rc)
     {
         IAudioClient3_Stop(iface);
+        audio_session_control_Release(impl->session_control);
         IMMDevice_Release(impl->parent);
         IUnknown_Release(impl->marshal);
         free(impl);
@@ -288,6 +480,14 @@ static HRESULT STDMETHODCALLTYPE audio_client_GetService(IAudioClient3 *iface,
         if (impl->dataflow != eRender) return AUDCLNT_E_WRONG_ENDPOINT_TYPE;
         IAudioClient3_AddRef(iface);
         *object = &impl->IAudioRenderClient_iface;
+        return S_OK;
+    }
+
+    if (IsEqualIID(iid, &IID_IAudioSessionControl))
+    {
+        if (impl->dataflow != eRender) return AUDCLNT_E_WRONG_ENDPOINT_TYPE;
+        audio_session_control_AddRef(impl->session_control);
+        *object = impl->session_control;
         return S_OK;
     }
 
@@ -454,8 +654,15 @@ HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient
     impl->dataflow = dataflow;
     impl->parent = dev;
 
+    if (FAILED(hr = audio_session_control_create(&impl->session_control)))
+    {
+        free(impl);
+        return hr;
+    }
+
     if (FAILED(hr = CoCreateFreeThreadedMarshaler((IUnknown *)&impl->IAudioClient3_iface, &impl->marshal)))
     {
+        audio_session_control_Release(impl->session_control);
         free(impl);
         return hr;
     }
