@@ -1427,6 +1427,7 @@ VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t count,
     VkResult res;
     VkCommandBuffer *command_buffers;
     unsigned int i, j, num_command_buffers, buf_size;
+    char buffer[256];
 
     TRACE("%p %u %p 0x%s\n", queue, count, submits, wine_dbgstr_longlong(fence));
 
@@ -1438,7 +1439,9 @@ VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t count,
     buf_size = count * sizeof(*submits_host);
     for (i = 0; i < count; i++) buf_size += submits[i].commandBufferCount * sizeof(*command_buffers);
 
-    submits_host = heap_alloc(buf_size);
+    if (buf_size <= sizeof(buffer)) submits_host = (VkSubmitInfo *)buffer;
+    else submits_host = heap_alloc(buf_size);
+
     if (!submits_host)
     {
         ERR("Unable to allocate memory for submit buffers!\n");
@@ -1460,7 +1463,7 @@ VkResult WINAPI wine_vkQueueSubmit(VkQueue queue, uint32_t count,
 
     res = queue->device->funcs.p_vkQueueSubmit(queue->queue, count, submits_host, fence);
 
-    heap_free(submits_host);
+    if (submits_host != (VkSubmitInfo *)buffer) heap_free(submits_host);
 
     TRACE("Returning %d\n", res);
     return res;
