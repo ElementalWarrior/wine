@@ -183,14 +183,14 @@ static HRESULT STDMETHODCALLTYPE audio_session_control_RegisterAudioSessionNotif
         IAudioSessionControl2 *iface, IAudioSessionEvents *events)
 {
     FIXME("iface %p, events %p stub!\n", iface, events);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_session_control_UnregisterAudioSessionNotification(
         IAudioSessionControl2 *iface, IAudioSessionEvents *events)
 {
     FIXME("iface %p, events %p stub!\n", iface, events);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_session_control_GetSessionIdentifier(
