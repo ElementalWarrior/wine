@@ -82,6 +82,7 @@ error:
 struct audio_client
 {
     IAudioClient3 IAudioClient3_iface;
+    IAudioRenderClient IAudioRenderClient_iface;
     LONG refcount;
 
     EDataFlow dataflow;
@@ -92,6 +93,11 @@ struct audio_client
 struct audio_client *impl_from_IAudioClient3(IAudioClient3 *iface)
 {
     return CONTAINING_RECORD(iface, struct audio_client, IAudioClient3_iface);
+}
+
+struct audio_client *impl_from_IAudioRenderClient(IAudioRenderClient *iface)
+{
+    return CONTAINING_RECORD(iface, struct audio_client, IAudioRenderClient_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_QueryInterface(
@@ -271,8 +277,23 @@ static HRESULT STDMETHODCALLTYPE audio_client_SetEventHandle(IAudioClient3 *ifac
 static HRESULT STDMETHODCALLTYPE audio_client_GetService(IAudioClient3 *iface,
         REFIID iid, void **object)
 {
-    FIXME("iface %p, iid %s, object %p stub!\n", iface, wine_dbgstr_guid(iid), object);
-    return E_NOTIMPL;
+    struct audio_client *impl = impl_from_IAudioClient3(iface);
+
+    TRACE("iface %p, iid %s, object %p.\n", iface, wine_dbgstr_guid(iid), object);
+
+    if (!object) return E_POINTER;
+
+    if (IsEqualIID(iid, &IID_IAudioRenderClient))
+    {
+        if (impl->dataflow != eRender) return AUDCLNT_E_WRONG_ENDPOINT_TYPE;
+        IAudioClient3_AddRef(iface);
+        *object = &impl->IAudioRenderClient_iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+    *object = NULL;
+    return E_NOINTERFACE;
 }
 
 static HRESULT STDMETHODCALLTYPE audio_client_IsOffloadCapable(IAudioClient3 *iface,
@@ -351,6 +372,67 @@ static const IAudioClient3Vtbl audio_client_vtbl =
     audio_client_InitializeSharedAudioStream,
 };
 
+static HRESULT WINAPI audio_render_client_QueryInterface(
+        IAudioRenderClient *iface, REFIID iid, void **object)
+{
+    struct audio_client *impl = impl_from_IAudioRenderClient(iface);
+
+    TRACE("iface %p, iid %s, object %p stub!\n", iface, debugstr_guid(iid), object);
+
+    if (!object) return E_POINTER;
+
+    if (IsEqualIID(iid, &IID_IUnknown) ||
+        IsEqualIID(iid, &IID_IAudioRenderClient))
+    {
+        IAudioRenderClient_AddRef(iface);
+        *object = iface;
+        return S_OK;
+    }
+
+    if (IsEqualIID(iid, &IID_IMarshal))
+        return IUnknown_QueryInterface(impl->marshal, iid, object);
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+    *object = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI audio_render_client_AddRef(IAudioRenderClient *iface)
+{
+    struct audio_client *impl = impl_from_IAudioRenderClient(iface);
+    return audio_client_AddRef(&impl->IAudioClient3_iface);
+}
+
+static ULONG WINAPI audio_render_client_Release(IAudioRenderClient *iface)
+{
+    struct audio_client *impl = impl_from_IAudioRenderClient(iface);
+    return audio_client_Release(&impl->IAudioClient3_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE audio_render_client_GetBuffer(IAudioRenderClient *iface,
+        UINT32 frame_count, BYTE **out)
+{
+    FIXME("iface %p, frame_count %d, out %p stub!\n", iface, frame_count, out);
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE audio_render_client_ReleaseBuffer(IAudioRenderClient *iface,
+        UINT32 frame_count, DWORD flags)
+{
+    FIXME("iface %p, frame_count %d, flags %x stub!\n", iface, frame_count, flags);
+    return E_NOTIMPL;
+}
+
+static const IAudioRenderClientVtbl audio_render_client_vtbl =
+{
+    audio_render_client_QueryInterface,
+    audio_render_client_AddRef,
+    audio_render_client_Release,
+    /*** IAudioRenderClient methods ***/
+    audio_render_client_GetBuffer,
+    audio_render_client_ReleaseBuffer,
+};
+
 HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient **out)
 {
     struct audio_client *impl;
@@ -367,6 +449,7 @@ HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient
     if (!(impl = calloc(1, sizeof(*impl)))) return E_OUTOFMEMORY;
 
     impl->IAudioClient3_iface.lpVtbl = &audio_client_vtbl;
+    impl->IAudioRenderClient_iface.lpVtbl = &audio_render_client_vtbl;
     impl->refcount = 1;
     impl->dataflow = dataflow;
     impl->parent = dev;
