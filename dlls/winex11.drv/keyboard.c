@@ -1161,7 +1161,7 @@ static BOOL get_async_key_state( BYTE state[256] )
 
     SERVER_START_REQ( get_key_state )
     {
-        req->tid = 0;
+        req->async = 1;
         req->key = -1;
         wine_server_set_reply( req, state, 256 );
         ret = !wine_server_call( req );
@@ -1177,7 +1177,6 @@ static void set_async_key_state( const BYTE state[256] )
 {
     SERVER_START_REQ( set_key_state )
     {
-        req->tid = GetCurrentThreadId();
         req->async = 1;
         wine_server_add_data( req, state, 256 );
         wine_server_call( req );
@@ -1417,6 +1416,35 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     return TRUE;
 }
 
+/* From the point of view of this function there are two types of
+ * keys: those for which the mapping to vkey and scancode depends on
+ * the keyboard layout (i.e., letters, numbers, punctuation) and those
+ * for which it doesn't (control keys); since this function is used to
+ * recognize the keyboard layout and map keysyms to vkeys and
+ * scancodes, we are only concerned about the first type, and map
+ * everything in the second type to zero.
+ */
+static char keysym_to_char( KeySym keysym )
+{
+    /* Dead keys */
+    if (0xfe50 <= keysym && keysym < 0xfed0)
+        return KEYBOARD_MapDeadKeysym( keysym );
+
+    /* Control keys (there is nothing allocated below 0xfc00, but I
+       take some margin in case something is added in the future) */
+    if (0xf000 <= keysym && keysym < 0x10000)
+        return 0;
+
+    /* XFree86 vendor keys */
+    if (0x10000000 <= keysym)
+        return 0;
+
+    /* "Normal" keys: return last octet, because our tables don't have
+       more than that; it would be better to extend the tables and
+       compare the whole keysym, but it's a lot of work... */
+    return keysym & 0xff;
+}
+
 /**********************************************************************
  *		X11DRV_KEYBOARD_DetectLayout
  *
@@ -1433,7 +1461,7 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
   KeySym keysym = 0;
   const char (*lkey)[MAIN_LEN][4];
   unsigned max_seq = 0;
-  int max_score = 0, ismatch = 0;
+  int max_score = INT_MIN, ismatch = 0;
   char ckey[256][4];
 
   syms = keysyms_per_keycode;
@@ -1447,24 +1475,20 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
       /* get data for keycode from X server */
       for (i = 0; i < syms; i++) {
         if (!(keysym = keycode_to_keysym (display, keyc, i))) continue;
-	/* Allow both one-byte and two-byte national keysyms */
-	if ((keysym < 0x8000) && (keysym != ' '))
+        ckey[keyc][i] = keysym_to_char(keysym);
+        if (TRACE_ON(keyboard))
         {
-#ifdef HAVE_XKB
-            if (!use_xkb || !XkbTranslateKeySym(display, &keysym, 0, &ckey[keyc][i], 1, NULL))
-#endif
-            {
-                TRACE("XKB could not translate keysym %04lx\n", keysym);
-                /* FIXME: query what keysym is used as Mode_switch, fill XKeyEvent
-                 * with appropriate ShiftMask and Mode_switch, use XLookupString
-                 * to get character in the local encoding.
-                 */
-                ckey[keyc][i] = keysym & 0xFF;
-            }
+            char buf[32];
+            WCHAR bufW[32];
+            int len, lenW;
+            KeySym orig_keysym = keysym;
+            len = XkbTranslateKeySym(display, &keysym, 0, buf, sizeof(buf), NULL);
+            lenW = MultiByteToWideChar(CP_UNIXCP, 0, buf, len, bufW, ARRAY_SIZE(bufW));
+            if (lenW < ARRAY_SIZE(bufW))
+                bufW[lenW] = 0;
+            TRACE("keycode %u, index %d, orig_keysym 0x%04lx, keysym 0x%04lx, buf %s, bufW %s\n",
+                    keyc, i, orig_keysym, keysym, debugstr_a(buf), debugstr_w(bufW));
         }
-	else {
-	  ckey[keyc][i] = KEYBOARD_MapDeadKeysym(keysym);
-	}
       }
   }
 
@@ -1506,7 +1530,7 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
           char str[5];
           for (i = 0; i < 4; i++) str[i] = ckey[keyc][i] ? ckey[keyc][i] : ' ';
           str[4] = 0;
-          TRACE_(key)("mismatch for keycode %u, got %s\n", keyc, str);
+          TRACE_(key)("mismatch for keycode %u, got %s\n", keyc, debugstr_a(str));
           mismatch++;
           score -= syms;
 	}
@@ -1713,21 +1737,7 @@ void X11DRV_InitKeyboard( Display *display )
 	      int maxlen=0,maxval=-1,ok;
 	      for (i=0; i<syms; i++) {
 		keysym = keycode_to_keysym(display, keyc, i);
-		if ((keysym<0x8000) && (keysym!=' '))
-                {
-#ifdef HAVE_XKB
-                    if (!use_xkb || !XkbTranslateKeySym(display, &keysym, 0, &ckey[i], 1, NULL))
-#endif
-                    {
-                        /* FIXME: query what keysym is used as Mode_switch, fill XKeyEvent
-                         * with appropriate ShiftMask and Mode_switch, use XLookupString
-                         * to get character in the local encoding.
-                         */
-                        ckey[i] = (keysym <= 0x7F) ? keysym : 0;
-                    }
-		} else {
-		  ckey[i] = KEYBOARD_MapDeadKeysym(keysym);
-		}
+                ckey[i] = keysym_to_char(keysym);
 	      }
 	      /* find key with longest match streak */
 	      for (keyn=0; keyn<MAIN_LEN; keyn++) {

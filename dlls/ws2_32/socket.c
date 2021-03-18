@@ -191,7 +191,7 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_EXPEDITED_DATA | XP1_GRACEFUL_CLOSE
                 | XP1_GUARANTEED_ORDER | XP1_GUARANTEED_DELIVERY,
         .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
-        .ProviderId = {0xe70f1aa0, 0xab8b, 0x11cf, {0x8c, 0xa3, 0x00, 0x80, 0x5f, 0x48, 0xa1, 0x92}},
+        .ProviderId = {0x2047fe24, 0x2c27, 0x460b, {0x95, 0xd3, 0x20, 0x1c, 0x4b, 0x73, 0xa5, 0xe8}},
         .dwCatalogEntryId = 1001,
         .ProtocolChain.ChainLen = 1,
         .iVersion = 2,
@@ -206,7 +206,7 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_SUPPORT_BROADCAST
                 | XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED | XP1_CONNECTIONLESS,
         .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
-        .ProviderId = {0xe70f1aa0, 0xab8b, 0x11cf, {0x8c, 0xa3, 0x00, 0x80, 0x5f, 0x48, 0xa1, 0x92}},
+        .ProviderId = {0x2047fe24, 0x2c27, 0x460b, {0x95, 0xd3, 0x20, 0x1c, 0x4b, 0x73, 0xa5, 0xe8}},
         .dwCatalogEntryId = 1002,
         .ProtocolChain.ChainLen = 1,
         .iVersion = 2,
@@ -222,7 +222,7 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_EXPEDITED_DATA | XP1_GRACEFUL_CLOSE
                 | XP1_GUARANTEED_ORDER | XP1_GUARANTEED_DELIVERY,
         .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
-        .ProviderId = {0xf9eab0c0, 0x26d4, 0x11d0, {0xbb, 0xbf, 0x00, 0xaa, 0x00, 0x6c, 0x34, 0xe4}},
+        .ProviderId = {0x2047fe24, 0x2c27, 0x460b, {0x95, 0xd3, 0x20, 0x1c, 0x4b, 0x73, 0xa5, 0xe8}},
         .dwCatalogEntryId = 1004,
         .ProtocolChain.ChainLen = 1,
         .iVersion = 2,
@@ -237,7 +237,7 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_SUPPORT_BROADCAST
                 | XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED | XP1_CONNECTIONLESS,
         .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
-        .ProviderId = {0xf9eab0c0, 0x26d4, 0x11d0, {0xbb, 0xbf, 0x00, 0xaa, 0x00, 0x6c, 0x34, 0xe4}},
+        .ProviderId = {0x2047fe24, 0x2c27, 0x460b, {0x95, 0xd3, 0x20, 0x1c, 0x4b, 0x73, 0xa5, 0xe8}},
         .dwCatalogEntryId = 1005,
         .ProtocolChain.ChainLen = 1,
         .iVersion = 2,
@@ -3249,6 +3249,13 @@ int WINAPI WS_bind(SOCKET s, const struct WS_sockaddr* name, int namelen)
                     else if (interface_bind(s, fd, &uaddr.addr))
                         in4->sin_addr.s_addr = htonl(INADDR_ANY);
                 }
+
+                if(name->sa_family ==  WS_AF_IPX){
+                    /* Quake (and similar family) fails if we can't bind to an IPX address. This often
+                     * doesn't work on Linux, so just fake success. */
+                    return 0;
+                }
+
                 if (bind(fd, &uaddr.addr, uaddrlen) < 0)
                 {
                     int loc_errno = errno;
@@ -6297,6 +6304,13 @@ struct WS_hostent* WINAPI WS_gethostbyname(const char* name)
         extrabuf=HeapAlloc(GetProcessHeap(),0,ebufsize) ;
         while(extrabuf) {
             int res = gethostbyname_r(name, &hostentry, extrabuf, ebufsize, &host, &locerr);
+
+            if (!strcmp(name, "download-alt.easyanticheat.net"))
+            {
+                ERR("HACK: failing download-alt.easyanticheat.net resolution.\n");
+                res = HOST_NOT_FOUND;
+            }
+
             if( res != ERANGE) break;
             ebufsize *=2;
             extrabuf=HeapReAlloc(GetProcessHeap(),0,extrabuf,ebufsize) ;
@@ -6558,6 +6572,13 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     *res = NULL;
     if (!nodename && !servname)
     {
+        SetLastError(WSAHOST_NOT_FOUND);
+        return WSAHOST_NOT_FOUND;
+    }
+
+    if (nodename && !strcmp(nodename, "download-alt.easyanticheat.net"))
+    {
+        ERR("HACK: failing download-alt.easyanticheat.net resolution.\n");
         SetLastError(WSAHOST_NOT_FOUND);
         return WSAHOST_NOT_FOUND;
     }
@@ -7526,6 +7547,37 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         CloseHandle(handle);
         return INVALID_SOCKET;
     }
+
+    /*
+     * msvcmon spawns new server instances for each connection, which conflicts
+     * with previous instance (which is no longer listening, but client connection
+     * is still active). This is allowed on Windows, but Linux handles it differently.
+     */
+    if (af == WS_AF_INET || af == WS_AF_INET6)
+    {
+        static int once, msvsmon;
+        if (!once++) {
+            char name[MAX_PATH], *p;
+            GetModuleFileNameA(GetModuleHandleA(NULL), name, ARRAY_SIZE(name));
+            p = strrchr(name, '\\');
+            p = p ? p+1 : name;
+            if (!strcasecmp(p, "msvsmon.exe")) {
+                FIXME("Using REUSESOCKET hack.\n");
+                msvsmon = 1;
+            }
+        }
+        if (msvsmon)
+        {
+            int fd = get_sock_fd(ret, 0, NULL);
+            if (fd != -1)
+            {
+                const int enable = 1;
+                setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable));
+                release_sock_fd(ret, fd);
+            }
+        }
+    }
+
     return ret;
 
 done:

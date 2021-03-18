@@ -749,6 +749,7 @@ SOURCES = \
 	windns.h \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
+	windows.globalization.idl \
 	windows.h \
 	windows.media.speechsynthesis.idl \
 	windowscontracts.idl \
@@ -759,6 +760,7 @@ SOURCES = \
 	wine/itss.idl \
 	wine/orpc.idl \
 	wine/svcctl.idl \
+	wine/wined3d-interop.idl \
 	wine/winedxgi.idl \
 	winerror.h \
 	winevt.h \

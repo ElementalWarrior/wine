@@ -1425,6 +1425,7 @@ static void output_syscall_dispatcher( int count, const char *variant )
 {
     const unsigned int invalid_param = 0xc000000d; /* STATUS_INVALID_PARAMETER */
     const char *symbol = strmake( "__wine_syscall_dispatcher%s", variant );
+    unsigned int i;
 
     output( "\t.align %d\n", get_alignment(4) );
     output( "\t%s\n", func_declaration(symbol) );
@@ -1456,9 +1457,41 @@ static void output_syscall_dispatcher( int count, const char *variant )
         output( "\tmovl %%ecx,-0x28(%%ebp)\n" ); /* frame->esp */
         output( "\tmovl 4(%%ebp),%%ecx\n" );
         output( "\tmovl %%ecx,-0x2c(%%ebp)\n" ); /* frame->eip */
-        output( "\tmovl %%esp,%%fs:0x1f8\n" );  /* x86_thread_data()->syscall_frame */
+        output( "\tsubl $0x2c0,%%esp\n") ;
+        output( "\tandl $~63,%%esp\n" );
+        if (!*variant)
+        {
+            output( "\tfnsave (%%esp)\n" );
+            output( "\tfwait\n" );
+        }
+        else if(!strcmp( variant, "_fxsave" ))
+        {
+            output( "\tfxsave (%%esp)\n" );
+        }
+        else if(!strcmp( variant, "_xsave" ))
+        {
+            output( "\tmovl %%eax,%%ecx\n ");
+            output( "\tmovl $7,%%eax\n" );
+            output( "\txorl %%edx,%%edx\n" );
+            for (i = 0; i < 6; i++)
+                output( "\tmovl %%edx,0x%x(%%esp)\n", 0x200 + i * 4 );
+            output( "\txsave (%%esp)\n" );
+            output( "\tmovl %%ecx,%%eax\n ");
+        }
+        else /* _xsavec */
+        {
+            output( "\tmovl %%eax,%%ecx\n ");
+            output( "\tmovl $7,%%eax\n" );
+            output( "\txorl %%edx,%%edx\n" );
+            for (i = 0; i < 16; i++)
+                output( "\tmovl %%edx,0x%x(%%esp)\n", 0x200 + i * 4 );
+            output( "\txsavec (%%esp)\n" );
+            output( "\tmovl %%ecx,%%eax\n ");
+        }
+        output( "\tleal -0x30(%%ebp),%%ecx\n" );
+        output( "\tmovl %%ecx,%%fs:0x1f8\n" );  /* x86_thread_data()->syscall_frame */
         output( "\tcmpl $%u,%%eax\n", count );
-        output( "\tjae 3f\n" );
+        output( "\tjae 4f\n" );
         if (UsePIC)
         {
             output( "\tmovl %%eax,%%edx\n" );
@@ -1479,19 +1512,73 @@ static void output_syscall_dispatcher( int count, const char *variant )
         else
             output( "\tcall *.Lsyscall_table(,%%eax,4)\n" );
         output( "2:\tmovl $0,%%fs:0x1f8\n" );
-        output( "\tmovl -0x14(%%ebp),%%ebx\n" );
-        output_cfi( ".cfi_same_value %%ebx\n" );
-        output( "\tmovl -0x08(%%ebp),%%edi\n" );
-        output_cfi( ".cfi_same_value %%edi\n" );
-        output( "\tmovl -0x04(%%ebp),%%esi\n" );
-        output_cfi( ".cfi_same_value %%esi\n" );
-        output( "\tmovl %%ebp,%%esp\n" );
-        output_cfi( ".cfi_def_cfa %%esp,8\n" );
-        output( "\tpopl %%ebp\n" );
-        output_cfi( ".cfi_adjust_cfa_offset -4\n" );
-        output_cfi( ".cfi_same_value %%ebp\n" );
-        output( "\tret\n" );
-        output( "3:\tmovl $0x%x,%%eax\n", invalid_param );
+        output( "\tleal -0x2f0(%%ebp),%%ebx\n") ;
+        output( "\tandl $~63,%%ebx\n" );
+        if (!*variant)
+        {
+            output( "\tfrstor (%%ebx)\n" );
+            output( "\tfwait\n" );
+        }
+        else if(!strcmp( variant, "_fxsave" ))
+        {
+            output( "\tfxrstor (%%ebx)\n" );
+        }
+        else
+        {
+            output( "\tmovl %%eax,%%ecx\n" );
+            output( "\tmovl $7,%%eax\n" );
+            output( "\txorl %%edx,%%edx\n" );
+            output( "\txrstor (%%ebx)\n" );
+            output( "\tmovl %%ecx,%%eax\n" );
+        }
+        output( "\tleal -0x30(%%ebp),%%ebx\n" );
+        output_cfi( ".cfi_def_cfa_register %%ebx" );
+        output_cfi( ".cfi_adjust_cfa_offset 0x30\n" );
+        output( "\tmovl %%eax,0x18(%%ebx)\n" );
+        output( "\tmovw 0x16(%%ebx),%%gs\n" );
+        output( "\tmovw 0x14(%%ebx),%%fs\n" );
+        output( "\tmovw 0x12(%%ebx),%%es\n" );
+        output( "\tmovl 0x28(%%ebx),%%edi\n" );
+        output_cfi( ".cfi_same_value %%edi" );
+        output( "\tmovl 0x2c(%%ebx),%%esi\n" );
+        output_cfi( ".cfi_same_value %%esi" );
+        output( "\tmovl (%%ebp),%%ebp\n" );
+        output_cfi( ".cfi_same_value %%ebp" );
+        output( "\tmovw %%ss,%%cx\n" );
+        output( "\tcmpw 0x0e(%%ebx),%%cx\n" );
+        output( "\tjne 3f\n" );
+        /* As soon as we have switched stacks the context structure could
+         * be invalid (when signal handlers are executed for example). Copy
+         * values on the target stack before changing ESP. */
+        output( "\tmovl 0x08(%%ebx),%%ecx\n" );
+        output( "\tleal -3*4(%%ecx),%%ecx\n" );
+        output( "\tmovl (%%ebx),%%edx\n" );
+        output( "\tmovl %%edx,2*4(%%ecx)\n" );
+        output( "\tmovl 0x0c(%%ebx),%%edx\n" );
+        output( "\tmovl %%edx,1*4(%%ecx)\n" );
+        output( "\tmovl 0x04(%%ebx),%%edx\n" );
+        output( "\tmovl %%edx,0*4(%%ecx)\n" );
+        output( "\tpushl 0x10(%%ebx)\n" );
+        output( "\tmovl 0x1c(%%ebx),%%ebx\n" );
+        output_cfi( ".cfi_same_value %%ebx" );
+        output( "\tpopl %%ds\n" );
+        output( "\tmovl %%ecx,%%esp\n" );
+        output( "\tiret\n" );
+        /* Restore the context when the stack segment changes. We can't use
+         * the same code as above because we do not know if the stack segment
+         * is 16 or 32 bit, and 'movl' will throw an exception when we try to
+         * access memory above the limit. */
+        output( "\t3:\tmovl 0x18(%%ebx),%%ecx\n" );
+        output( "\tmovw 0x0e(%%ebx),%%ss\n" );
+        output( "\tmovl 0x08(%%ebx),%%esp\n" );
+        output( "\tpushl 0x00(%%ebx)\n" );
+        output( "\tpushl 0x0c(%%ebx)\n" );
+        output( "\tpushl 0x04(%%ebx)\n" );
+        output( "\tpushl 0x10(%%ebx)\n" );
+        output( "\tmovl 0x1c(%%ebx),%%ebx\n" );
+        output( "\tpopl %%ds\n" );
+        output( "\tiret\n" );
+        output( "4:\tmovl $0x%x,%%eax\n", invalid_param );
         output( "\tjmp 2b\n" );
         break;
     case CPU_x86_64:
@@ -1518,6 +1605,7 @@ static void output_syscall_dispatcher( int count, const char *variant )
         /* Legends of Runeterra hooks the first system call return instruction, and
          * depends on us returning to it. Adjust the return address accordingly. */
         output( "\tsubq $0xb,0x8(%%rbp)\n" );
+        output( "\tsubq $0xf000,%%rax\n" );
         output( "\tmovq 0x8(%%rbp),%%rbx\n" );
         output( "\tmovq %%rbx,-0x28(%%rbp)\n" );
         output( "\tleaq 0x10(%%rbp),%%rbx\n" );
@@ -1757,6 +1845,11 @@ void output_syscalls( DLLSPEC *spec )
 
         switch( target_cpu )
         {
+        case CPU_x86:
+            output_syscall_dispatcher( count, "_fxsave" );
+            output_syscall_dispatcher( count, "_xsave" );
+            output_syscall_dispatcher( count, "_xsavec" );
+            break;
         case CPU_x86_64:
             output_syscall_dispatcher( count, "_xsave" );
             output_syscall_dispatcher( count, "_xsavec" );
@@ -1773,6 +1866,13 @@ void output_syscalls( DLLSPEC *spec )
         output( ".Lsyscall_args:\n" );
         for (i = 0; i < count; i++)
             output( "\t.byte %u\n", get_args_size( syscalls[i] ));
+
+        for (i = 0; i < count; i++)
+        {
+            output( "\t.align %d\n", get_alignment( get_ptr_size() ) );
+            output( "%s\n", asm_globl(strmake( "__wine_syscall_nr_%s", get_link_name( syscalls[i] ) )) );
+            output( "\t.long %u\n", i + 0xf000 );
+        }
         return;
     }
 
@@ -1810,7 +1910,7 @@ void output_syscalls( DLLSPEC *spec )
              * validate that instruction, we can just put a jmp there instead. */
             output( "\t.byte 0x4c,0x8b,0xd1\n" ); /* movq %rcx,%r10 */
             output( "\t.byte 0xb8\n" );           /* movl $i,%eax */
-            output( "\t.long %u\n", i );
+            output( "\t.long %u\n", 0xf000 + i );
             output( "\t.byte 0xf6,0x04,0x25,0x08,0x03,0xfe,0x7f,0x01\n" ); /* testb $1,0x7ffe0308 */
             output( "\t.byte 0x75,0x03\n" );      /* jne 1f */
             output( "\t.byte 0x0f,0x05\n" );      /* syscall */

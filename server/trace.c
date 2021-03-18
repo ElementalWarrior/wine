@@ -1355,6 +1355,24 @@ static void dump_varargs_handle_infos( const char *prefix, data_size_t size )
     fputc( '}', stderr );
 }
 
+static void dump_varargs_cpu_topology_override( const char *prefix, data_size_t size )
+{
+    const struct cpu_topology_override *cpu_topology = cur_data;
+    unsigned int i;
+
+    if (size < sizeof(*cpu_topology))
+        return;
+
+    fprintf( stderr,"%s{", prefix );
+    for (i = 0; i < cpu_topology->cpu_count; ++i)
+    {
+        if (i) fputc( ',', stderr );
+        fprintf( stderr, "%u", cpu_topology->host_cpu_id[i] );
+    }
+    fputc( '}', stderr );
+    remove_data( size );
+}
+
 typedef void (*dump_func)( const void *req );
 
 /* Everything below this line is generated automatically by tools/make_requests */
@@ -1435,6 +1453,7 @@ static void dump_init_process_done_request( const struct init_process_done_reque
 static void dump_init_process_done_reply( const struct init_process_done_reply *req )
 {
     dump_uint64( " entry=", &req->entry );
+    dump_varargs_cpu_topology_override( ", cpu_override=", cur_size );
     fprintf( stderr, ", suspend=%d", req->suspend );
 }
 
@@ -1449,6 +1468,7 @@ static void dump_init_first_thread_request( const struct init_first_thread_reque
     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
     dump_client_cpu( ", cpu=", &req->cpu );
+    fprintf( stderr, ", nice_limit=%c", req->nice_limit );
 }
 
 static void dump_init_first_thread_reply( const struct init_first_thread_reply *req )
@@ -3405,7 +3425,7 @@ static void dump_get_last_input_time_reply( const struct get_last_input_time_rep
 
 static void dump_get_key_state_request( const struct get_key_state_request *req )
 {
-    fprintf( stderr, " tid=%04x", req->tid );
+    fprintf( stderr, " async=%d", req->async );
     fprintf( stderr, ", key=%d", req->key );
 }
 
@@ -3417,8 +3437,7 @@ static void dump_get_key_state_reply( const struct get_key_state_reply *req )
 
 static void dump_set_key_state_request( const struct set_key_state_request *req )
 {
-    fprintf( stderr, " tid=%04x", req->tid );
-    fprintf( stderr, ", async=%d", req->async );
+    fprintf( stderr, " async=%d", req->async );
     dump_varargs_bytes( ", keystate=", cur_size );
 }
 

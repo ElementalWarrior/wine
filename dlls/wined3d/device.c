@@ -218,6 +218,8 @@ void wined3d_device_cleanup(struct wined3d_device *device)
     if (device->swapchain_count)
         wined3d_device_uninit_3d(device);
 
+    wined3d_destroy_gl_vr_context(&device->vr_context);
+
     wined3d_cs_destroy(device->cs);
 
     for (i = 0; i < ARRAY_SIZE(device->multistate_funcs); ++i)
@@ -6171,8 +6173,49 @@ LRESULT device_process_message(struct wined3d_device *device, HWND window, BOOL 
         }
     }
 
+    /* Testing shows we shouldn't hook that message, but doing it allows us
+     * to create fullscreen exclusive windows without altering window styles. */
+    if (message == WM_NCCALCSIZE && wparam == TRUE)
+    {
+        unsigned int i = device->swapchain_count;
+        NCCALCSIZE_PARAMS params = *(NCCALCSIZE_PARAMS*)lparam;
+        LRESULT res;
+
+        if (unicode)
+            res = CallWindowProcW(proc, window, message, wparam, lparam);
+        else
+            res = CallWindowProcA(proc, window, message, wparam, lparam);
+
+        while (i--)
+        {
+            if (device->swapchains[i]->state.device_window == window &&
+                !device->swapchains[i]->state.desc.windowed)
+            {
+                *(NCCALCSIZE_PARAMS*)lparam = params;
+                return 0;
+            }
+        }
+
+        return res;
+    }
+
     if (unicode)
         return CallWindowProcW(proc, window, message, wparam, lparam);
     else
         return CallWindowProcA(proc, window, message, wparam, lparam);
+}
+
+void CDECL wined3d_device_run_cs_callback(struct wined3d_device *device,
+        wined3d_cs_callback callback, const void *data, unsigned int size)
+{
+    TRACE("device %p, callback %p, data %p, size %u.\n", device, callback, data, size);
+
+    wined3d_cs_emit_user_callback(device->cs, callback, data, size);
+}
+
+void CDECL wined3d_device_wait_idle(struct wined3d_device *device)
+{
+    TRACE("device %p.\n", device);
+
+    device->cs->ops->finish(device->cs, WINED3D_CS_QUEUE_DEFAULT);
 }

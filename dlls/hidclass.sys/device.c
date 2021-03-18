@@ -91,11 +91,11 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
     NTSTATUS status;
     HDEVINFO devinfo;
     GUID hidGuid;
-    BASE_DEVICE_EXTENSION *ext;
+    BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
     INT32 handle;
 
     HidD_GetHidGuid(&hidGuid);
-    ext = device->DeviceExtension;
+    if (ext->xinput_hack) hidGuid.Data4[7]++; /* HACK: use different GUID so only xinput will find this device */
 
     RtlInitUnicodeString( &nameW, ext->device_name);
 
@@ -266,6 +266,8 @@ static void HID_Device_sendRawInput(DEVICE_OBJECT *device, HID_XFER_PACKET *pack
 {
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
 
+    if (ext->xinput_hack) return;
+
     SERVER_START_REQ(send_hardware_message)
     {
         req->win                  = 0;
@@ -337,7 +339,6 @@ static DWORD CALLBACK hid_device_thread(void *args)
     DEVICE_OBJECT *device = (DEVICE_OBJECT*)args;
 
     IRP *irp;
-    IO_STATUS_BLOCK irp_status;
     HID_XFER_PACKET *packet;
     DWORD rc;
     HANDLE events[2];
@@ -360,8 +361,7 @@ static DWORD CALLBACK hid_device_thread(void *args)
             packet->reportId = 0;
 
             irp = IoBuildDeviceIoControlRequest(IOCTL_HID_GET_INPUT_REPORT,
-                device, NULL, 0, packet, sizeof(*packet), TRUE, NULL,
-                &irp_status);
+                device, NULL, 0, packet, sizeof(*packet), TRUE, NULL, NULL);
 
             IoSetCompletionRoutine(irp, read_Completion, events[0], TRUE, TRUE, TRUE);
             ntrc = IoCallDriver(device, irp);
@@ -396,8 +396,7 @@ static DWORD CALLBACK hid_device_thread(void *args)
 
             irp = IoBuildDeviceIoControlRequest(IOCTL_HID_READ_REPORT,
                 device, NULL, 0, packet->reportBuffer,
-                ext->preparseData->caps.InputReportByteLength, TRUE, NULL,
-                &irp_status);
+                ext->preparseData->caps.InputReportByteLength, TRUE, NULL, NULL);
 
             IoSetCompletionRoutine(irp, read_Completion, events[0], TRUE, TRUE, TRUE);
             ntrc = IoCallDriver(device, irp);

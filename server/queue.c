@@ -1661,7 +1661,6 @@ static int send_hook_ll_message( struct desktop *desktop, struct message *hardwa
 
     if (!(hook_thread = get_first_global_hook( id ))) return 0;
     if (!(queue = hook_thread->queue)) return 0;
-    if (is_queue_hung( queue )) return 0;
 
     if (!(msg = mem_alloc( sizeof(*msg) ))) return 0;
 
@@ -3115,14 +3114,15 @@ DECL_HANDLER(get_thread_input)
 }
 
 
-/* retrieve queue keyboard state for a given thread */
+/* retrieve queue keyboard state for current thread or global async state */
 DECL_HANDLER(get_key_state)
 {
-    struct thread *thread;
+    struct thread_input *input = current->queue ? current->queue->input : NULL;
+    struct thread *foreground = NULL;
     struct desktop *desktop;
     data_size_t size = min( 256, get_reply_max_size() );
 
-    if (!req->tid)  /* get global async key state */
+    if (req->async)  /* get global async key state */
     {
         if (!(desktop = get_thread_desktop( current, 0 ))) return;
         if (req->key >= 0)
@@ -3133,55 +3133,43 @@ DECL_HANDLER(get_key_state)
         set_reply_data( desktop->keystate, size );
         release_object( desktop );
     }
+    else if (!input)
+    {
+        reply->state = 0;
+        memset( set_reply_data_size( size ), 0, size );
+    }
     else
     {
-        unsigned char *keystate;
-        if (!(thread = get_thread_from_id( req->tid ))) return;
-        if (thread->queue)
-        {
-            if (req->key >= 0) reply->state = thread->queue->input->keystate[req->key & 0xff];
-            set_reply_data( thread->queue->input->keystate, size );
-            release_object( thread );
-            return;
-        }
-        release_object( thread );
+        if (req->key >= 0) reply->state = input->keystate[req->key & 0xff];
+        set_reply_data( input->keystate, size );
 
-        /* fallback to desktop keystate */
         if (!(desktop = get_thread_desktop( current, 0 ))) return;
-        if (req->key >= 0) reply->state = desktop->keystate[req->key & 0xff] & ~0x40;
-        if ((keystate = set_reply_data_size( size )))
+        if (desktop->foreground_input != input &&
+            (foreground = get_foreground_thread( desktop, 0 )) &&
+            foreground->process == current->process)
         {
-            unsigned int i;
-            for (i = 0; i < size; i++) keystate[i] = desktop->keystate[i] & ~0x40;
+            reply->state = desktop->keystate[req->key & 0xff];
+            memcpy( input->keystate, desktop->keystate, 256 );
         }
+
+        if (foreground) release_object( foreground );
         release_object( desktop );
     }
 }
 
 
-/* set queue keyboard state for a given thread */
+/* set queue keyboard state for current thread */
 DECL_HANDLER(set_key_state)
 {
-    struct thread *thread;
+    struct thread_input *input = current->queue ? current->queue->input : NULL;
     struct desktop *desktop;
     data_size_t size = min( 256, get_req_data_size() );
 
-    if (!req->tid)  /* set global async key state */
+    if (input) memcpy( input->keystate, get_req_data(), size );
+    if (req->async && (desktop = get_thread_desktop( current, 0 )))
     {
-        if (!(desktop = get_thread_desktop( current, 0 ))) return;
         memcpy( desktop->keystate, get_req_data(), size );
         release_object( desktop );
-    }
-    else
-    {
-        if (!(thread = get_thread_from_id( req->tid ))) return;
-        if (thread->queue) memcpy( thread->queue->input->keystate, get_req_data(), size );
-        if (req->async && (desktop = get_thread_desktop( thread, 0 )))
-        {
-            memcpy( desktop->keystate, get_req_data(), size );
-            release_object( desktop );
-        }
-        release_object( thread );
     }
 }
 

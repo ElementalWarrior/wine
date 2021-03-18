@@ -58,6 +58,9 @@
 #ifdef HAVE_SYS_PRCTL_H
 # include <sys/prctl.h>
 #endif
+#ifdef HAVE_SYS_RESOURCE_H
+# include <sys/resource.h>
+#endif
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
@@ -1473,6 +1476,8 @@ size_t server_init_process(void)
     int ret, reply_pipe;
     struct sigaction sig_act;
     size_t info_size;
+    struct rlimit rlimit;
+    int nice_limit = 0;
 
     server_pid = -1;
     if (env_socket)
@@ -1534,10 +1539,19 @@ size_t server_init_process(void)
 
     reply_pipe = init_thread_pipe();
 
+#ifdef RLIMIT_NICE
+    if (!getrlimit( RLIMIT_NICE, &rlimit ))
+    {
+        if (rlimit.rlim_cur <= 40) nice_limit = 20 - rlimit.rlim_cur;
+        else if (rlimit.rlim_cur == -1 /* RLIMIT_INFINITY */) nice_limit = -20;
+    }
+#endif
+
     SERVER_START_REQ( init_first_thread )
     {
         req->unix_pid    = getpid();
         req->unix_tid    = get_unix_tid();
+        req->nice_limit  = nice_limit;
         req->teb         = wine_server_client_ptr( NtCurrentTeb() );
         req->peb         = wine_server_client_ptr( NtCurrentTeb()->Peb );
 #ifdef __i386__
@@ -1584,6 +1598,11 @@ size_t server_init_process(void)
     }
 }
 
+static BOOL force_laa(void)
+{
+    const char *e = getenv("WINE_LARGE_ADDRESS_AWARE");
+    return (e != NULL) && (*e != '\0' && *e != '0');
+}
 
 /***********************************************************************
  *           server_init_process_done
@@ -1593,6 +1612,7 @@ void server_init_process_done(void)
     PEB *peb = NtCurrentTeb()->Peb;
     IMAGE_NT_HEADERS *nt = get_exe_nt_header();
     void *entry;
+    struct cpu_topology_override *cpu_override = get_cpu_topology_override();
     NTSTATUS status;
     int suspend, needs_close, unixdir;
 
@@ -1608,7 +1628,7 @@ void server_init_process_done(void)
 #ifdef __APPLE__
     send_server_task_port();
 #endif
-    if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) virtual_set_large_address_space();
+    if (force_laa() || (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)) virtual_set_large_address_space();
 
     /* Install signal handlers; this cannot be done earlier, since we cannot
      * send exceptions to the debugger before the create process event that
@@ -1618,6 +1638,8 @@ void server_init_process_done(void)
     /* Signal the parent process to continue */
     SERVER_START_REQ( init_process_done )
     {
+        if (cpu_override)
+            wine_server_add_data( req, cpu_override, sizeof(*cpu_override) );
         status = wine_server_call( req );
         suspend = reply->suspend;
         entry = wine_server_get_ptr( reply->entry );

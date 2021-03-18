@@ -282,7 +282,7 @@ static void start_pipeline(struct media_source *source, struct source_async_comm
             IMFMediaTypeHandler_GetCurrentMediaType(mth, &current_mt);
 
             mf_media_type_to_wg_format(current_mt, &format);
-            unix_funcs->wg_parser_stream_enable(stream->wg_stream, &format);
+            unix_funcs->wg_parser_stream_enable(stream->wg_stream, &format, NULL);
 
             IMFMediaType_Release(current_mt);
             IMFMediaTypeHandler_Release(mth);
@@ -527,7 +527,7 @@ static DWORD CALLBACK read_thread(void *arg)
             hr = IMFByteStream_Read(byte_stream, data, size, &ret_size);
         if (SUCCEEDED(hr) && ret_size != size)
             ERR("Unexpected short read: requested %u bytes, got %u.\n", size, ret_size);
-        unix_funcs->wg_parser_complete_read_request(source->wg_parser, SUCCEEDED(hr));
+        unix_funcs->wg_parser_complete_read_request(source->wg_parser, SUCCEEDED(hr) ? WG_READ_SUCCESS : WG_READ_FAILURE, ret_size);
     }
 
     TRACE("Media source is shutting down; exiting.\n");
@@ -786,6 +786,44 @@ static HRESULT media_stream_init_desc(struct media_stream *stream)
                 goto done;
             if (FAILED(hr = IMFMediaType_SetGUID(new_type, &MF_MT_SUBTYPE, video_types[i])))
                 goto done;
+        }
+    }
+    else if (format.major_type == WG_MAJOR_TYPE_AUDIO)
+    {
+        /* Make sure to expose both a F32 and PCM type for the source reader to pick from */
+
+        stream_types = malloc( sizeof(IMFMediaType *) * 2 );
+
+        stream_types[0] = mf_media_type_from_wg_format(&format);
+        if (stream_types[0])
+        {
+            GUID base_subtype;
+            UINT32 sample_rate, channel_count, channel_mask;
+
+            IMFMediaType_GetGUID(stream_types[0], &MF_MT_SUBTYPE, &base_subtype);
+            IMFMediaType_GetUINT32(stream_types[0], &MF_MT_AUDIO_SAMPLES_PER_SECOND, &sample_rate);
+            IMFMediaType_GetUINT32(stream_types[0], &MF_MT_AUDIO_NUM_CHANNELS, &channel_count);
+            IMFMediaType_GetUINT32(stream_types[0], &MF_MT_AUDIO_CHANNEL_MASK, &channel_mask);
+
+            MFCreateMediaType(&stream_types[1]);
+            IMFMediaType_SetGUID(stream_types[1], &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_SAMPLES_PER_SECOND, sample_rate);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_NUM_CHANNELS, channel_count);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_CHANNEL_MASK, channel_mask);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+
+            /* regardless of which format is used in the base type, when the non base-type is used
+               we'd be converting either to or from a floating point type, which has 32 bits per sample */
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_BITS_PER_SAMPLE, 32);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_BLOCK_ALIGNMENT, channel_count * 32 / 8);
+            IMFMediaType_SetUINT32(stream_types[1], &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sample_rate * channel_count * 32 / 8);
+
+            if (IsEqualGUID(&base_subtype, &MFAudioFormat_Float))
+                IMFMediaType_SetGUID(stream_types[1], &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+            else
+                IMFMediaType_SetGUID(stream_types[1], &MF_MT_SUBTYPE, &MFAudioFormat_Float);
+
+            type_count = 2;
         }
     }
     else
@@ -1066,6 +1104,7 @@ static const IMFMediaSourceVtbl IMFMediaSource_vtbl =
 
 static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_source **out_media_source)
 {
+    BOOL video_selected = FALSE, audio_selected = FALSE;
     IMFStreamDescriptor **descriptors = NULL;
     struct media_source *object;
     UINT64 total_pres_time = 0;
@@ -1125,7 +1164,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
      * never deselects it). Remove buffering limits from decodebin in order to
      * account for this. Note that this does leak memory, but the same memory
      * leak occurs with native. */
-    unix_funcs->wg_parser_set_unlimited_buffering(parser);
+    unix_funcs->wg_parser_set_large_buffering(parser);
 
     object->stream_count = unix_funcs->wg_parser_get_stream_count(parser);
 
@@ -1153,15 +1192,52 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     descriptors = malloc(object->stream_count * sizeof(IMFStreamDescriptor *));
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, &descriptors[i]);
+        IMFStreamDescriptor **descriptor = &descriptors[object->stream_count - 1 - i];
+        DWORD language_len;
+        WCHAR *languageW;
+        char *language;
+
+        IMFMediaStream_GetStreamDescriptor(&object->streams[i]->IMFMediaStream_iface, descriptor);
+
+        if ((language = unix_funcs->wg_parser_stream_get_language(object->streams[i]->wg_stream)))
+        {
+            if ((language_len = MultiByteToWideChar(CP_UTF8, 0, language, -1, NULL, 0)))
+            {
+                languageW = malloc(language_len * sizeof(WCHAR));
+                if (MultiByteToWideChar(CP_UTF8, 0, language, -1, languageW, language_len))
+                {
+                    IMFStreamDescriptor_SetString(*descriptor, &MF_SD_LANGUAGE, languageW);
+                }
+                free(languageW);
+            }
+        }
     }
 
     if (FAILED(hr = MFCreatePresentationDescriptor(object->stream_count, descriptors, &object->pres_desc)))
         goto fail;
 
+    /* Select one of each major type. */
     for (i = 0; i < object->stream_count; i++)
     {
-        IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler *handler;
+        GUID major_type;
+        BOOL select_stream = FALSE;
+
+        IMFStreamDescriptor_GetMediaTypeHandler(descriptors[i], &handler);
+        IMFMediaTypeHandler_GetMajorType(handler, &major_type);
+        if (IsEqualGUID(&major_type, &MFMediaType_Video) && !video_selected)
+        {
+            select_stream = TRUE;
+            video_selected = TRUE;
+        }
+        if (IsEqualGUID(&major_type, &MFMediaType_Audio) && !audio_selected)
+        {
+            select_stream = TRUE;
+            audio_selected = TRUE;
+        }
+        if (select_stream)
+            IMFPresentationDescriptor_SelectStream(object->pres_desc, i);
+        IMFMediaTypeHandler_Release(handler);
         IMFStreamDescriptor_Release(descriptors[i]);
     }
     free(descriptors);

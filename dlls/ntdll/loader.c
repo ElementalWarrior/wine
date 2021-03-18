@@ -72,7 +72,7 @@ static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 BOOL is_wow64 = FALSE;
 
 /* system search path */
-static const WCHAR system_path[] = L"C:\\windows\\system32;C:\\windows\\system;C:\\windows";
+static const WCHAR system_path[] = L"C:\\windows\\system32;C:\\windows\\system;C:\\windows;C:\\Program Files (x86)\\Steam";
 
 static BOOL imports_fixup_done = FALSE;  /* set once the imports have been fixed up, before attaching them */
 static BOOL process_detaching = FALSE;  /* set on process detach to avoid deadlocks with thread detach */
@@ -1837,10 +1837,14 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
                               const SECTION_IMAGE_INFORMATION *image_info, const struct file_id *id,
                               DWORD flags, WINE_MODREF **pwm )
 {
+    static HMODULE lsteamclient = NULL;
+    UNICODE_STRING lsteamclient_us;
     IMAGE_NT_HEADERS *nt;
     WINE_MODREF *wm;
     NTSTATUS status;
     SIZE_T map_size;
+    WCHAR *basename, *tmp;
+    ULONG basename_len;
 
     if (!(nt = RtlImageNtHeader( *module ))) return STATUS_INVALID_IMAGE_FORMAT;
 
@@ -1857,6 +1861,24 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
     if (image_info->u.s.ComPlusILOnly) wm->ldr.Flags |= LDR_COR_ILONLY;
 
     set_security_cookie( *module, map_size );
+
+    basename = nt_name->Buffer;
+    if ((tmp = wcsrchr(basename, '\\'))) basename = tmp + 1;
+    if ((tmp = wcsrchr(basename, '/'))) basename = tmp + 1;
+    basename_len = wcslen(basename);
+    if (basename_len >= 4 && !wcscmp(basename + basename_len - 4, L".dll")) basename_len -= 4;
+
+    if ((!RtlCompareUnicodeStrings(basename, basename_len, L"steamclient", 11, TRUE) ||
+         !RtlCompareUnicodeStrings(basename, basename_len, L"steamclient64", 13, TRUE) ||
+         !RtlCompareUnicodeStrings(basename, basename_len, L"gameoverlayrenderer", 19, TRUE) ||
+         !RtlCompareUnicodeStrings(basename, basename_len, L"gameoverlayrenderer64", 21, TRUE)) &&
+        RtlCreateUnicodeStringFromAsciiz(&lsteamclient_us, "lsteamclient.dll") &&
+        (lsteamclient || LdrLoadDll(load_path, 0, &lsteamclient_us, &lsteamclient) == STATUS_SUCCESS))
+    {
+        unix_funcs->steamclient_setup_trampolines( *module, lsteamclient );
+        wm->ldr.Flags |= LDR_DONT_RESOLVE_REFS;
+        flags |= DONT_RESOLVE_DLL_REFERENCES;
+    }
 
     /* fixup imports */
 
@@ -2524,6 +2546,42 @@ done:
     return status;
 }
 
+static WCHAR *strstriW( const WCHAR *str, const WCHAR *sub )
+{
+    while (*str)
+    {
+        const WCHAR *p1 = str, *p2 = sub;
+        while (*p1 && *p2 && tolower(*p1) == tolower(*p2)) { p1++; p2++; }
+        if (!*p2) return (WCHAR *)str;
+        str++;
+    }
+    return NULL;
+}
+
+static WCHAR *get_env( const WCHAR *var )
+{
+    UNICODE_STRING name, value;
+
+    RtlInitUnicodeString( &name, var );
+    value.Length = 0;
+    value.MaximumLength = 0;
+    value.Buffer = NULL;
+
+    if (RtlQueryEnvironmentVariable_U( NULL, &name, &value ) == STATUS_BUFFER_TOO_SMALL) {
+
+        value.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, value.Length + sizeof(WCHAR) );
+        value.MaximumLength = value.Length;
+
+        if (RtlQueryEnvironmentVariable_U( NULL, &name, &value ) == STATUS_SUCCESS) {
+            value.Buffer[value.Length / sizeof(WCHAR)] = 0;
+            return value.Buffer;
+        }
+
+        RtlFreeHeap( GetProcessHeap(), 0, value.Buffer );
+    }
+
+    return NULL;
+}
 
 /***********************************************************************
  *	find_dll_file
@@ -2591,9 +2649,28 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, con
 done:
     RtlFreeHeap( GetProcessHeap(), 0, dllname );
     if (wow64_old_value) RtlWow64EnableFsRedirectionEx( 1, &wow64_old_value );
+
+    if (status != STATUS_SUCCESS)
+    {
+        /* HACK for Proton issue #17
+         *
+         * Some games try to load mfc42.dll, but then proceed to not use it.
+         * Just return a handle to kernel32 in that case.
+         */
+        WCHAR *sgi = get_env( L"SteamGameId" );
+        if (sgi)
+        {
+            if (!wcscmp( sgi, L"105450") &&
+                    strstriW( libname, L"mfc42" ))
+            {
+                WARN_(loaddll)( "Using a fake mfc42 handle\n" );
+                status = find_dll_file( load_path, L"kernel32.dll", L".dll", nt_name, pwm, mapping, image_info, id );
+            }
+            RtlFreeHeap(GetProcessHeap(), 0, sgi);
+        }
+    }
     return status;
 }
-
 
 /***********************************************************************
  *	load_dll  (internal)
@@ -3233,7 +3310,8 @@ void WINAPI LdrShutdownThread(void)
     RtlReleasePebLock();
 
     RtlLeaveCriticalSection( &loader_section );
-    if (DbgUiGetThreadDebugObject()) NtClose( DbgUiGetThreadDebugObject() );
+    /* don't call DbgUiGetThreadDebugObject as some apps hook it and terminate if called */
+    if (NtCurrentTeb()->DbgSsReserved[1]) NtClose( NtCurrentTeb()->DbgSsReserved[1] );
     RtlFreeThreadActivationContextStack();
 }
 
@@ -3533,6 +3611,7 @@ static void load_global_options(void)
 {
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING name_str;
+    WCHAR *env_str;
     HANDLE hkey;
     ULONG value;
 
@@ -3570,6 +3649,16 @@ static void load_global_options(void)
     LdrQueryImageFileExecutionOptions( &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName,
                                        L"GlobalFlag", REG_DWORD, &NtCurrentTeb()->Peb->NtGlobalFlag,
                                        sizeof(DWORD), NULL );
+
+    if ((env_str = get_env(L"WINE_HEAP_DELAY_FREE")))
+    {
+        if (*env_str == L'1')
+        {
+            ERR("Enabling heap free delay hack.\n");
+            delay_heap_free = TRUE;
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, env_str );
+    }
     heap_set_debug_flags( GetProcessHeap() );
 }
 

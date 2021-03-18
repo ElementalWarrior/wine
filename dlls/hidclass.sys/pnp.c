@@ -74,6 +74,8 @@ static void HID_PNP_SendDeviceChange(DEVICE_OBJECT *device, WPARAM wparam)
 {
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
 
+    if (ext->xinput_hack) return;
+
     SERVER_START_REQ(send_hardware_message)
     {
         req->win                  = 0;
@@ -199,6 +201,8 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     lstrcpyW(ext->device_id, L"HID");
     lstrcatW(ext->device_id, L"\\");
     lstrcatW(ext->device_id, wcschr(device_id, '\\') + 1);
+
+    ext->xinput_hack = attr.Reserved[0];
 
     HID_LinkDevice(device);
 

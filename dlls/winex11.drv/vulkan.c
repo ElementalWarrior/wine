@@ -224,12 +224,15 @@ void wine_vk_surface_destroy(HWND hwnd)
     LeaveCriticalSection(&context_section);
 }
 
-static VkResult X11DRV_vkCreateInstance(const VkInstanceCreateInfo *create_info,
-        const VkAllocationCallbacks *allocator, VkInstance *instance)
+static VkResult X11DRV_create_vk_instance_with_callback(const VkInstanceCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkInstance *instance,
+        VkResult (WINAPI *native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *,
+        VkInstance *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateInstance_context)
 {
     VkInstanceCreateInfo create_info_host;
     VkResult res;
-    TRACE("create_info %p, allocator %p, instance %p\n", create_info, allocator, instance);
+    TRACE("create_info %p, allocator %p, instance %p, native_vkCreateInstance %p, context %p.\n",
+            create_info, allocator, instance, native_vkCreateInstance, native_vkCreateInstance_context);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
@@ -245,10 +248,20 @@ static VkResult X11DRV_vkCreateInstance(const VkInstanceCreateInfo *create_info,
         return res;
     }
 
-    res = pvkCreateInstance(&create_info_host, NULL /* allocator */, instance);
+    if (native_vkCreateInstance)
+        res = native_vkCreateInstance(&create_info_host, NULL /* allocator */, instance,
+                pvkGetInstanceProcAddr, native_vkCreateInstance_context);
+    else
+        res = pvkCreateInstance(&create_info_host, NULL /* allocator */, instance);
 
     heap_free((void *)create_info_host.ppEnabledExtensionNames);
     return res;
+}
+
+static VkResult X11DRV_vkCreateInstance(const VkInstanceCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkInstance *instance)
+{
+    return X11DRV_create_vk_instance_with_callback(create_info, allocator, instance, NULL, NULL);
 }
 
 static VkResult X11DRV_vkCreateSwapchainKHR(VkDevice device,
@@ -610,6 +623,64 @@ static VkSurfaceKHR X11DRV_wine_get_native_surface(VkSurfaceKHR surface)
     return x11_surface->surface;
 }
 
+static VkBool32 X11DRV_query_fs_hack(VkSurfaceKHR surface, VkExtent2D *real_sz, VkExtent2D *user_sz,
+        VkRect2D *dst_blit, VkFilter *filter)
+{
+    struct wine_vk_surface *x11_surface = surface_from_handle(surface);
+    HMONITOR monitor;
+    HWND hwnd;
+
+    if (wm_is_steamcompmgr(gdi_display))
+        return VK_FALSE;
+
+    if (XFindContext(gdi_display, x11_surface->window, winContext, (char **)&hwnd) != 0)
+    {
+        ERR("Failed to find hwnd context\n");
+        return VK_FALSE;
+    }
+
+    monitor = fs_hack_monitor_from_hwnd(hwnd);
+    if(fs_hack_enabled(monitor)){
+        RECT real_rect = fs_hack_real_mode(monitor);
+        RECT user_rect = fs_hack_current_mode(monitor);
+        SIZE scaled = fs_hack_get_scaled_screen_size(monitor);
+        POINT scaled_origin;
+
+        scaled_origin.x = user_rect.left;
+        scaled_origin.y = user_rect.top;
+        fs_hack_point_user_to_real(&scaled_origin);
+        scaled_origin.x -= real_rect.left;
+        scaled_origin.y -= real_rect.top;
+
+        TRACE("real_rect:%s user_rect:%s scaled:%dx%d scaled_origin:%s\n", wine_dbgstr_rect(&real_rect),
+              wine_dbgstr_rect(&user_rect), scaled.cx, scaled.cy, wine_dbgstr_point(&scaled_origin));
+
+        if(real_sz){
+            real_sz->width = real_rect.right - real_rect.left;
+            real_sz->height = real_rect.bottom - real_rect.top;
+        }
+
+        if(user_sz){
+            user_sz->width = user_rect.right - user_rect.left;
+            user_sz->height = user_rect.bottom - user_rect.top;
+        }
+
+        if(dst_blit){
+            dst_blit->offset.x = scaled_origin.x;
+            dst_blit->offset.y = scaled_origin.y;
+            dst_blit->extent.width = scaled.cx;
+            dst_blit->extent.height = scaled.cy;
+        }
+
+        if(filter)
+            *filter = fs_hack_is_integer() ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+
+        return VK_TRUE;
+    }
+
+    return VK_FALSE;
+}
+
 static const struct vulkan_funcs vulkan_funcs =
 {
     X11DRV_vkCreateInstance,
@@ -634,6 +705,8 @@ static const struct vulkan_funcs vulkan_funcs =
     X11DRV_vkQueuePresentKHR,
 
     X11DRV_wine_get_native_surface,
+    X11DRV_query_fs_hack,
+    X11DRV_create_vk_instance_with_callback,
 };
 
 static void *X11DRV_get_vk_device_proc_addr(const char *name)

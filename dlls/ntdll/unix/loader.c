@@ -1084,9 +1084,11 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
     struct builtin_module *builtin;
     void *module, *handle;
     const IMAGE_NT_HEADERS *nt;
+    BOOL mapped = FALSE;
 
     callback_module = (void *)1;
-    handle = dlopen( so_name, RTLD_NOW );
+    if ((handle = dlopen( so_name, RTLD_NOW | RTLD_NOLOAD ))) mapped = TRUE;
+    else handle = dlopen( so_name, RTLD_NOW );
     if (!handle)
     {
         WARN( "failed to load .so lib %s: %s\n", debugstr_a(so_name), dlerror() );
@@ -1105,7 +1107,7 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
         module = (HMODULE)((nt->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
         LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
             if (builtin->module == module) goto already_loaded;
-        if (map_so_dll( nt, module ))
+        if (!mapped && map_so_dll( nt, module ))
         {
             dlclose( handle );
             return STATUS_NO_MEMORY;
@@ -1670,6 +1672,92 @@ ULONG_PTR get_image_address(void)
 }
 
 
+static void *steamclient_srcs[128];
+static void *steamclient_tgts[128];
+static int steamclient_count;
+
+void *steamclient_handle_fault( LPCVOID addr, DWORD err )
+{
+    int i;
+
+    if (!(err & EXCEPTION_EXECUTE_FAULT)) return NULL;
+
+    for (i = 0; i < steamclient_count; ++i)
+    {
+        if (addr == steamclient_srcs[i])
+            return steamclient_tgts[i];
+    }
+
+    return NULL;
+}
+
+static void steamclient_write_jump(void *src_addr, void *tgt_addr)
+{
+#ifdef _WIN64
+    static const char mov[] = {0x48, 0xb8};
+#else
+    static const char mov[] = {0xb8};
+#endif
+    static const char jmp[] = {0xff, 0xe0};
+    memcpy(src_addr, mov, sizeof(mov));
+    memcpy((char *)src_addr + sizeof(mov), &tgt_addr, sizeof(tgt_addr));
+    memcpy((char *)src_addr + sizeof(mov) + sizeof(tgt_addr), jmp, sizeof(jmp));
+}
+
+static void CDECL steamclient_setup_trampolines(HMODULE src_mod, HMODULE tgt_mod)
+{
+    static int noexec_cached = -1;
+
+    SYSTEM_BASIC_INFORMATION info;
+    IMAGE_NT_HEADERS *src_nt = (IMAGE_NT_HEADERS *)((UINT_PTR)src_mod + ((IMAGE_DOS_HEADER *)src_mod)->e_lfanew);
+    IMAGE_NT_HEADERS *tgt_nt = (IMAGE_NT_HEADERS *)((UINT_PTR)tgt_mod + ((IMAGE_DOS_HEADER *)tgt_mod)->e_lfanew);
+    IMAGE_SECTION_HEADER *src_sec = (IMAGE_SECTION_HEADER *)(src_nt + 1);
+    const IMAGE_EXPORT_DIRECTORY *src_exp = get_export_dir(src_mod), *tgt_exp = get_export_dir(tgt_mod);
+    const DWORD *names;
+    SIZE_T size;
+    void *addr, *src_addr, *tgt_addr;
+    char *name, *wsne;
+    UINT_PTR page_mask;
+    int i;
+
+    if (noexec_cached == -1)
+        noexec_cached = (wsne = getenv("WINESTEAMNOEXEC")) && atoi(wsne);
+
+    virtual_get_system_info(&info);
+    page_mask = info.PageSize - 1;
+
+    for (i = 0; i < src_nt->FileHeader.NumberOfSections; ++i)
+    {
+        if (memcmp(src_sec[i].Name, ".text", 5)) continue;
+        addr = (void *)(((UINT_PTR)src_mod + src_sec[i].VirtualAddress) & ~page_mask);
+        size = (src_sec[i].Misc.VirtualSize + page_mask) & ~page_mask;
+        if (noexec_cached) mprotect(addr, size, PROT_READ);
+        else mprotect(addr, size, PROT_READ|PROT_WRITE|PROT_EXEC);
+    }
+
+    names = (const DWORD *)((UINT_PTR)src_mod + src_exp->AddressOfNames);
+    for (i = 0; i < src_exp->NumberOfNames; ++i)
+    {
+        if (!names[i] || !(name = (char *)((UINT_PTR)src_mod + names[i]))) continue;
+        if (!(src_addr = (void *)find_named_export(src_mod, src_exp, name))) continue;
+        if (!(tgt_addr = (void *)find_named_export(tgt_mod, tgt_exp, name))) continue;
+        assert(steamclient_count < ARRAY_SIZE(steamclient_srcs));
+        steamclient_srcs[steamclient_count] = src_addr;
+        steamclient_tgts[steamclient_count] = tgt_addr;
+        if (!noexec_cached) steamclient_write_jump(src_addr, tgt_addr);
+        else steamclient_count++;
+    }
+
+    src_addr = (void *)((UINT_PTR)src_mod + src_nt->OptionalHeader.AddressOfEntryPoint);
+    tgt_addr = (void *)((UINT_PTR)tgt_mod + tgt_nt->OptionalHeader.AddressOfEntryPoint);
+    assert(steamclient_count < ARRAY_SIZE(steamclient_srcs));
+    steamclient_srcs[steamclient_count] = src_addr;
+    steamclient_tgts[steamclient_count] = tgt_addr;
+    if (!noexec_cached) steamclient_write_jump(src_addr, tgt_addr);
+    else steamclient_count++;
+}
+
+
 /* math function wrappers */
 static double CDECL ntdll_atan( double d )  { return atan( d ); }
 static double CDECL ntdll_ceil( double d )  { return ceil( d ); }
@@ -1729,6 +1817,7 @@ static struct unix_funcs unix_funcs =
     __wine_dbg_strdup,
     __wine_dbg_output,
     __wine_dbg_header,
+    steamclient_setup_trampolines,
 };
 
 
@@ -2078,6 +2167,9 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #endif
 #ifdef RLIMIT_AS
     set_max_limit( RLIMIT_AS );
+#endif
+#ifdef RLIMIT_NICE
+    set_max_limit( RLIMIT_NICE );
 #endif
 
     virtual_init();
