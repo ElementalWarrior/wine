@@ -17989,13 +17989,16 @@ for ac_func in \
 	proc_pidinfo \
 	pwrite \
 	readlink \
+	renameat \
+	renameat2 \
 	sched_yield \
 	setproctitle \
 	setprogname \
 	sigprocmask \
 	symlink \
 	tcdrain \
-	thr_kill2
+	thr_kill2 \
+	utimensat
 
 do :
   as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
