@@ -2607,13 +2607,26 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT)
+    {
         ret = process_rawinput_message( msg, hw_id, msg_data );
+    }
+    else if (msg->message == WM_INPUT_DEVICE_CHANGE)
+    {
+        ret = TRUE;
+        msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+    }
     else if (is_keyboard_message( msg->message ))
+    {
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
+    }
     else if (is_mouse_message( msg->message ))
+    {
         ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
+    }
     else
+    {
         ERR( "unknown message type %x\n", msg->message );
+    }
     SetThreadDpiAwarenessContext( context );
     return ret;
 }
@@ -3240,10 +3253,10 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
     {
         req->win        = wine_server_user_handle( hwnd );
         req->flags      = flags;
-        req->input.type = input->type;
         switch (input->type)
         {
         case INPUT_MOUSE:
+            req->input.type        = HW_INPUT_MOUSE;
             req->input.mouse.x     = input->u.mi.dx;
             req->input.mouse.y     = input->u.mi.dy;
             req->input.mouse.data  = input->u.mi.mouseData;
@@ -3252,6 +3265,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.mouse.info  = input->u.mi.dwExtraInfo;
             break;
         case INPUT_KEYBOARD:
+            req->input.type      = HW_INPUT_KEYBOARD;
             req->input.kbd.vkey  = input->u.ki.wVk;
             req->input.kbd.scan  = input->u.ki.wScan;
             req->input.kbd.flags = input->u.ki.dwFlags;
@@ -3259,6 +3273,7 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.kbd.info  = input->u.ki.dwExtraInfo;
             break;
         case INPUT_HARDWARE:
+            req->input.type      = HW_INPUT_HARDWARE;
             req->input.hw.msg    = input->u.hi.uMsg;
             req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
             break;

@@ -20,6 +20,7 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
+#include "winuser.h"
 #include "winternl.h"
 #include "winioctl.h"
 #include "ddk/wdm.h"
@@ -51,6 +52,7 @@ typedef struct _BASE_DEVICE_EXTENSION {
     struct ReportRingBuffer *ring_buffer;
     HANDLE halt_event;
     HANDLE thread;
+    HANDLE rawinput_handle;
 
     KSPIN_LOCK irp_queue_lock;
     LIST_ENTRY irp_queue;

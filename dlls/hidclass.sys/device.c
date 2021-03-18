@@ -26,6 +26,7 @@
 #include "winuser.h"
 #include "setupapi.h"
 
+#include "wine/server.h"
 #include "wine/debug.h"
 #include "ddk/hidsdi.h"
 #include "ddk/hidtypes.h"
@@ -33,10 +34,13 @@
 
 #include "initguid.h"
 #include "devguid.h"
+#include "devpkey.h"
 #include "ntddmou.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
 WINE_DECLARE_DEBUG_CHANNEL(hid_report);
+
+DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
 
 NTSTATUS HID_CreateDevice(DEVICE_OBJECT *native_device, HID_MINIDRIVER_REGISTRATION *driver, DEVICE_OBJECT **device)
 {
@@ -71,6 +75,14 @@ NTSTATUS HID_CreateDevice(DEVICE_OBJECT *native_device, HID_MINIDRIVER_REGISTRAT
     return STATUS_SUCCESS;
 }
 
+/* user32 reserves 1 & 2 for winemouse and winekeyboard */
+#define WINE_KEYBOARD_HANDLE 2
+static INT32 alloc_new_handle(void)
+{
+    static INT32 counter = WINE_KEYBOARD_HANDLE+1;
+    return InterlockedIncrement(&counter);
+}
+
 NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
 {
     WCHAR device_instance_id[MAX_DEVICE_ID_LEN];
@@ -80,6 +92,7 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
     HDEVINFO devinfo;
     GUID hidGuid;
     BASE_DEVICE_EXTENSION *ext;
+    INT32 handle;
 
     HidD_GetHidGuid(&hidGuid);
     ext = device->DeviceExtension;
@@ -110,7 +123,19 @@ NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device)
         FIXME( "failed to create device info %x\n", GetLastError());
         goto error;
     }
+
     SetupDiDestroyDeviceInfoList(devinfo);
+
+    handle = alloc_new_handle();
+    status = IoSetDevicePropertyData(device, &DEVPROPKEY_HID_HANDLE, LOCALE_NEUTRAL,
+                                     PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_INT32,
+                                     sizeof(handle), &handle);
+    if (status != STATUS_SUCCESS)
+    {
+        FIXME( "failed to set device property %x\n", status );
+        return status;
+    }
+    ext->rawinput_handle = (HANDLE)(UINT_PTR) handle;
 
     status = IoRegisterDeviceInterface(device, &hidGuid, NULL, &ext->link_name);
     if (status != STATUS_SUCCESS)
@@ -237,6 +262,33 @@ static NTSTATUS copy_packet_into_buffer(HID_XFER_PACKET *packet, BYTE* buffer, U
         return STATUS_BUFFER_OVERFLOW;
 }
 
+static void HID_Device_sendRawInput(DEVICE_OBJECT *device, HID_XFER_PACKET *packet)
+{
+    BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
+
+    SERVER_START_REQ(send_hardware_message)
+    {
+        req->win                  = 0;
+        req->flags                = 0;
+        req->input.type           = HW_INPUT_HID;
+        req->input.hid.msg        = WM_INPUT;
+        req->input.hid.device     = wine_server_obj_handle(ext->rawinput_handle);
+        req->input.hid.usage_page = ext->preparseData->caps.UsagePage;
+        req->input.hid.usage      = ext->preparseData->caps.Usage;
+        req->input.hid.length     = packet->reportBufferLen;
+
+        if (ext->preparseData->reports[0].reportID == 0) {
+            BYTE zero_byte = 0;
+            req->input.hid.length++;
+            wine_server_add_data(req, &zero_byte, sizeof(zero_byte));
+        }
+
+        wine_server_add_data(req, packet->reportBuffer, packet->reportBufferLen);
+        wine_server_call(req);
+    }
+    SERVER_END_REQ;
+}
+
 static void HID_Device_processQueue(DEVICE_OBJECT *device)
 {
     IRP *irp;
@@ -320,6 +372,7 @@ static DWORD CALLBACK hid_device_thread(void *args)
             if (irp->IoStatus.u.Status == STATUS_SUCCESS)
             {
                 RingBuffer_Write(ext->ring_buffer, packet);
+                HID_Device_sendRawInput(device, packet);
                 HID_Device_processQueue(device);
             }
 
@@ -366,6 +419,7 @@ static DWORD CALLBACK hid_device_thread(void *args)
                 else
                     packet->reportId = 0;
                 RingBuffer_Write(ext->ring_buffer, packet);
+                HID_Device_sendRawInput(device, packet);
                 HID_Device_processQueue(device);
             }
 
