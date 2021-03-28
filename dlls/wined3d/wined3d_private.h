@@ -2852,6 +2852,7 @@ enum wined3d_pci_vendor
     HW_VENDOR_SOFTWARE              = 0x0000,
     HW_VENDOR_AMD                   = 0x1002,
     HW_VENDOR_NVIDIA                = 0x10de,
+    HW_VENDOR_MICROSOFT             = 0x1414,
     HW_VENDOR_VMWARE                = 0x15ad,
     HW_VENDOR_REDHAT                = 0x1af4,
     HW_VENDOR_INTEL                 = 0x8086,
@@ -2860,6 +2861,7 @@ enum wined3d_pci_vendor
 enum wined3d_pci_device
 {
     CARD_WINE                       = 0x0000,
+    CARD_WARP                       = 0x008c,
 
     CARD_AMD_RAGE_128PRO            = 0x5246,
     CARD_AMD_RADEON_7200            = 0x5144,
@@ -3414,7 +3416,7 @@ struct wined3d_adapter
 };
 
 BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, unsigned int ordinal, const LUID *luid,
-        const struct wined3d_adapter_ops *adapter_ops) DECLSPEC_HIDDEN;
+        const struct wined3d_adapter_ops *adapter_ops, BOOL no_output) DECLSPEC_HIDDEN;
 void wined3d_adapter_cleanup(struct wined3d_adapter *adapter) DECLSPEC_HIDDEN;
 BOOL wined3d_get_primary_adapter_luid(LUID *luid) DECLSPEC_HIDDEN;
 
@@ -3609,7 +3611,7 @@ struct wined3d
     LONG ref;
     unsigned int flags;
     unsigned int adapter_count;
-    struct wined3d_adapter *adapters[1];
+    struct wined3d_adapter *adapters[2];
 };
 
 BOOL wined3d_filter_messages(HWND window, BOOL filter) DECLSPEC_HIDDEN;
