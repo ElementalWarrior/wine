@@ -46,7 +46,7 @@ typedef struct _DriverFuncs {
      *   all of the elements in both arrays with HeapFree() */
     HRESULT (WINAPI *pGetEndpointIDs)(EDataFlow flow, WCHAR ***ids,
             GUID **guids, UINT *num, UINT *default_index);
-    HRESULT (WINAPI *pGetAudioEndpoint)(void *key, IMMDevice *dev,
+    HRESULT (WINAPI *pGetAudioEndpoint)(GUID *guid, IMMDevice *dev,
             IAudioClient **out);
     HRESULT (WINAPI *pGetAudioSessionManager)(IMMDevice *device,
             IAudioSessionManager2 **out);
@@ -72,5 +72,11 @@ typedef struct MMDevice {
 extern HRESULT AudioClient_Create(MMDevice *parent, IAudioClient **ppv) DECLSPEC_HIDDEN;
 extern HRESULT AudioEndpointVolume_Create(MMDevice *parent, IAudioEndpointVolumeEx **ppv) DECLSPEC_HIDDEN;
 extern HRESULT SpatialAudioClient_Create(IMMDevice *device, ISpatialAudioClient **out) DECLSPEC_HIDDEN;
+
+extern int WINAPI nulldrv_GetPriority(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI nulldrv_GetEndpointIDs(EDataFlow flow, WCHAR ***ids, GUID **guids, UINT *num, UINT *default_index) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI nulldrv_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient **out) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI nulldrv_GetAudioSessionManager(IMMDevice *device, IAudioSessionManager2 **out) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI nulldrv_GetPropValue(GUID *guid, const PROPERTYKEY *prop, PROPVARIANT *out) DECLSPEC_HIDDEN;
 
 extern const WCHAR drv_keyW[] DECLSPEC_HIDDEN;
