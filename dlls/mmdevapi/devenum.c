@@ -858,16 +858,29 @@ static const IMMDeviceCollectionVtbl MMDevColVtbl =
     MMDevCol_Item
 };
 
+static CRITICAL_SECTION devenum_init_cs;
+static CRITICAL_SECTION_DEBUG devenum_init_cs_debug =
+{
+    0, 0, &devenum_init_cs,
+    { &devenum_init_cs_debug.ProcessLocksList, &devenum_init_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": devenum_init_cs") }
+};
+static CRITICAL_SECTION devenum_init_cs = { &devenum_init_cs_debug, -1, 0, 0, 0, 0 };
+
 HRESULT MMDevEnum_Create(REFIID riid, void **ppv)
 {
-    MMDevEnumImpl *This = MMDevEnumerator;
+    MMDevEnumImpl *This;
 
-    if (!This)
+    EnterCriticalSection(&devenum_init_cs);
+    if (!(This = MMDevEnumerator))
     {
         This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
         *ppv = NULL;
         if (!This)
+        {
+            LeaveCriticalSection(&devenum_init_cs);
             return E_OUTOFMEMORY;
+        }
         This->ref = 1;
         This->IMMDeviceEnumerator_iface.lpVtbl = &MMDevEnumVtbl;
         MMDevEnumerator = This;
@@ -876,6 +889,8 @@ HRESULT MMDevEnum_Create(REFIID riid, void **ppv)
         load_driver_devices(eRender);
         load_driver_devices(eCapture);
     }
+    LeaveCriticalSection(&devenum_init_cs);
+
     return IMMDeviceEnumerator_QueryInterface(&This->IMMDeviceEnumerator_iface, riid, ppv);
 }
 
@@ -886,8 +901,11 @@ void MMDevEnum_Free(void)
     RegCloseKey(key_render);
     RegCloseKey(key_capture);
     key_render = key_capture = NULL;
+
+    EnterCriticalSection(&devenum_init_cs);
     HeapFree(GetProcessHeap(), 0, MMDevEnumerator);
     MMDevEnumerator = NULL;
+    LeaveCriticalSection(&devenum_init_cs);
 }
 
 static HRESULT WINAPI MMDevEnum_QueryInterface(IMMDeviceEnumerator *iface, REFIID riid, void **ppv)
