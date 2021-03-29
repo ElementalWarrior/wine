@@ -2162,6 +2162,7 @@ static HRESULT WINAPI XA20_CreateMasteringVoice(IXAudio20 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     pthread_mutex_lock(&This->mst.engine_lock);
 
     This->mst.engine_thread = CreateThread(NULL, 0, &engine_thread, &This->mst, 0, NULL);
@@ -2171,6 +2172,7 @@ static HRESULT WINAPI XA20_CreateMasteringVoice(IXAudio20 *iface,
     pthread_mutex_unlock(&This->mst.engine_lock);
 
     FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+#endif
 
     FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
@@ -2397,6 +2399,7 @@ static HRESULT WINAPI XA22_CreateMasteringVoice(IXAudio22 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     pthread_mutex_lock(&This->mst.engine_lock);
 
     This->mst.engine_thread = CreateThread(NULL, 0, &engine_thread, &This->mst, 0, NULL);
@@ -2406,6 +2409,7 @@ static HRESULT WINAPI XA22_CreateMasteringVoice(IXAudio22 *iface,
     pthread_mutex_unlock(&This->mst.engine_lock);
 
     FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+#endif
 
     FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
@@ -2631,6 +2635,7 @@ static HRESULT WINAPI XA23_CreateMasteringVoice(IXAudio23 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     pthread_mutex_lock(&This->mst.engine_lock);
 
     This->mst.engine_thread = CreateThread(NULL, 0, &engine_thread, &This->mst, 0, NULL);
@@ -2640,6 +2645,7 @@ static HRESULT WINAPI XA23_CreateMasteringVoice(IXAudio23 *iface,
     pthread_mutex_unlock(&This->mst.engine_lock);
 
     FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+#endif
 
     FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
@@ -2819,6 +2825,7 @@ static HRESULT WINAPI XA27_CreateMasteringVoice(IXAudio27 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     pthread_mutex_lock(&This->mst.engine_lock);
 
     This->mst.engine_thread = CreateThread(NULL, 0, &engine_thread, &This->mst, 0, NULL);
@@ -2828,6 +2835,7 @@ static HRESULT WINAPI XA27_CreateMasteringVoice(IXAudio27 *iface,
     pthread_mutex_unlock(&This->mst.engine_lock);
 
     FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+#endif
 
     FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
