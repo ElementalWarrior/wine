@@ -21,11 +21,20 @@
 #include "config.h"
 
 #include <stdarg.h>
+#include <assert.h>
 
 #define NONAMELESSUNION
 #define COBJMACROS
 
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
+#include "winreg.h"
+
+#include "propsys.h"
 #include "initguid.h"
+#include "audioclient.h"
+#include "mmdeviceapi.h"
 #include "xaudio_private.h"
 #include "xaudio2fx.h"
 #if XAUDIO2_VER >= 8
@@ -82,7 +91,522 @@ static HINSTANCE instance;
 
 static XA2VoiceImpl *impl_from_IXAudio2Voice(IXAudio2Voice *iface);
 
+#ifdef FAUDIO_PLATFORM_CALLBACKS
+WINE_DECLARE_DEBUG_CHANNEL(faudio);
+
+static CRITICAL_SECTION faudio_cs;
+static CRITICAL_SECTION_DEBUG faudio_cs_debug =
+{
+    0, 0, &faudio_cs,
+    { &faudio_cs_debug.ProcessLocksList, &faudio_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": faudio_cs") }
+};
+static CRITICAL_SECTION faudio_cs = { &faudio_cs_debug, -1, 0, 0, 0, 0 };
+static IMMDeviceEnumerator *device_enumerator;
+static HRESULT init_hr;
+
+static int FAUDIOCALL faudio_HasSSE2(void)
+{
+    return IsProcessorFeaturePresent( PF_XMMI64_INSTRUCTIONS_AVAILABLE );
+}
+
+static int FAUDIOCALL faudio_HasNEON(void)
+{
+    return 0;
+}
+
+static void FAUDIOCALL faudio_PlatformAddRef(void)
+{
+    HRESULT hr;
+    TRACE_(faudio)("\n");
+    EnterCriticalSection(&faudio_cs);
+    if (!device_enumerator)
+    {
+        init_hr = CoInitialize(NULL);
+        hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&device_enumerator);
+        assert(SUCCEEDED(hr));
+    }
+    else IMMDeviceEnumerator_AddRef(device_enumerator);
+    LeaveCriticalSection(&faudio_cs);
+}
+
+static void FAUDIOCALL faudio_PlatformRelease(void)
+{
+    TRACE_(faudio)("\n");
+    EnterCriticalSection(&faudio_cs);
+    if (!IMMDeviceEnumerator_Release(device_enumerator))
+    {
+        device_enumerator = NULL;
+        if (SUCCEEDED(init_hr)) CoUninitialize();
+    }
+    LeaveCriticalSection(&faudio_cs);
+}
+
+struct audio_client_thread_args
+{
+    WAVEFORMATEXTENSIBLE format;
+    IAudioClient *client;
+    HANDLE events[2];
+    FAudio *faudio;
+    FAudioPlatformCallback callback;
+    UINT update_frames;
+};
+
+struct platform_data
+{
+    IAudioClient *client;
+    HANDLE audio_thread;
+    HANDLE stop_event;
+};
+
+static HRESULT audio_client_fill_buffer(struct audio_client_thread_args *args,
+                                        IAudioRenderClient *client, UINT frames, UINT padding)
+{
+    HRESULT hr = S_OK;
+    BYTE *buffer;
+
+    TRACE_(faudio)("args %p, client %p, frames %u, padding %u.\n", args, client, frames, padding);
+
+    while (padding + args->update_frames <= frames)
+    {
+        if (FAILED(hr = IAudioRenderClient_GetBuffer(client, frames - padding, &buffer)))
+            return hr;
+
+        args->callback(args->faudio, (char *)buffer, args->update_frames * args->format.Format.nBlockAlign);
+
+        if (FAILED(hr = IAudioRenderClient_ReleaseBuffer(client, args->update_frames, 0)))
+            return hr;
+
+        padding += args->update_frames;
+    }
+
+    return hr;
+}
+
+static DWORD WINAPI audio_client_thread(void *user)
+{
+    struct audio_client_thread_args *args = user;
+    IAudioRenderClient *render_client;
+    HRESULT hr = S_OK;
+    UINT frames, padding = 0;
+
+    if (FAILED(hr = IAudioClient_GetService(args->client, &IID_IAudioRenderClient, (void **)&render_client)))
+    {
+        ERR_(faudio)("failed to get IAudioRenderClient service, hr %#x!\n", hr);
+        return hr;
+    }
+
+    if (FAILED(hr = IAudioClient_GetBufferSize(args->client, &frames)))
+    {
+        ERR_(faudio)("failed to get IAudioClient buffer size, hr %#x!\n", hr);
+        goto done;
+    }
+
+    if (FAILED(hr = audio_client_fill_buffer(args, render_client, frames, 0)))
+    {
+        ERR_(faudio)("failed to initialize IAudioClient buffer, hr %#x!\n", hr);
+        goto done;
+    }
+
+    if (FAILED(hr = IAudioClient_Start(args->client)))
+    {
+        ERR_(faudio)("failed to start IAudioClient, hr %#x!\n", hr);
+        goto done;
+    }
+
+    while (WaitForMultipleObjects(2, args->events, FALSE, INFINITE) == WAIT_OBJECT_0)
+    {
+        if (FAILED(hr = IAudioClient_GetCurrentPadding(args->client, &padding)))
+        {
+            ERR_(faudio)("failed to get IAudioClient current padding, hr %#x!\n", hr);
+            goto done;
+        }
+
+        if (FAILED(hr = audio_client_fill_buffer(args, render_client, frames, padding)))
+        {
+            ERR_(faudio)("failed to fill IAudioClient buffer, hr %#x!\n", hr);
+            goto done;
+        }
+    }
+
+    if (FAILED(hr = IAudioClient_Stop(args->client)))
+    {
+        ERR_(faudio)("failed to stop IAudioClient, hr %#x!\n", hr);
+        goto done;
+    }
+
+done:
+    IAudioRenderClient_Release(render_client);
+    HeapFree(GetProcessHeap(), 0, args);
+    return hr;
+}
+
+static void FAUDIOCALL faudio_PlatformInit(FAudio *faudio, uint32_t flags, uint32_t index,
+        FAudioWaveFormatExtensible *faudio_format, uint32_t *update_size, FAudioPlatformCallback callback,
+        void** platform_device)
+{
+    struct audio_client_thread_args *args;
+    struct platform_data *data;
+    REFERENCE_TIME duration;
+    WAVEFORMATEX *closest;
+    IMMDevice *device = NULL;
+    HRESULT hr;
+    HANDLE audio_event = NULL;
+
+    TRACE_(faudio)("faudio %p, flags %x, index %d, faudio_format %p, update_size %p, platform_device %p.\n",
+          faudio, flags, index, faudio_format, update_size, platform_device);
+
+    faudio_PlatformAddRef();
+
+    *platform_device = NULL;
+    if (index > 0) return;
+
+    if (!(args = HeapAlloc(GetProcessHeap(), 0, sizeof(*args))))
+    {
+        ERR_(faudio)("failed to allocate FAudio thread args!\n");
+        return;
+    }
+
+    if (!(data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
+    {
+        ERR_(faudio)("failed to allocate FAudio platform data!\n");
+        HeapFree(GetProcessHeap(), 0, args);
+        return;
+    }
+
+    args->format.Format.wFormatTag = faudio_format->Format.wFormatTag;
+    args->format.Format.nChannels = faudio_format->Format.nChannels;
+    args->format.Format.nSamplesPerSec = faudio_format->Format.nSamplesPerSec;
+    args->format.Format.nAvgBytesPerSec = faudio_format->Format.nAvgBytesPerSec;
+    args->format.Format.nBlockAlign = faudio_format->Format.nBlockAlign;
+    args->format.Format.wBitsPerSample = faudio_format->Format.wBitsPerSample;
+    args->format.Format.cbSize = faudio_format->Format.cbSize;
+
+    if (args->format.Format.wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+    {
+        args->format.Samples.wValidBitsPerSample = faudio_format->Samples.wValidBitsPerSample;
+        args->format.dwChannelMask = faudio_format->dwChannelMask;
+        memcpy(&args->format.SubFormat, &faudio_format->SubFormat, sizeof(GUID));
+    }
+
+    if (!(audio_event = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR_(faudio)("failed to create FAudio thread buffer event!\n");
+        goto error;
+    }
+
+    if (!(data->stop_event = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR_(faudio)("failed to create FAudio thread stop event!\n");
+        goto error;
+    }
+
+    if (FAILED(hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(device_enumerator, eRender, eConsole, &device)))
+    {
+        ERR_(faudio)("failed to get default audio endpoint, hr %#x!\n", hr);
+        goto error;
+    }
+
+    if (FAILED(hr = IMMDevice_Activate(device, &IID_IAudioClient, CLSCTX_ALL, NULL, (void **)&data->client)))
+    {
+        ERR_(faudio)("failed to create audio client, hr %#x!\n", hr);
+        IMMDevice_Release(device);
+        goto error;
+    }
+    IMMDevice_Release(device);
+
+    if (flags & FAUDIO_1024_QUANTUM) duration = 21330;
+    else duration = 30000;
+
+    if (FAILED(hr = IAudioClient_IsFormatSupported(data->client, AUDCLNT_SHAREMODE_SHARED, &args->format.Format, &closest)))
+    {
+        ERR_(faudio)("failed to find supported audio format, hr %#x!\n", hr);
+        goto error;
+    }
+
+    if (closest)
+    {
+        if (closest->wFormatTag != WAVE_FORMAT_EXTENSIBLE) args->format.Format = *closest;
+        else args->format = *(WAVEFORMATEXTENSIBLE *)closest;
+        CoTaskMemFree(closest);
+    }
+
+    if (FAILED(hr = IAudioClient_Initialize(data->client, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                            duration, 0, &args->format.Format, &GUID_NULL)))
+    {
+        ERR_(faudio)("failed to initialize audio client, hr %#x!\n", hr);
+        goto error;
+    }
+    if (FAILED(hr = IAudioClient_SetEventHandle(data->client, audio_event)))
+    {
+        ERR_(faudio)("failed to set audio client event, hr %#x!\n", hr);
+        goto error;
+    }
+
+    faudio_format->Format.wFormatTag = args->format.Format.wFormatTag;
+    faudio_format->Format.nChannels = args->format.Format.nChannels;
+    faudio_format->Format.nSamplesPerSec = args->format.Format.nSamplesPerSec;
+    faudio_format->Format.nAvgBytesPerSec = args->format.Format.nAvgBytesPerSec;
+    faudio_format->Format.nBlockAlign = args->format.Format.nBlockAlign;
+    faudio_format->Format.wBitsPerSample = args->format.Format.wBitsPerSample;
+
+    if (args->format.Format.wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+    {
+        faudio_format->Format.cbSize = sizeof(FAudioWaveFormatExtensible) - sizeof(FAudioWaveFormatEx);
+        faudio_format->Samples.wValidBitsPerSample = args->format.Samples.wValidBitsPerSample;
+        faudio_format->dwChannelMask = args->format.dwChannelMask;
+        memcpy(&faudio_format->SubFormat, &args->format.SubFormat, sizeof(GUID));
+    }
+    else faudio_format->Format.cbSize = sizeof(FAudioWaveFormatEx);
+
+    args->client = data->client;
+    args->events[0] = audio_event;
+    args->events[1] = data->stop_event;
+    args->faudio = faudio;
+    args->callback = callback;
+    args->update_frames = args->format.Format.nSamplesPerSec / 100;
+    data->audio_thread = CreateThread(NULL, 0, &audio_client_thread, args, 0, NULL);
+
+    TRACE_(faudio)("returning update_size %x, platform_device %p\n", args->update_frames, data);
+
+    *update_size = args->update_frames;
+    *platform_device = data;
+    return;
+
+error:
+    if (data->client) IAudioClient_Release(data->client);
+    CloseHandle(data->stop_event);
+    CloseHandle(audio_event);
+    HeapFree(GetProcessHeap(), 0, data);
+    HeapFree(GetProcessHeap(), 0, args);
+}
+
+static void FAUDIOCALL faudio_PlatformQuit(void *platform_device)
+{
+    struct platform_data *data = platform_device;
+    TRACE_(faudio)("platform_device %p.\n", platform_device);
+    SetEvent(data->stop_event);
+    WaitForSingleObject(data->audio_thread, INFINITE);
+    if (data->client) IAudioClient_Release(data->client);
+    faudio_PlatformRelease();
+}
+
+static void FAUDIOCALL faudio_sleep(uint32_t ms)
+{
+    Sleep(ms);
+}
+
+static uint32_t FAUDIOCALL faudio_timems(void)
+{
+    return GetTickCount();
+}
+
+static FAudioMutex FAUDIOCALL faudio_CreateMutex(void)
+{
+    CRITICAL_SECTION *cs;
+    if (!(cs = HeapAlloc(GetProcessHeap(), 0, sizeof(CRITICAL_SECTION)))) return NULL;
+    InitializeCriticalSection(cs);
+    return cs;
+}
+
+static void FAUDIOCALL faudio_LockMutex(FAudioMutex mutex)
+{
+    if (!mutex) WARN_(faudio)("locking NULL mutex!\n");
+    else EnterCriticalSection(mutex);
+}
+
+static void FAUDIOCALL faudio_UnlockMutex(FAudioMutex mutex)
+{
+    if (!mutex) WARN_(faudio)("unlocking NULL mutex!\n");
+    else LeaveCriticalSection(mutex);
+}
+
+static void FAUDIOCALL faudio_DestroyMutex(FAudioMutex mutex)
+{
+    if (!mutex) WARN_(faudio)("destroying NULL mutex!\n");
+    else DeleteCriticalSection(mutex);
+    HeapFree(GetProcessHeap(), 0, mutex);
+}
+
+struct faudio_thread_args
+{
+    FAudioThreadFunc func;
+    const char *name;
+    void* data;
+};
+
+static DWORD WINAPI faudio_thread(void *user)
+{
+    struct faudio_thread_args *args = user;
+    DWORD ret;
+    TRACE_(faudio)("args %p.\n", args);
+    ret = args->func(args->data);
+    TRACE_(faudio)("ret %d.\n", ret);
+    HeapFree(GetProcessHeap(), 0, args);
+    return ret;
+}
+
+static FAudioThread FAUDIOCALL faudio_CreateThread(FAudioThreadFunc func, const char *name, void* data)
+{
+    struct faudio_thread_args *args;
+
+    TRACE_(faudio)("func %p, name %s, data %p.\n", func, debugstr_a(name), data);
+
+    if (!(args = HeapAlloc(GetProcessHeap(), 0, sizeof(*args)))) return NULL;
+    args->func = func;
+    args->name = name;
+    args->data = data;
+
+    return CreateThread(NULL, 0, &faudio_thread, args, 0, NULL);
+}
+
+static uint64_t FAUDIOCALL faudio_GetThreadID(void)
+{
+    return GetCurrentThreadId();
+}
+
+static void FAUDIOCALL faudio_ThreadPriority(FAudioThreadPriority priority)
+{
+    FIXME_(faudio)("priority %d stub!\n", priority);
+}
+
+static void FAUDIOCALL faudio_WaitThread(FAudioThread thread, int32_t *retval)
+{
+    TRACE_(faudio)("thread %p, retval %p.\n", thread, retval);
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, (DWORD *)retval);
+}
+
+static uint32_t FAUDIOCALL faudio_GetDeviceCount(void)
+{
+    IMMDevice *device;
+    uint32_t count;
+    HRESULT hr;
+
+    faudio_PlatformAddRef();
+    if (SUCCEEDED(hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(device_enumerator, eRender, eConsole, &device)))
+    {
+        IMMDevice_Release(device);
+        count = 1;
+    }
+    else
+    {
+        ERR_(faudio)("failed to get default audio endpoint, hr %#x!\n", hr);
+        count = 0;
+    }
+    faudio_PlatformRelease();
+
+    TRACE_(faudio)("count %d.\n", count);
+    return count;
+}
+
+static uint32_t FAUDIOCALL faudio_GetDeviceDetails(uint32_t index, FAudioDeviceDetails *details)
+{
+    WAVEFORMATEXTENSIBLE *ext;
+    WAVEFORMATEX *format;
+    IAudioClient *client;
+    IMMDevice *device;
+    uint32_t ret = 0;
+    HRESULT hr;
+    WCHAR *str;
+
+    TRACE_(faudio)("index %u details %p.\n", index, details);
+
+    memset(details, 0, sizeof(FAudioDeviceDetails));
+    if (index > 0) return FAUDIO_E_INVALID_CALL;
+
+    faudio_PlatformAddRef();
+
+    if (FAILED(hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(device_enumerator, eRender, eConsole, &device)))
+    {
+        ERR_(faudio)("failed to get default audio endpoint, hr %#x!\n", hr);
+        ret = FAUDIO_E_INVALID_CALL;
+    }
+    else
+    {
+        details->Role = FAudioGlobalDefaultDevice;
+
+        if (FAILED(hr = IMMDevice_GetId(device, &str)))
+        {
+            ERR_(faudio)("failed to get audio endpoint id, hr %#x!\n", hr);
+            ret = FAUDIO_E_INVALID_CALL;
+        }
+        else
+        {
+            memcpy(details->DeviceID, str, 0xff * sizeof(WCHAR));
+            details->DeviceID[0xff] = 0;
+            memcpy(details->DisplayName, str, 0xff * sizeof(WCHAR));
+            details->DisplayName[0xff] = 0;
+            CoTaskMemFree(str);
+        }
+
+        if (FAILED(hr = IMMDevice_Activate(device, &IID_IAudioClient, CLSCTX_ALL, NULL, (void **)&client)))
+        {
+            ERR_(faudio)("failed to activate audio client, hr %#x!\n", hr);
+            ret = FAUDIO_E_INVALID_CALL;
+        }
+        else
+        {
+            if (FAILED(hr = IAudioClient_GetMixFormat(client, &format)))
+            {
+                ERR_(faudio)("failed to get audio client mix format, hr %#x!\n", hr);
+                ret = FAUDIO_E_INVALID_CALL;
+            }
+            else
+            {
+                details->OutputFormat.Format.wFormatTag = format->wFormatTag;
+                details->OutputFormat.Format.nChannels = format->nChannels;
+                details->OutputFormat.Format.nSamplesPerSec = format->nSamplesPerSec;
+                details->OutputFormat.Format.nAvgBytesPerSec = format->nAvgBytesPerSec;
+                details->OutputFormat.Format.nBlockAlign = format->nBlockAlign;
+                details->OutputFormat.Format.wBitsPerSample = format->wBitsPerSample;
+                details->OutputFormat.Format.cbSize = format->cbSize;
+
+                if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+                {
+                    ext = (WAVEFORMATEXTENSIBLE *)format;
+                    details->OutputFormat.Samples.wValidBitsPerSample = ext->Samples.wValidBitsPerSample;
+                    details->OutputFormat.dwChannelMask = ext->dwChannelMask;
+                    memcpy(&details->OutputFormat.SubFormat, &ext->SubFormat, sizeof(GUID));
+                }
+
+                CoTaskMemFree(str);
+            }
+            IAudioClient_Release(client);
+        }
+
+        IMMDevice_Release(device);
+    }
+
+    faudio_PlatformRelease();
+
+    return ret;
+}
+
+static const FAudioPlatform faudio_platform =
+{
+    faudio_HasSSE2,
+    faudio_HasNEON,
+    faudio_PlatformAddRef,
+    faudio_PlatformRelease,
+    faudio_PlatformInit,
+    faudio_PlatformQuit,
+    faudio_sleep,
+    faudio_timems,
+    faudio_CreateMutex,
+    faudio_LockMutex,
+    faudio_UnlockMutex,
+    faudio_DestroyMutex,
+    faudio_CreateThread,
+    faudio_GetThreadID,
+    faudio_ThreadPriority,
+    faudio_WaitThread,
+    faudio_GetDeviceCount,
+    faudio_GetDeviceDetails,
+};
+#else
 static void stop_engine_thread(XA2VoiceImpl *This);
+#endif /* FAUDIO_PLATFORM_CALLBACKS */
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
 {
@@ -95,6 +619,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
         DisableThreadLibraryCalls( hinstDLL );
 #ifdef HAVE_FAUDIOLINKEDVERSION
         TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
+#endif
+#ifdef FAUDIO_PLATFORM_CALLBACKS
+        TRACE("Using FAudio platform callbacks.\n");
+        FAudio_SetPlatform( &faudio_platform );
 #endif
         break;
     }
@@ -1306,7 +1834,9 @@ static void WINAPI XA2M_DestroyVoice(IXAudio2MasteringVoice *iface)
     EnterCriticalSection(&This->lock);
 
     destroy_voice(This);
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     stop_engine_thread(This);
+#endif
 
     LeaveCriticalSection(&This->lock);
 }
@@ -1677,6 +2207,7 @@ static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface,
     return S_OK;
 }
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
 /* called thread created by SDL, must not access Wine TEB */
 void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float *stream, void *user)
 {
@@ -1753,6 +2284,7 @@ static void stop_engine_thread(XA2VoiceImpl *This)
 
     pthread_mutex_unlock(&This->engine_lock);
 }
+#endif
 
 static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
         IXAudio2MasteringVoice **ppMasteringVoice, UINT32 inputChannels,
@@ -1787,9 +2319,11 @@ static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     start_engine_thread(&This->mst);
 
     FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+#endif
 
     FAudio_CreateMasteringVoice8(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, NULL /* TODO: (uint16_t*)deviceId */,
@@ -1808,7 +2342,9 @@ static HRESULT WINAPI IXAudio2Impl_StartEngine(IXAudio2 *iface)
 
     TRACE("(%p)->()\n", This);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     start_engine_thread(&This->mst);
+#endif
 
     return FAudio_StartEngine(This->faudio);
 }
@@ -1821,7 +2357,9 @@ static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
 
     FAudio_StopEngine(This->faudio);
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     stop_engine_thread(&This->mst);
+#endif
 }
 
 static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
@@ -1972,9 +2510,11 @@ static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *p
     InitializeCriticalSection(&object->mst.lock);
     object->mst.lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": XA2MasteringVoice.lock");
 
+#ifndef FAUDIO_PLATFORM_CALLBACKS
     pthread_mutex_init(&object->mst.engine_lock, NULL);
     pthread_cond_init(&object->mst.engine_done, NULL);
     pthread_cond_init(&object->mst.engine_ready, NULL);
+#endif
 
     /* set PulseAudio's application.name in the environment since FAudio and
      * SDL provide no way to pass this in */
