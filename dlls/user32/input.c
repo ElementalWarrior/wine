@@ -386,7 +386,6 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
     volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
     BYTE state;
-    SHORT ret;
 
     if (key < 0 || key >= 256 || !shared) return 0;
 
@@ -398,23 +397,7 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
     }
     SHARED_READ_END( &shared->seq );
 
-    if (!(state & 0x40)) return (state & 0x80) << 8;
-
-    /* Need to make a server call to reset the last pressed bit */
-    ret = 0;
-    SERVER_START_REQ( get_key_state )
-    {
-        req->async = 1;
-        req->key = key;
-        if (!wine_server_call( req ))
-        {
-            if (reply->state & 0x40) ret |= 0x0001;
-            if (reply->state & 0x80) ret |= 0x8000;
-        }
-    }
-    SERVER_END_REQ;
-
-    return ret;
+    return (state & 0x80) << 8;
 }
 
 
@@ -521,14 +504,39 @@ BOOL WINAPI AttachThreadInput( DWORD from, DWORD to, BOOL attach )
  */
 SHORT WINAPI DECLSPEC_HOTPATCH GetKeyState(INT vkey)
 {
+    volatile struct desktop_shared_memory *desktop = get_desktop_shared_memory();
+    volatile struct input_shared_memory *foreground = get_foreground_shared_memory();
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
+    DWORD tid = GetCurrentThreadId();
     SHORT retval = 0;
+    BOOL is_foreground, update_keystate;
 
-    SERVER_START_REQ( get_key_state )
+    SHARED_READ_BEGIN( &foreground->seq )
     {
-        req->key = vkey;
-        if (!wine_server_call( req )) retval = (signed char)(reply->state & 0x81);
+        if ((is_foreground = (foreground->tid == tid)))
+            retval = (signed char)(foreground->keystate[vkey & 0xff] & 0x81);
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &foreground->seq );
+
+    if (!is_foreground)
+    {
+        SHARED_READ_BEGIN( &shared->seq )
+        SHARED_READ_BEGIN( &desktop->seq )
+        {
+            retval = (signed char)(shared->keystate[vkey & 0xff] & 0x81);
+            update_keystate = memcmp( (const void *)desktop->keystate, (const void *)shared->keystate, 256 );
+        }
+        SHARED_READ_END( &desktop->seq );
+        SHARED_READ_END( &shared->seq );
+
+        if (update_keystate) SERVER_START_REQ( get_key_state )
+        {
+            req->key = vkey;
+            if (!wine_server_call( req )) retval = (signed char)(reply->state & 0x81);
+        }
+        SERVER_END_REQ;
+    }
+
     TRACE("key (0x%x) -> %x\n", vkey, retval);
     return retval;
 }
@@ -539,21 +547,17 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetKeyState(INT vkey)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetKeyboardState( LPBYTE state )
 {
-    BOOL ret;
-    UINT i;
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
 
     TRACE("(%p)\n", state);
 
-    memset( state, 0, 256 );
-    SERVER_START_REQ( get_key_state )
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->key = -1;
-        wine_server_set_reply( req, state, 256 );
-        ret = !wine_server_call_err( req );
-        for (i = 0; i < 256; i++) state[i] &= 0x81;
+        memcpy( state, (const void *)shared->keystate, 256 );
     }
-    SERVER_END_REQ;
-    return ret;
+    SHARED_READ_END( &shared->seq );
+
+    return TRUE;
 }
 
 
