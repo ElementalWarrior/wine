@@ -1617,6 +1617,7 @@ static void sync_client_position( struct x11drv_win_data *data,
         TRACE( "setting client win %lx pos %d,%d,%dx%d changes=%x\n",
                data->client_window, changes.x, changes.y, changes.width, changes.height, mask );
         XConfigureWindow( data->display, data->client_window, mask, &changes );
+        resize_vk_surfaces( data->hwnd, data->client_window, mask, &changes );
     }
 }
 
@@ -1718,6 +1719,23 @@ static Window get_dummy_parent(void)
         XMapWindow( gdi_display, dummy_parent );
     }
     return dummy_parent;
+}
+
+
+/**********************************************************************
+ *		destroy_client_window
+ */
+void destroy_client_window( HWND hwnd, Window old_window, Window new_window )
+{
+    struct x11drv_win_data *data;
+    if ((data = get_win_data( hwnd )))
+    {
+        if (data->client_window == old_window) data->client_window = new_window;
+        /* make sure any request that could use old_window has been flushed */
+        XFlush( data->display );
+        release_win_data( data );
+    }
+    XDestroyWindow( gdi_display, old_window );
 }
 
 
@@ -1991,6 +2009,15 @@ void CDECL X11DRV_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style )
 {
     struct x11drv_win_data *data;
     DWORD changed = style->styleNew ^ style->styleOld;
+    HWND parent = GetAncestor( hwnd, GA_PARENT );
+
+    if (offset == GWL_STYLE && (changed & WS_CHILD))
+    {
+        if (GetWindow( parent, GW_CHILD ) || GetAncestor( parent, GA_PARENT ) != GetDesktopWindow())
+            sync_vk_surface( parent, TRUE );
+        else
+            sync_vk_surface( parent, FALSE );
+    }
 
     if (hwnd == GetDesktopWindow()) return;
     if (!(data = get_win_data( hwnd ))) return;
@@ -2017,6 +2044,10 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
 {
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
     struct x11drv_win_data *data;
+    HWND parent = GetAncestor( hwnd, GA_PARENT );
+
+    if (!GetWindow( parent, GW_CHILD ) && GetAncestor( parent, GA_PARENT ) == GetDesktopWindow())
+        sync_vk_surface( parent, FALSE );
 
     if (!(data = get_win_data( hwnd ))) return;
 
@@ -2224,6 +2255,7 @@ static struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd, const RECT *wi
      * that will need clipping support.
      */
     sync_gl_drawable( parent, TRUE );
+    sync_vk_surface( parent, TRUE );
 
     display = thread_init_display();
     init_clip_window();  /* make sure the clip window is initialized in this thread */
@@ -2562,6 +2594,7 @@ done:
      * that will need clipping support.
      */
     sync_gl_drawable( parent, TRUE );
+    sync_vk_surface( parent, TRUE );
 
     fetch_icon_data( hwnd, 0, 0 );
 }
@@ -2611,7 +2644,8 @@ void CDECL X11DRV_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flag
         if(data->whole_window)
             XMoveResizeWindow(data->display, data->whole_window, tl.x, tl.y, real_rect.right - real_rect.left, real_rect.bottom - real_rect.top);
         if(data->client_window)
-            XMoveResizeWindow(data->display, data->client_window, 0, 0, real_rect.right - real_rect.left, real_rect.bottom - real_rect.top);
+            XMoveResizeWindow(gdi_display, data->client_window, 0, 0, real_rect.right - real_rect.left, real_rect.bottom - real_rect.top);
+        EnumChildWindows( hwnd, fs_hack_update_child_window_client_surface, TRUE );
     }else if(data->fs_hack && (!fs_hack_enabled(monitor) ||
             !fs_hack_matches_current_mode(monitor,
                 window_rect->right - window_rect->left,
@@ -2624,12 +2658,13 @@ void CDECL X11DRV_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_flag
                     window_rect->right - window_rect->left,
                     window_rect->bottom - window_rect->top);
         if(data->client_window){
-            XMoveResizeWindow(data->display, data->client_window,
+            XMoveResizeWindow(gdi_display, data->client_window,
                     data->client_rect.left - data->whole_rect.left,
                     data->client_rect.top - data->whole_rect.top,
                     data->client_rect.right - data->client_rect.left,
                     data->client_rect.bottom - data->client_rect.top);
         }
+        EnumChildWindows( hwnd, fs_hack_update_child_window_client_surface, FALSE );
     }
 
     /* check if we need to switch the window to managed */
