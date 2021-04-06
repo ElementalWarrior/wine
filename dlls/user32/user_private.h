@@ -185,6 +185,8 @@ struct user_thread_info
     HANDLE                        server_queue;           /* Handle to server-side queue */
     DWORD                         wake_mask;              /* Current queue wake mask */
     DWORD                         changed_mask;           /* Current queue changed mask */
+    DWORD                         last_driver_time;       /* Get/PeekMessage driver event time */
+    DWORD                         last_getmsg_time;       /* Get/PeekMessage last request time */
     WORD                          recursion_count;        /* SendMessage recursion counter */
     WORD                          message_count;          /* Get/PeekMessage loop counter */
     WORD                          hook_call_depth;        /* Number of recursively called hook procs */
@@ -198,25 +200,24 @@ struct user_thread_info
     DWORD                         GetMessageTimeVal;      /* Value for GetMessageTime */
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
-    struct user_key_state_info   *key_state;              /* Cache of global key state */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
     struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
+    HANDLE                        desktop_shared_map;     /* HANDLE to server's desktop shared memory */
+    struct desktop_shared_memory *desktop_shared_memory;  /* Ptr to server's desktop shared memory */
+    HANDLE                        queue_shared_map;       /* HANDLE to server's thread queue shared memory */
+    struct queue_shared_memory   *queue_shared_memory;     /* Ptr to server's thread queue shared memory */
+    HANDLE                        input_shared_map;       /* HANDLE to server's thread input shared memory */
+    struct input_shared_memory   *input_shared_memory;     /* Ptr to server's thread input shared memory */
+    HANDLE                        foreground_shared_map;    /* HANDLE to server's thread input shared memory */
+    struct input_shared_memory   *foreground_shared_memory; /* Ptr to server's thread input shared memory */
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
 
-extern INT global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_activate_window)(HWND) DECLSPEC_HIDDEN;
-
-struct user_key_state_info
-{
-    UINT                          time;                   /* Time of last key state refresh */
-    INT                           counter;                /* Counter to invalidate the key state */
-    BYTE                          state[256];             /* State for each key */
-};
 
 struct hook_extra_info
 {
@@ -294,6 +295,10 @@ extern BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 extern const WCHAR *CLASS_GetVersionedName(const WCHAR *classname, UINT *basename_offset,
         WCHAR *combined, BOOL register_class) DECLSPEC_HIDDEN;
+extern volatile struct desktop_shared_memory *get_desktop_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct queue_shared_memory *get_queue_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct input_shared_memory *get_input_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct input_shared_memory *get_foreground_shared_memory( void ) DECLSPEC_HIDDEN;
 
 /* message spy definitions */
 
@@ -391,5 +396,25 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     if ((dst = heap_alloc(len))) memcpy(dst, src, len);
     return dst;
 }
+
+#if defined(__i386__) || defined(__x86_64__)
+#define __SHARED_READ_SEQ( x ) (*(x))
+#define __SHARED_READ_FENCE do {} while(0)
+#else
+#define __SHARED_READ_SEQ( x ) __atomic_load_n( x, __ATOMIC_RELAXED )
+#define __SHARED_READ_FENCE __atomic_thread_fence( __ATOMIC_ACQUIRE )
+#endif
+
+#define SHARED_READ_BEGIN( x )                                          \
+    do {                                                                \
+        unsigned int __seq;                                             \
+        do {                                                            \
+            while ((__seq = __SHARED_READ_SEQ( x )) & SEQUENCE_MASK) NtYieldExecution(); \
+            __SHARED_READ_FENCE;
+
+#define SHARED_READ_END( x )                       \
+            __SHARED_READ_FENCE;                   \
+        } while (__SHARED_READ_SEQ( x ) != __seq); \
+    } while(0)
 
 #endif /* __WINE_USER_PRIVATE_H */

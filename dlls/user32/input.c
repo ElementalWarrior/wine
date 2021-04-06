@@ -49,8 +49,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
-INT global_key_state_counter = 0;
-
 /***********************************************************************
  *           get_key_state
  */
@@ -246,25 +244,23 @@ void WINAPI mouse_event( DWORD dwFlags, DWORD dx, DWORD dy,
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
 {
-    BOOL ret;
+    BOOL ret = TRUE;
     DWORD last_change;
     UINT dpi;
+    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
 
-    if (!pt) return FALSE;
+    if (!pt || !shared) return FALSE;
 
-    SERVER_START_REQ( set_cursor )
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        if ((ret = !wine_server_call( req )))
-        {
-            pt->x = reply->new_x;
-            pt->y = reply->new_y;
-            last_change = reply->last_change;
-        }
+        pt->x = shared->cursor.x;
+        pt->y = shared->cursor.y;
+        last_change = shared->cursor.last_change;
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
 
     /* query new position from graphics driver if we haven't updated recently */
-    if (ret && GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
+    if (GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
     if (ret && (dpi = get_thread_dpi()))
     {
         DPI_AWARENESS_CONTEXT context;
@@ -281,20 +277,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
  */
 BOOL WINAPI GetCursorInfo( PCURSORINFO pci )
 {
+    volatile struct input_shared_memory *shared = get_foreground_shared_memory();
     BOOL ret;
 
     if (!pci) return FALSE;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) ret = FALSE;
+    else SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = 0;
-        if ((ret = !wine_server_call( req )))
-        {
-            pci->hCursor = wine_server_ptr_handle( reply->cursor );
-            pci->flags = (reply->show_count >= 0) ? CURSOR_SHOWING : 0;
-        }
+        pci->hCursor = wine_server_ptr_handle( shared->cursor );
+        pci->flags = (shared->cursor_count >= 0) ? CURSOR_SHOWING : 0;
+        ret = TRUE;
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     GetCursorPos(&pci->ptScreenPos);
     return ret;
 }
@@ -362,14 +357,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReleaseCapture(void)
  */
 HWND WINAPI GetCapture(void)
 {
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
     HWND ret = 0;
 
-    SERVER_START_REQ( get_thread_input )
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->capture );
+        ret = wine_server_ptr_handle( shared->capture );
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     return ret;
 }
 
@@ -389,52 +384,32 @@ static void check_for_events( UINT flags )
  */
 SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
-    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
-    INT counter = global_key_state_counter;
-    BYTE prev_key_state;
+    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
+    BYTE state;
     SHORT ret;
 
-    if (key < 0 || key >= 256) return 0;
+    if (key < 0 || key >= 256 || !shared) return 0;
 
     check_for_events( QS_INPUT );
 
-    if (key_state_info && !(key_state_info->state[key] & 0xc0) &&
-        key_state_info->counter == counter && GetTickCount() - key_state_info->time < 50)
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        /* use cached value */
-        return 0;
+        state = shared->keystate[key];
     }
-    else if (!key_state_info)
-    {
-        key_state_info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*key_state_info) );
-        get_user_thread_info()->key_state = key_state_info;
-    }
+    SHARED_READ_END( &shared->seq );
 
+    if (!(state & 0x40)) return (state & 0x80) << 8;
+
+    /* Need to make a server call to reset the last pressed bit */
     ret = 0;
     SERVER_START_REQ( get_key_state )
     {
         req->async = 1;
         req->key = key;
-        if (key_state_info)
-        {
-            prev_key_state = key_state_info->state[key];
-            wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
-        }
         if (!wine_server_call( req ))
         {
             if (reply->state & 0x40) ret |= 0x0001;
             if (reply->state & 0x80) ret |= 0x8000;
-            if (key_state_info)
-            {
-                /* force refreshing the key state cache - some multithreaded programs
-                 * (like Adobe Photoshop CS5) expect that changes to the async key state
-                 * are also immediately available in other threads. */
-                if (prev_key_state != key_state_info->state[key])
-                    counter = InterlockedIncrement( &global_key_state_counter );
-
-                key_state_info->time    = GetTickCount();
-                key_state_info->counter = counter;
-            }
         }
     }
     SERVER_END_REQ;

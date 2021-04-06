@@ -2663,15 +2663,17 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
  * available; -1 on error.
  * All pending sent messages are processed before returning.
  */
-static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, UINT changed_mask )
+static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags, UINT changed_mask, BOOL waited )
 {
     LRESULT result;
+    volatile struct queue_shared_memory *shared = get_queue_shared_memory();
     struct user_thread_info *thread_info = get_user_thread_info();
     INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     struct received_message_info info, *old_info;
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
     size_t buffer_size = 256;
+    BOOL skip = FALSE;
 
     if (!(buffer = HeapAlloc( GetProcessHeap(), 0, buffer_size ))) return -1;
 
@@ -2683,10 +2685,37 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
         NTSTATUS res;
         size_t size = 0;
         const message_data_t *msg_data = buffer;
+        UINT wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
+        DWORD clear_bits = 0, filter = flags >> 16 ? flags >> 16 : QS_ALLINPUT;
+        if (filter & QS_POSTMESSAGE)
+        {
+            clear_bits |= QS_POSTMESSAGE | QS_HOTKEY | QS_TIMER;
+            if (first == 0 && last == ~0U) clear_bits |= QS_ALLPOSTMESSAGE;
+        }
+        if (filter & QS_INPUT) clear_bits |= QS_INPUT;
+        if (filter & QS_PAINT) clear_bits |= QS_PAINT;
 
         thread_info->msg_source = prev_source;
 
-        SERVER_START_REQ( get_message )
+        if (!shared || waited || GetTickCount() - thread_info->last_getmsg_time >= 3000) skip = FALSE;
+        else SHARED_READ_BEGIN( &shared->seq )
+        {
+            /* if the masks need an update */
+            if (shared->wake_mask != wake_mask) skip = FALSE;
+            else if (shared->changed_mask != changed_mask) skip = FALSE;
+            /* or if the queue is signaled */
+            else if (shared->wake_bits & wake_mask) skip = FALSE;
+            else if (shared->changed_bits & changed_mask) skip = FALSE;
+            /* or if the filter matches some bits */
+            else if (shared->wake_bits & filter) skip = FALSE;
+            /* or if we should clear some bits */
+            else if (shared->changed_bits & clear_bits) skip = FALSE;
+            else skip = TRUE;
+        }
+        SHARED_READ_END( &shared->seq );
+
+        if (skip) res = STATUS_PENDING;
+        else SERVER_START_REQ( get_message )
         {
             req->flags     = flags;
             req->get_win   = wine_server_user_handle( hwnd );
@@ -2696,6 +2725,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             req->wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
             req->changed_mask = changed_mask;
             wine_server_set_reply( req, buffer, buffer_size );
+            thread_info->last_getmsg_time = GetTickCount();
             if (!(res = wine_server_call( req )))
             {
                 size = wine_server_reply_size( reply );
@@ -2708,11 +2738,13 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 info.msg.pt.x    = reply->x;
                 info.msg.pt.y    = reply->y;
                 hw_id            = 0;
-                thread_info->active_hooks = reply->active_hooks;
             }
             else buffer_size = reply->total;
         }
         SERVER_END_REQ;
+
+        /* force refreshing hooks */
+        thread_info->active_hooks = 0;
 
         if (res)
         {
@@ -2871,7 +2903,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 }
                 else
                     peek_message( msg, info.msg.hwnd, info.msg.message,
-                                  info.msg.message, flags | PM_REMOVE, changed_mask );
+                                  info.msg.message, flags | PM_REMOVE, changed_mask, TRUE );
                 continue;
             }
 	    if (info.msg.message >= WM_DDE_FIRST && info.msg.message <= WM_DDE_LAST)
@@ -2915,7 +2947,7 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
 static inline void process_sent_messages(void)
 {
     MSG msg;
-    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0 );
+    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE, 0, FALSE );
 }
 
 
@@ -3242,10 +3274,8 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
  */
 NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
 {
-    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
     struct send_message_info info;
     int prev_x, prev_y, new_x, new_y;
-    INT counter = global_key_state_counter;
     NTSTATUS ret;
     BOOL wait;
 
@@ -3284,8 +3314,6 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
             break;
         }
-        if (key_state_info) wine_server_set_reply( req, key_state_info->state,
-                                                   sizeof(key_state_info->state) );
         ret = wine_server_call( req );
         wait = reply->wait;
         prev_x = reply->prev_x;
@@ -3295,16 +3323,8 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
     }
     SERVER_END_REQ;
 
-    if (!ret)
-    {
-        if (key_state_info)
-        {
-            key_state_info->time    = GetTickCount();
-            key_state_info->counter = counter;
-        }
-        if ((flags & SEND_HWMSG_INJECTED) && (prev_x != new_x || prev_y != new_y))
-            USER_Driver->pSetCursorPos( new_x, new_y );
-    }
+    if (!ret && (flags & SEND_HWMSG_INJECTED) && (prev_x != new_x || prev_y != new_y))
+        USER_Driver->pSetCursorPos( new_x, new_y );
 
     if (wait)
     {
@@ -3694,7 +3714,8 @@ void WINAPI PostQuitMessage( INT exit_code )
 /* check for driver events if we detect that the app is not properly consuming messages */
 static inline void check_for_driver_events( UINT msg )
 {
-    if (get_user_thread_info()->message_count > 200)
+    struct user_thread_info *thread_info = get_user_thread_info();
+    if (thread_info->message_count > 200)
     {
         flush_window_surfaces( FALSE );
         USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_ALLINPUT, 0 );
@@ -3702,9 +3723,9 @@ static inline void check_for_driver_events( UINT msg )
     else if (msg == WM_TIMER || msg == WM_SYSTIMER)
     {
         /* driver events should have priority over timers, so make sure we'll check for them soon */
-        get_user_thread_info()->message_count += 100;
+        thread_info->message_count += 100;
     }
-    else get_user_thread_info()->message_count++;
+    else thread_info->message_count++;
 }
 
 /***********************************************************************
@@ -3712,24 +3733,29 @@ static inline void check_for_driver_events( UINT msg )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
     MSG msg;
     int ret;
 
     USER_CheckNotLock();
-    check_for_driver_events( 0 );
+    if (thread_info->last_driver_time != GetTickCount())
+        check_for_driver_events( 0 );
 
-    ret = peek_message( &msg, hwnd, first, last, flags, 0 );
+    ret = peek_message( &msg, hwnd, first, last, flags, 0, FALSE );
     if (ret < 0) return FALSE;
 
     if (!ret)
     {
+        if (thread_info->last_driver_time == GetTickCount()) return FALSE;
+        thread_info->last_driver_time = GetTickCount();
         flush_window_surfaces( TRUE );
         ret = wow_handlers.wait_message( 0, NULL, 0, QS_ALLINPUT, 0 );
         /* if we received driver events, check again for a pending message */
-        if (ret == WAIT_TIMEOUT || peek_message( &msg, hwnd, first, last, flags, 0 ) <= 0) return FALSE;
+        if (ret == WAIT_TIMEOUT || peek_message( &msg, hwnd, first, last, flags, 0, TRUE ) <= 0) return FALSE;
     }
 
     check_for_driver_events( msg.message );
+    thread_info->last_driver_time = GetTickCount() - 1;
 
     /* copy back our internal safe copy of message data to msg_out.
      * msg_out is a variable from the *program*, so it can't be used
@@ -3780,7 +3806,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT
     }
     else mask = QS_ALLINPUT;
 
-    while (!(ret = peek_message( msg, hwnd, first, last, PM_REMOVE | (mask << 16), mask )))
+    while (!(ret = peek_message( msg, hwnd, first, last, PM_REMOVE | (mask << 16), mask, TRUE )))
     {
         wait_objects( 1, &server_queue, INFINITE, mask & (QS_SENDMESSAGE | QS_SMRESULT), mask, 0 );
     }
@@ -4535,12 +4561,40 @@ BOOL WINAPI IsGUIThread( BOOL convert )
  */
 BOOL WINAPI GetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
 {
+    volatile struct input_shared_memory *shared;
     BOOL ret;
 
     if (info->cbSize != sizeof(*info))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
+    }
+
+    if (id == GetCurrentThreadId()) shared = get_input_shared_memory();
+    else if (id == 0) shared = get_foreground_shared_memory();
+    else shared = NULL;
+
+    if (shared)
+    {
+        SHARED_READ_BEGIN( &shared->seq )
+        {
+            info->flags          = 0;
+            info->hwndActive     = wine_server_ptr_handle( shared->active );
+            info->hwndFocus      = wine_server_ptr_handle( shared->focus );
+            info->hwndCapture    = wine_server_ptr_handle( shared->capture );
+            info->hwndMenuOwner  = wine_server_ptr_handle( shared->menu_owner );
+            info->hwndMoveSize   = wine_server_ptr_handle( shared->move_size );
+            info->hwndCaret      = wine_server_ptr_handle( shared->caret );
+            info->rcCaret.left   = shared->caret_rect.left;
+            info->rcCaret.top    = shared->caret_rect.top;
+            info->rcCaret.right  = shared->caret_rect.right;
+            info->rcCaret.bottom = shared->caret_rect.bottom;
+            if (shared->menu_owner) info->flags |= GUI_INMENUMODE;
+            if (shared->move_size) info->flags |= GUI_INMOVESIZE;
+            if (shared->caret) info->flags |= GUI_CARETBLINKING;
+        }
+        SHARED_READ_END( &shared->seq );
+        return TRUE;
     }
 
     SERVER_START_REQ( get_thread_input )
