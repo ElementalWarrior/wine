@@ -178,6 +178,7 @@ static HRESULT WINAPI sample_grabber_stream_QueryInterface(IMFStreamSink *iface,
 static ULONG WINAPI sample_grabber_stream_AddRef(IMFStreamSink *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFStreamSink(iface);
+    TRACE("\n");
     return IMFMediaSink_AddRef(&grabber->IMFMediaSink_iface);
 }
 
@@ -199,6 +200,7 @@ static void stream_release_pending_item(struct scheduled_item *item)
 static ULONG WINAPI sample_grabber_stream_Release(IMFStreamSink *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFStreamSink(iface);
+    TRACE("\n");
     return IMFMediaSink_Release(&grabber->IMFMediaSink_iface);
 }
 
@@ -1092,12 +1094,14 @@ static HRESULT WINAPI sample_grabber_clock_sink_QueryInterface(IMFClockStateSink
 static ULONG WINAPI sample_grabber_clock_sink_AddRef(IMFClockStateSink *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFClockStateSink(iface);
+    TRACE("\n");
     return IMFMediaSink_AddRef(&grabber->IMFMediaSink_iface);
 }
 
 static ULONG WINAPI sample_grabber_clock_sink_Release(IMFClockStateSink *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFClockStateSink(iface);
+    TRACE("\n");
     return IMFMediaSink_Release(&grabber->IMFMediaSink_iface);
 }
 
@@ -1203,12 +1207,14 @@ static HRESULT WINAPI sample_grabber_events_QueryInterface(IMFMediaEventGenerato
 static ULONG WINAPI sample_grabber_events_AddRef(IMFMediaEventGenerator *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFMediaEventGenerator(iface);
+    TRACE("\n");
     return IMFMediaSink_AddRef(&grabber->IMFMediaSink_iface);
 }
 
 static ULONG WINAPI sample_grabber_events_Release(IMFMediaEventGenerator *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFMediaEventGenerator(iface);
+    TRACE("\n");
     return IMFMediaSink_Release(&grabber->IMFMediaSink_iface);
 }
 
@@ -1283,12 +1289,14 @@ static HRESULT WINAPI sample_grabber_getservice_QueryInterface(IMFGetService *if
 static ULONG WINAPI sample_grabber_getservice_AddRef(IMFGetService *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFGetService(iface);
+    TRACE("\n");
     return IMFMediaSink_AddRef(&grabber->IMFMediaSink_iface);
 }
 
 static ULONG WINAPI sample_grabber_getservice_Release(IMFGetService *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFGetService(iface);
+    TRACE("\n");
     return IMFMediaSink_Release(&grabber->IMFMediaSink_iface);
 }
 
@@ -1327,12 +1335,14 @@ static HRESULT WINAPI sample_grabber_rate_support_QueryInterface(IMFRateSupport 
 static ULONG WINAPI sample_grabber_rate_support_AddRef(IMFRateSupport *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFRateSupport(iface);
+    TRACE("\n");
     return IMFMediaSink_AddRef(&grabber->IMFMediaSink_iface);
 }
 
 static ULONG WINAPI sample_grabber_rate_support_Release(IMFRateSupport *iface)
 {
     struct sample_grabber *grabber = impl_from_IMFRateSupport(iface);
+    TRACE("\n");
     return IMFMediaSink_Release(&grabber->IMFMediaSink_iface);
 }
 

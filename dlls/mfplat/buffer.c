@@ -764,7 +764,7 @@ static ULONG WINAPI memory_2d_buffer_gs_Release(IMFGetService *iface)
 
 static HRESULT WINAPI memory_2d_buffer_gs_GetService(IMFGetService *iface, REFGUID service, REFIID riid, void **obj)
 {
-    TRACE("%p, %s, %s, %p.\n", iface, debugstr_guid(service), debugstr_guid(riid), obj);
+    FIXME("%p, %s, %s, %p.\n", iface, debugstr_guid(service), debugstr_guid(riid), obj);
 
     return E_NOTIMPL;
 }
@@ -788,6 +788,7 @@ static HRESULT WINAPI d3d9_surface_buffer_gs_GetService(IMFGetService *iface, RE
         return IDirect3DSurface9_QueryInterface(buffer->d3d9_surface.surface, riid, obj);
     }
 
+    FIXME("\n");
     return E_NOTIMPL;
 }
 

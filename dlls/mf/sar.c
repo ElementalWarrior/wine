@@ -1747,6 +1747,7 @@ static ULONG WINAPI audio_renderer_render_callback_Release(IMFAsyncCallback *ifa
 
 static HRESULT WINAPI audio_renderer_render_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
 {
+    FIXME("\n");
     return E_NOTIMPL;
 }
 

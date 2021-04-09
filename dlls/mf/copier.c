@@ -121,7 +121,7 @@ static HRESULT WINAPI sample_copier_transform_GetStreamCount(IMFTransform *iface
 static HRESULT WINAPI sample_copier_transform_GetStreamIDs(IMFTransform *iface, DWORD input_size, DWORD *inputs,
         DWORD output_size, DWORD *outputs)
 {
-    TRACE("%p, %u, %p, %u, %p.\n", iface, input_size, inputs, output_size, outputs);
+    FIXME("%p, %u, %p, %u, %p.\n", iface, input_size, inputs, output_size, outputs);
 
     return E_NOTIMPL;
 }
@@ -172,7 +172,7 @@ static HRESULT WINAPI sample_copier_transform_GetAttributes(IMFTransform *iface,
 static HRESULT WINAPI sample_copier_transform_GetInputStreamAttributes(IMFTransform *iface, DWORD id,
         IMFAttributes **attributes)
 {
-    TRACE("%p, %u, %p.\n", iface, id, attributes);
+    FIXME("%p, %u, %p.\n", iface, id, attributes);
 
     return E_NOTIMPL;
 }
@@ -180,21 +180,21 @@ static HRESULT WINAPI sample_copier_transform_GetInputStreamAttributes(IMFTransf
 static HRESULT WINAPI sample_copier_transform_GetOutputStreamAttributes(IMFTransform *iface, DWORD id,
         IMFAttributes **attributes)
 {
-    TRACE("%p, %u, %p.\n", iface, id, attributes);
+    FIXME("%p, %u, %p.\n", iface, id, attributes);
 
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI sample_copier_transform_DeleteInputStream(IMFTransform *iface, DWORD id)
 {
-    TRACE("%p, %u.\n", iface, id);
+    FIXME("%p, %u.\n", iface, id);
 
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI sample_copier_transform_AddInputStreams(IMFTransform *iface, DWORD streams, DWORD *ids)
 {
-    TRACE("%p, %u, %p.\n", iface, streams, ids);
+    FIXME("%p, %u, %p.\n", iface, streams, ids);
 
     return E_NOTIMPL;
 }
@@ -425,7 +425,7 @@ static HRESULT WINAPI sample_copier_transform_GetOutputStatus(IMFTransform *ifac
 
 static HRESULT WINAPI sample_copier_transform_SetOutputBounds(IMFTransform *iface, LONGLONG lower, LONGLONG upper)
 {
-    TRACE("%p, %s, %s.\n", iface, debugstr_time(lower), debugstr_time(upper));
+    FIXME("%p, %s, %s.\n", iface, debugstr_time(lower), debugstr_time(upper));
 
     return E_NOTIMPL;
 }

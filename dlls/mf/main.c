@@ -412,7 +412,7 @@ static HRESULT WINAPI activate_object_ShutdownObject(IMFActivate *iface)
 
 static HRESULT WINAPI activate_object_DetachObject(IMFActivate *iface)
 {
-    TRACE("%p.\n", iface);
+    FIXME("%p.\n", iface);
 
     return E_NOTIMPL;
 }
@@ -884,6 +884,7 @@ static ULONG WINAPI file_scheme_handler_callback_Release(IMFAsyncCallback *iface
 
 static HRESULT WINAPI file_scheme_handler_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
 {
+    FIXME("\n");
     return E_NOTIMPL;
 }
 

@@ -1676,6 +1676,7 @@ static ULONG WINAPI sample_allocator_tracking_callback_Release(IMFAsyncCallback 
 static HRESULT WINAPI sample_allocator_tracking_callback_GetParameters(IMFAsyncCallback *iface,
         DWORD *flags, DWORD *queue)
 {
+    FIXME("\n");
     return E_NOTIMPL;
 }
 

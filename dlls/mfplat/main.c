@@ -547,7 +547,7 @@ static HRESULT WINAPI transform_activate_ShutdownObject(IMFActivate *iface)
 
 static HRESULT WINAPI transform_activate_DetachObject(IMFActivate *iface)
 {
-    TRACE("%p.\n", iface);
+    FIXME("%p.\n", iface);
 
     return E_NOTIMPL;
 }
@@ -5908,6 +5908,7 @@ static ULONG WINAPI source_resolver_callback_stream_Release(IRtwqAsyncCallback *
 
 static HRESULT WINAPI source_resolver_callback_GetParameters(IRtwqAsyncCallback *iface, DWORD *flags, DWORD *queue)
 {
+    FIXME("\n");
     return E_NOTIMPL;
 }
 
@@ -6623,10 +6624,13 @@ static HRESULT WINAPI mfmediaevent_Compare(IMFMediaEvent *iface, IMFAttributes *
 static HRESULT WINAPI mfmediaevent_GetUINT32(IMFMediaEvent *iface, REFGUID key, UINT32 *value)
 {
     struct media_event *event = impl_from_IMFMediaEvent(iface);
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
 
-    return attributes_GetUINT32(&event->attributes, key, value);
+    hr = attributes_GetUINT32(&event->attributes, key, value);
+    TRACE("hr %#x, value %p (%u)\n", hr, value, value ? *value : 0);
+    return hr;
 }
 
 static HRESULT WINAPI mfmediaevent_GetUINT64(IMFMediaEvent *iface, REFGUID key, UINT64 *value)
@@ -8124,6 +8128,7 @@ static ULONG WINAPI async_create_file_callback_Release(IRtwqAsyncCallback *iface
 
 static HRESULT WINAPI async_create_file_callback_GetParameters(IRtwqAsyncCallback *iface, DWORD *flags, DWORD *queue)
 {
+    FIXME("\n");
     return E_NOTIMPL;
 }
 
@@ -8521,7 +8526,7 @@ static HRESULT WINAPI property_store_SetValue(IPropertyStore *iface, REFPROPERTY
 
 static HRESULT WINAPI property_store_Commit(IPropertyStore *iface)
 {
-    TRACE("%p.\n", iface);
+    FIXME("%p.\n", iface);
 
     return E_NOTIMPL;
 }
@@ -8918,7 +8923,7 @@ HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **man
 {
     struct dxgi_device_manager *object;
 
-    TRACE("%p, %p.\n", token, manager);
+    FIXME("%p, %p.\n", token, manager);
 
     return E_NOTIMPL;
 

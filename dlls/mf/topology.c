@@ -1539,7 +1539,10 @@ static HRESULT WINAPI topology_node_SetOutputPrefType(IMFTopologyNode *iface, DW
             topology_node_set_stream_type(&node->outputs.streams[index], mediatype);
     }
     else
+    {
+        FIXME("\n");
         hr = E_NOTIMPL;
+    }
 
     LeaveCriticalSection(&node->cs);
 
@@ -1606,6 +1609,7 @@ static HRESULT WINAPI topology_node_SetInputPrefType(IMFTopologyNode *iface, DWO
             }
             break;
         case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            FIXME("\n");
             hr = E_NOTIMPL;
             break;
         default:

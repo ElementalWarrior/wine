@@ -200,19 +200,25 @@ static HRESULT WINAPI mediatype_Compare(IMFMediaType *iface, IMFAttributes *attr
 static HRESULT WINAPI mediatype_GetUINT32(IMFMediaType *iface, REFGUID key, UINT32 *value)
 {
     struct media_type *media_type = impl_from_IMFMediaType(iface);
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
 
-    return attributes_GetUINT32(&media_type->attributes, key, value);
+    hr = attributes_GetUINT32(&media_type->attributes, key, value);
+    TRACE("hr %#x, value %p (%u)\n", hr, value, value ? *value : 0);
+    return hr;
 }
 
 static HRESULT WINAPI mediatype_GetUINT64(IMFMediaType *iface, REFGUID key, UINT64 *value)
 {
     struct media_type *media_type = impl_from_IMFMediaType(iface);
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
 
-    return attributes_GetUINT64(&media_type->attributes, key, value);
+    hr = attributes_GetUINT64(&media_type->attributes, key, value);
+    TRACE("hr %#x, value %p (%I64u)\n", hr, value, value ? *value : 0);
+    return hr;
 }
 
 static HRESULT WINAPI mediatype_GetDouble(IMFMediaType *iface, REFGUID key, double *value)
@@ -2172,10 +2178,13 @@ static HRESULT WINAPI presentation_descriptor_GetUINT32(IMFPresentationDescripto
 static HRESULT WINAPI presentation_descriptor_GetUINT64(IMFPresentationDescriptor *iface, REFGUID key, UINT64 *value)
 {
     struct presentation_desc *presentation_desc = impl_from_IMFPresentationDescriptor(iface);
+    HRESULT hr;
 
     TRACE("%p, %s, %p.\n", iface, debugstr_attr(key), value);
 
-    return attributes_GetUINT64(&presentation_desc->attributes, key, value);
+    hr = attributes_GetUINT64(&presentation_desc->attributes, key, value);
+    TRACE("hr %#x, value %p (%I64u)\n", hr, value, value ? *value : 0);
+    return hr;
 }
 
 static HRESULT WINAPI presentation_descriptor_GetDouble(IMFPresentationDescriptor *iface, REFGUID key, double *value)

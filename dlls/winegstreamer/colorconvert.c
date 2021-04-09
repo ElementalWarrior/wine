@@ -613,6 +613,12 @@ static HRESULT WINAPI color_converter_ProcessMessage(IMFTransform *iface, MFT_ME
         }
         case MFT_MESSAGE_NOTIFY_BEGIN_STREAMING:
             return S_OK;
+        case MFT_MESSAGE_NOTIFY_START_OF_STREAM:
+            FIXME("MFT_MESSAGE_NOTIFY_START_OF_STREAM stub!\n");
+            return S_OK;
+        case MFT_MESSAGE_COMMAND_DRAIN:
+            FIXME("MFT_MESSAGE_COMMAND_DRAIN stub!\n");
+            return S_OK;
         default:
             FIXME("Unhandled message type %x.\n", message);
             return E_NOTIMPL;
