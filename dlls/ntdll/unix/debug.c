@@ -51,6 +51,7 @@
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
 WINE_DECLARE_DEBUG_CHANNEL(microsecs);
+WINE_DECLARE_DEBUG_CHANNEL(address);
 
 static BOOL init_done;
 static struct debug_info initial_info;  /* debug info for initial thread */
@@ -286,7 +287,7 @@ int __cdecl __wine_dbg_output( const char *str )
  *		__wine_dbg_header  (NTDLL.@)
  */
 int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                               const char *function )
+                               void *ret, void *addr, const char *function )
 {
     static const char * const classes[] = { "fixme", "err", "warn", "trace" };
     struct debug_info *info = get_info();
@@ -313,6 +314,7 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
         }
         if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", GetCurrentProcessId() );
         pos += sprintf( pos, "%04x:", GetCurrentThreadId() );
+        if (TRACE_ON(address)) pos += sprintf( pos, "%p:%p:", ret, addr );
     }
     if (function && cls < ARRAY_SIZE( classes ))
         snprintf( pos, sizeof(buffer) - (pos - buffer), "%s:%s:%s ",

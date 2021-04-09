@@ -92,7 +92,7 @@ struct unix_funcs
     const char *  (CDECL *dbg_strdup)( const char *str );
     int           (CDECL *dbg_output)( const char *str );
     int           (CDECL *dbg_header)( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                                       const char *function );
+                                       void *ret, void *addr, const char *function );
     int           (CDECL *dbg_vprintf)( const char *format, __ms_va_list args );
     const char *  (CDECL *dbg_vsprintf)( const char *format, __ms_va_list args );
 

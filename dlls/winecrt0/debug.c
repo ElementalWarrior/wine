@@ -30,6 +30,7 @@
 
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+WINE_DECLARE_DEBUG_CHANNEL(address);
 
 static BOOL (__cdecl *p__wine_dbg_start_debugger)( unsigned int code, BOOL start_debugger );
 static const char * (__cdecl *p__wine_dbg_strdup)( const char *str );
@@ -39,7 +40,7 @@ static const char * (__cdecl *p__wine_dbg_vsprintf)( const char *format, __ms_va
 static unsigned char (__cdecl *p__wine_dbg_get_channel_flags)( struct __wine_debug_channel *channel );
 static int (__cdecl *p__wine_dbg_header)( enum __wine_debug_class cls,
                                           struct __wine_debug_channel *channel,
-                                          const char *function );
+                                          void *ret, void *addr, const char *function );
 
 static const char * const debug_classes[] = { "fixme", "err", "warn", "trace" };
 
@@ -202,7 +203,7 @@ static const char * __cdecl fallback__wine_dbg_vsprintf( const char *format, __m
 
 static int __cdecl fallback__wine_dbg_header( enum __wine_debug_class cls,
                                               struct __wine_debug_channel *channel,
-                                              const char *function )
+                                              void *ret, void *addr, const char *function )
 {
     char buffer[200], *pos = buffer;
 
@@ -218,6 +219,7 @@ static int __cdecl fallback__wine_dbg_header( enum __wine_debug_class cls,
     }
     if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", GetCurrentProcessId() );
     pos += sprintf( pos, "%04x:", GetCurrentThreadId() );
+    if (TRACE_ON(address)) pos += sprintf( pos, "%p:%p:", ret, addr );
     if (function && cls < ARRAY_SIZE( debug_classes ))
         snprintf( pos, sizeof(buffer) - (pos - buffer), "%s:%s:%s ",
                   debug_classes[cls], channel->name, function );
@@ -283,10 +285,10 @@ unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel 
 }
 
 int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                               const char *function )
+                               void *ret, void *addr, const char *function )
 {
     LOAD_FUNC( __wine_dbg_header );
-    return p__wine_dbg_header( cls, channel, function );
+    return p__wine_dbg_header( cls, channel, ret, addr, function );
 }
 
 #endif  /* _WIN32 */

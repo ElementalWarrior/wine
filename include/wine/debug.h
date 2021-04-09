@@ -77,6 +77,8 @@ struct __wine_debug_channel
 #define __WINE_IS_DEBUG_ON(dbcl,dbch) \
   (__WINE_GET_DEBUGGING##dbcl(dbch) && (__wine_dbg_get_channel_flags(dbch) & (1 << __WINE_DBCL##dbcl)))
 
+static __attribute__((noinline,used)) void *__wine_dbg_loc(void) { return __builtin_extract_return_addr(__builtin_return_address(0)); }
+
 #if defined(__GNUC__) || defined(__clang__)
 
 #define __WINE_DPRINTF(dbcl,dbch) \
@@ -86,7 +88,7 @@ struct __wine_debug_channel
        __WINE_DBG_LOG
 
 #define __WINE_DBG_LOG(args...) \
-    wine_dbg_log( __dbcl, __dbch, __FUNCTION__, args); } } while(0)
+    wine_dbg_log( __dbcl, __dbch, __builtin_extract_return_addr(__builtin_return_address(0)), __wine_dbg_loc(), __FUNCTION__, args); } } while(0)
 
 #if !defined(__WINE_USE_MSVCRT) || defined(__MINGW32__)
 #define __WINE_PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
@@ -116,7 +118,7 @@ struct __wine_debug_channel
        __WINE_DBG_LOG
 
 #define __WINE_DBG_LOG(...) \
-   wine_dbg_log( __dbcl, __dbch, __func__, __VA_ARGS__); } } while(0)
+   wine_dbg_log( __dbcl, __dbch, __builtin_extract_return_addr(__builtin_return_address (0)), __wine_dbg_loc(), __func__, __VA_ARGS__); } } while(0)
 
 #define __WINE_PRINTF_ATTR(fmt,args)
 
@@ -136,7 +138,7 @@ struct __wine_debug_channel
 
 #define __WINE_DPRINTF(dbcl,dbch) \
     (!__WINE_GET_DEBUGGING(dbcl,(dbch)) || \
-     (wine_dbg_log(__WINE_DBCL##dbcl,(dbch),__FILE__,"%d: ",__LINE__) == -1)) ? \
+     (wine_dbg_log(__WINE_DBCL##dbcl,(dbch),NULL,NULL,__FILE__,"%d: ",__LINE__) == -1)) ? \
      (void)0 : (void)wine_dbg_printf
 
 #define __WINE_PRINTF_ATTR(fmt, args)
@@ -147,7 +149,7 @@ extern unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_c
 extern const char * __cdecl __wine_dbg_strdup( const char *str );
 extern int __cdecl __wine_dbg_output( const char *str );
 extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                                      const char *function );
+                                      void *ret, void *addr, const char *function );
 extern int __cdecl __wine_dbg_vprintf( const char *format, __ms_va_list args );
 extern const char * __cdecl __wine_dbg_vsprintf( const char *format, __ms_va_list args );
 
@@ -182,27 +184,25 @@ static inline int __cdecl wine_dbg_printf( const char *format, ... )
     return ret;
 }
 
-static int __cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                 struct __wine_debug_channel *channel, const char *func,
-                                 const char *format, ... ) __WINE_PRINTF_ATTR(4,5);
-static inline int __cdecl wine_dbg_log( enum __wine_debug_class cls,
-                                        struct __wine_debug_channel *channel,
-                                        const char *function, const char *format, ... )
+static int __cdecl wine_dbg_log( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
+                                 void *ret, void *addr, const char *func, const char *format, ... ) __WINE_PRINTF_ATTR(6,7);
+static inline int __cdecl wine_dbg_log( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
+                                        void *ret, void *addr, const char *function, const char *format, ... )
 {
     __ms_va_list args;
-    int ret;
+    int count;
 
     if (*format == '\1')  /* special magic to avoid standard prefix */
     {
         format++;
         function = NULL;
     }
-    if ((ret = __wine_dbg_header( cls, channel, function )) == -1) return ret;
+    if ((count = __wine_dbg_header( cls, channel, ret, addr, function )) == -1) return count;
 
     __ms_va_start( args, format );
-    ret += __wine_dbg_vprintf( format, args );
+    count += __wine_dbg_vprintf( format, args );
     __ms_va_end( args );
-    return ret;
+    return count;
 }
 
 static inline const char *__cdecl wine_dbgstr_an( const char *str, int n )

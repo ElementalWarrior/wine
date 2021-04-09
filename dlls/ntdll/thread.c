@@ -64,9 +64,9 @@ const char * __cdecl __wine_dbg_strdup( const char *str )
  *		__wine_dbg_header  (NTDLL.@)
  */
 int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                               const char *function )
+                               void *ret, void *addr, const char *function )
 {
-    return unix_funcs->dbg_header( cls, channel, function );
+    return unix_funcs->dbg_header( cls, channel, ret, addr, function );
 }
 
 /***********************************************************************
