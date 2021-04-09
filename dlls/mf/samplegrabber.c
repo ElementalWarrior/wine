@@ -1446,7 +1446,15 @@ failed:
 static void sample_grabber_shutdown_object(void *user_context, IUnknown *obj)
 {
     struct sample_grabber_activate_context *context = user_context;
+    IMFMediaSink *sink;
+
     context->shut_down = TRUE;
+
+    if (SUCCEEDED(IUnknown_QueryInterface(obj, &IID_IMFMediaSink, (void **)&sink)))
+    {
+        IMFMediaSink_Shutdown(sink);
+        IMFMediaSink_Release(sink);
+    }
 }
 
 static const struct activate_funcs sample_grabber_activate_funcs =
