@@ -3408,6 +3408,7 @@ void WINAPI RtlExitUserProcess( DWORD status )
     RtlAcquirePebLock();
     NtTerminateProcess( 0, status );
     LdrShutdownProcess();
+    HEAP_notify_thread_destroy(TRUE);
     for (;;) NtTerminateProcess( GetCurrentProcess(), status );
 }
 
@@ -3823,6 +3824,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         ANSI_STRING func_name;
         WINE_MODREF *kernel32;
         PEB *peb = NtCurrentTeb()->Peb;
+        DWORD hci = 2;
 
         peb->LdrData            = &ldr;
         peb->FastPebLock        = &peb_lock;
@@ -3844,6 +3846,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         wm->ldr.LoadCount = -1;
 
         build_ntdll_module();
+        RtlSetHeapInformation( GetProcessHeap(), HeapCompatibilityInformation, &hci, sizeof(hci) );
 
         if (NtCurrentTeb()->WowTebOffset) init_wow64( context );
 
