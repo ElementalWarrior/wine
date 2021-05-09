@@ -245,7 +245,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, &sigset );
 
-    if ((status = virtual_alloc_teb( &teb ))) goto done;
+    if ((status = virtual_alloc_teb( &teb, zero_bits ))) goto done;
 
     if ((status = virtual_alloc_thread_stack( &stack, zero_bits, stack_reserve, stack_commit, &extra_stack )))
     {
