@@ -64,6 +64,10 @@ struct product_desc
     const WCHAR* serialnumber;
 };
 
+#define VID_WINE            0x845e
+#define PID_WINE_MOUSE      0x0001
+#define PID_WINE_KEYBOARD   0x0002
+
 #define VID_MICROSOFT 0x045e
 
 static const WCHAR xbox360_product_string[] = {
@@ -547,7 +551,7 @@ static void mouse_device_create(void)
     if (!hid_descriptor_end(&mouse_desc))
         return;
 
-    mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
+    mouse_obj = bus_create_hid_device(busidW, VID_WINE, PID_WINE_MOUSE, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -622,7 +626,7 @@ static void keyboard_device_create(void)
     if (!hid_descriptor_end(&keyboard_desc))
         return;
 
-    keyboard_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, 0);
+    keyboard_obj = bus_create_hid_device(busidW, VID_WINE, PID_WINE_KEYBOARD, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
