@@ -51,6 +51,7 @@ DEFINE_DEVPROPKEY( DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda
 struct hid_joystick
 {
     IDirectInputDeviceImpl base;
+    DIJOYSTATE2 state;
 
     HANDLE device;
     PHIDP_PREPARSED_DATA preparsed;
@@ -183,11 +184,15 @@ static HRESULT WINAPI hid_joystick_Unacquire( IDirectInputDevice8W *iface )
 
 static HRESULT WINAPI hid_joystick_GetDeviceState( IDirectInputDevice8W *iface, DWORD len, void *ptr )
 {
-    FIXME( "iface %p, len %u, ptr %p stub!\n", iface, len, ptr );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p, len %u, ptr %p.\n", iface, len, ptr );
 
     if (!ptr) return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    fill_DataFormat( ptr, len, &impl->state, &impl->base.data_format );
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_GetObjectInfo( IDirectInputDevice8W *iface, DIDEVICEOBJECTINSTANCEW *instance,
