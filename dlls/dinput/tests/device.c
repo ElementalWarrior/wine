@@ -519,11 +519,145 @@ static void device_tests(void)
     if (pDI) IUnknown_Release(pDI);
 }
 
+static void check_device(const DIDEVICEINSTANCEW *instance, BOOL is_hid)
+{
+    GUID guid_null = {0};
+    GUID hid_instance = {0x00000000,0x0000,0x11eb,{0x80,0x01,0x44,0x45,0x53,0x54,0x00,0x00}};
+    GUID hid_product = {0x00000000,0x0000,0x0000,{0x00,0x00,0x50,0x49,0x44,0x56,0x49,0x44}};
+    BOOL todo_name = FALSE;
+
+    switch (GET_DIDEVICE_TYPE(instance->dwDevType))
+    {
+    case DIDEVTYPE_DEVICE:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) == 0, "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DIDEVTYPE_MOUSE:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DIDEVTYPEMOUSE_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DIDEVTYPEMOUSE_TRACKBALL,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        todo_name = TRUE;
+        break;
+    case DIDEVTYPE_KEYBOARD:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DIDEVTYPEKEYBOARD_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DIDEVTYPEKEYBOARD_J3100,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        todo_name = TRUE;
+        break;
+    case DIDEVTYPE_JOYSTICK:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DIDEVTYPEJOYSTICK_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DIDEVTYPEJOYSTICK_HEADTRACKER,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    default:
+        ok( 0, "unexpected device type %#x\n", instance->dwDevType );
+        break;
+    }
+
+    if (!is_hid)
+    {
+        ok( !instance->wUsagePage && !instance->wUsage, "unexpected HID usages %04x:%04x\n", instance->wUsagePage, instance->wUsage );
+        ok( IsEqualGUID(&instance->guidProduct, &GUID_SysMouse) || IsEqualGUID(&instance->guidProduct, &GUID_SysKeyboard) ||
+            IsEqualGUID(&instance->guidProduct, &GUID_Joystick), "unexpected guidProduct %s\n", debugstr_guid(&instance->guidProduct) );
+        ok( IsEqualGUID(&instance->guidProduct, &instance->guidInstance), "unexpected guidProduct %s, guidInstance %s\n", debugstr_guid(&instance->guidProduct), debugstr_guid(&instance->guidInstance) );
+    }
+    else
+    {
+        ok( (instance->dwDevType & ~0xffff) == DIDEVTYPE_HID, "unexpected HID device type %x, expected DIDEVTYPE_HID bit set\n", instance->dwDevType );
+        ok( instance->wUsagePage && instance->wUsage, "unexpected HID usages %04x:%04x\n", instance->wUsagePage, instance->wUsage );
+
+        hid_product.Data1 = instance->guidProduct.Data1;
+        ok( IsEqualGUID(&instance->guidProduct, &hid_product), "unexpected guidProduct %s, expected %s\n", debugstr_guid(&instance->guidProduct), debugstr_guid(&hid_product) );
+
+        hid_instance.Data1 = instance->guidInstance.Data1;
+        hid_instance.Data2 = instance->guidInstance.Data2;
+        todo_wine ok( IsEqualGUID(&instance->guidInstance, &hid_instance), "unexpected guidInstance %s, expected %s\n", debugstr_guid(&instance->guidInstance), debugstr_guid(&hid_instance) );
+    }
+
+    todo_wine_if(todo_name) ok( !wcscmp(instance->tszInstanceName, instance->tszProductName), "unexpected, product name %s, instance name %s\n", debugstr_w(instance->tszProductName), debugstr_w(instance->tszInstanceName) );
+    ok( IsEqualGUID(&instance->guidFFDriver, &guid_null), "unexpected guidFFDriver %s\n", debugstr_guid(&instance->guidFFDriver) );
+}
+
+static BOOL CALLBACK check_devices_callback(const DIDEVICEINSTANCEW *instance, void *ref)
+{
+    BOOL is_hid = instance->dwDevType & ~0xffff;
+    check_device(instance, is_hid);
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK check_hid_devices_callback(const DIDEVICEINSTANCEW *instance, void *ref)
+{
+    check_device(instance, TRUE);
+    return DIENUM_CONTINUE;
+}
+
+static void dump_devices(void)
+{
+    IDirectInput7W *dinput;
+    HRESULT hr;
+
+    hr = DirectInputCreateEx(GetModuleHandleW(NULL), DIRECTINPUT_VERSION, &IID_IDirectInput7W, (void **)&dinput, NULL);
+    ok(hr == S_OK, "DirectInputCreateEx returned %#x\n", hr);
+
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysMouse);
+    ok(hr == S_OK, "IDirectInput_GetDeviceStatus GUID_SysMouse returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysKeyboard);
+    ok(hr == S_OK, "IDirectInput_GetDeviceStatus GUID_SysKeyboard returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_Joystick);
+    todo_wine_if(hr != S_OK) ok(hr == S_OK || hr == REGDB_E_CLASSNOTREG, "IDirectInput_GetDeviceStatus GUID_Joystick returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysMouseEm);
+    ok(hr == S_FALSE, "IDirectInput_GetDeviceStatus GUID_SysMouseEm returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysMouseEm2);
+    ok(hr == S_FALSE, "IDirectInput_GetDeviceStatus GUID_SysMouseEm2 returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysKeyboardEm);
+    ok(hr == S_FALSE, "IDirectInput_GetDeviceStatus GUID_SysKeyboardEm returned %#x\n", hr);
+    hr = IDirectInput_GetDeviceStatus(dinput, &GUID_SysKeyboardEm2);
+    ok(hr == S_FALSE, "IDirectInput_GetDeviceStatus GUID_SysKeyboardEm2 returned %#x\n", hr);
+
+
+    hr = IDirectInput7_EnumDevices(dinput, 0, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, DIDEVTYPE_DEVICE, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, DIDEVTYPE_MOUSE, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, DIDEVTYPE_KEYBOARD, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, DIDEVTYPE_JOYSTICK, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, DIDEVTYPE_HID, check_hid_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    todo_wine ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 5, check_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == DIERR_INVALIDPARAM, "IDirectInput7_EnumDevices returned %#x\n", hr);
+
+
+#if 0
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_ATTACHEDONLY);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_FORCEFEEDBACK);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEALIASES);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEPHANTOMS);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput7_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEHIDDEN);
+    ok(hr == S_OK, "IDirectInput7_EnumDevices returned %#x\n", hr);
+#endif
+
+    /* hr = IDirectInput7_FindDevice(p,a,b,c); */
+
+    IDirectInput7_Release(dinput);
+}
+
 START_TEST(device)
 {
     CoInitialize(NULL);
 
+    dump_devices();
+#if 0
     device_tests();
+#endif
 
     CoUninitialize();
 }

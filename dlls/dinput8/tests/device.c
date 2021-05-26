@@ -1011,15 +1011,487 @@ static void test_appdata_property(void)
     IDirectInput_Release(pDI);
 }
 
+static void check_device(const DIDEVICEINSTANCEW *instance, BOOL is_hid)
+{
+    GUID guid_null = {0};
+    GUID hid_instance = {0x00000000,0x0000,0x11eb,{0x80,0x01,0x44,0x45,0x53,0x54,0x00,0x00}};
+    GUID hid_product = {0x00000000,0x0000,0x0000,{0x00,0x00,0x50,0x49,0x44,0x56,0x49,0x44}};
+    BOOL todo_name = FALSE;
+
+    switch (GET_DIDEVICE_TYPE(instance->dwDevType))
+    {
+    case DI8DEVTYPE_DEVICE:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) == 0, "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_MOUSE:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEMOUSE_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEMOUSE_ABSOLUTE,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        todo_name = TRUE;
+        break;
+    case DI8DEVTYPE_KEYBOARD:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEKEYBOARD_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEKEYBOARD_J3100,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        todo_name = TRUE;
+        break;
+    case DI8DEVTYPE_JOYSTICK:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEJOYSTICK_LIMITED &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEJOYSTICK_STANDARD,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_GAMEPAD:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEGAMEPAD_LIMITED &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEGAMEPAD_TILT,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_DRIVING:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEDRIVING_LIMITED &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEDRIVING_HANDHELD,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_FLIGHT:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEFLIGHT_LIMITED &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEFLIGHT_RC,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_1STPERSON:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPE1STPERSON_LIMITED &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPE1STPERSON_SHOOTER,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_DEVICECTRL:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPEDEVICECTRL_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPEDEVICECTRL_COMMSSELECTION_HARDWIRED,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_SCREENPOINTER:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPESCREENPTR_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPESCREENPTR_TOUCH,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_REMOTE:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) == DI8DEVTYPEREMOTE_UNKNOWN,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    case DI8DEVTYPE_SUPPLEMENTAL:
+        ok( GET_DIDEVICE_SUBTYPE(instance->dwDevType) >= DI8DEVTYPESUPPLEMENTAL_UNKNOWN &&
+            GET_DIDEVICE_SUBTYPE(instance->dwDevType) <= DI8DEVTYPESUPPLEMENTAL_RUDDERPEDALS,
+            "unexpected device subtype %02x\n", GET_DIDEVICE_SUBTYPE(instance->dwDevType) );
+        break;
+    default:
+        ok( 0, "unexpected device type %#x\n", instance->dwDevType );
+        break;
+    }
+
+    if (!is_hid)
+    {
+        ok( !instance->wUsagePage && !instance->wUsage, "unexpected HID usages %04x:%04x\n", instance->wUsagePage, instance->wUsage );
+        ok( IsEqualGUID(&instance->guidProduct, &GUID_SysMouse) || IsEqualGUID(&instance->guidProduct, &GUID_SysKeyboard) ||
+            IsEqualGUID(&instance->guidProduct, &GUID_Joystick), "unexpected guidProduct %s\n", debugstr_guid(&instance->guidProduct) );
+        ok( IsEqualGUID(&instance->guidProduct, &instance->guidInstance), "unexpected guidProduct %s, guidInstance %s\n", debugstr_guid(&instance->guidProduct), debugstr_guid(&instance->guidInstance) );
+    }
+    else
+    {
+        ok( (instance->dwDevType & ~0xffff) == DIDEVTYPE_HID, "unexpected HID device type %x, expected DIDEVTYPE_HID bit set\n", instance->dwDevType );
+        ok( instance->wUsagePage && instance->wUsage, "unexpected HID usages %04x:%04x\n", instance->wUsagePage, instance->wUsage );
+
+        hid_product.Data1 = instance->guidProduct.Data1;
+        ok( IsEqualGUID(&instance->guidProduct, &hid_product), "unexpected guidProduct %s, expected %s\n", debugstr_guid(&instance->guidProduct), debugstr_guid(&hid_product) );
+
+        hid_instance.Data1 = instance->guidInstance.Data1;
+        hid_instance.Data2 = instance->guidInstance.Data2;
+        todo_wine ok( IsEqualGUID(&instance->guidInstance, &hid_instance), "unexpected guidInstance %s, expected %s\n", debugstr_guid(&instance->guidInstance), debugstr_guid(&hid_instance) );
+    }
+
+    todo_wine_if(todo_name) ok( !wcscmp(instance->tszInstanceName, instance->tszProductName), "unexpected, product name %s, instance name %s\n", debugstr_w(instance->tszProductName), debugstr_w(instance->tszInstanceName) );
+    ok( IsEqualGUID(&instance->guidFFDriver, &guid_null), "unexpected guidFFDriver %s\n", debugstr_guid(&instance->guidFFDriver) );
+}
+
+static BOOL CALLBACK check_devices_callback(const DIDEVICEINSTANCEW *instance, void *ref)
+{
+    BOOL is_hid = instance->dwDevType & ~0xffff;
+    check_device(instance, is_hid);
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK check_hid_devices_callback(const DIDEVICEINSTANCEW *instance, void *ref)
+{
+    check_device(instance, TRUE);
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK dump_devices_objects_callback(const DIDEVICEOBJECTINSTANCEW *instance, void *ref)
+{
+    DIDEVCAPS *dev_caps = ref;
+
+    if (IsEqualGUID(&instance->guidType, &GUID_Key))
+    {
+        ok(instance->dwOfs >= DIK_ESCAPE && instance->dwOfs <= 0xff, "unexpected dwOfs %#x\n", instance->dwOfs);
+        ok(DIDFT_GETINSTANCE(instance->dwType) == instance->dwOfs, "unexpected dwType %#x, expected %#x\n", instance->dwType, DIDFT_MAKEINSTANCE(instance->dwOfs) | DIDFT_PSHBUTTON);
+        ok(DIDFT_GETTYPE(instance->dwType) == DIDFT_PSHBUTTON, "unexpected dwType %#x, expected %#x\n", instance->dwType, DIDFT_MAKEINSTANCE(instance->dwOfs) | DIDFT_PSHBUTTON);
+        ok(instance->dwFlags == 0, "unexpected dwFlags %#x\n", instance->dwFlags);
+        ok(instance->dwFFMaxForce == 0, "unexpected dwFFMaxForce %#x\n", instance->dwFFMaxForce);
+        ok(instance->dwFFForceResolution == 0, "unexpected dwFFForceResolution %#x\n", instance->dwFFForceResolution);
+        ok(instance->wCollectionNumber == 0, "unexpected wCollectionNumber %04x\n", instance->wCollectionNumber);
+        ok(instance->wDesignatorIndex == 0, "unexpected wDesignatorIndex %04x\n", instance->wDesignatorIndex);
+        ok(instance->wUsagePage == 0 && instance->wUsage == 0, "unexpected usage %04x:%04x\n", instance->wUsagePage, instance->wUsage);
+        ok(instance->dwDimension == 0, "unexpected dwDimension %#x\n", instance->dwDimension);
+        ok(instance->wExponent == 0, "unexpected wExponent %04x\n", instance->wExponent);
+        ok(instance->wReportId == 0, "unexpected wReportId %04x\n", instance->wReportId);
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_Button))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_XAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_YAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_ZAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_RxAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_RyAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_RzAxis))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_POV))
+    {
+    }
+    else if (IsEqualGUID(&instance->guidType, &GUID_Unknown))
+    {
+        ok(instance->dwOfs == 0, "unexpected dwOfs %#x\n", instance->dwOfs);
+        ok(DIDFT_GETTYPE(instance->dwType) == (DIDFT_COLLECTION|DIDFT_NODATA), "unexpected dwType %#x, expected %#x\n", instance->dwType, DIDFT_COLLECTION|DIDFT_NODATA);
+        ok(instance->dwFlags == 0, "unexpected dwFlags %#x\n", instance->dwFlags);
+        ok(instance->dwFFMaxForce == 0, "unexpected dwFFMaxForce %#x\n", instance->dwFFMaxForce);
+        ok(instance->dwFFForceResolution == 0, "unexpected dwFFForceResolution %#x\n", instance->dwFFForceResolution);
+        ok(instance->wCollectionNumber == 0, "unexpected wCollectionNumber %04x\n", instance->wCollectionNumber);
+        ok(instance->wDesignatorIndex == 0, "unexpected wDesignatorIndex %04x\n", instance->wDesignatorIndex);
+        ok(instance->wUsagePage != 0 && (instance->wUsage == 5 || instance->wUsage == 0), "unexpected usage %04x:%04x\n", instance->wUsagePage, instance->wUsage);
+        ok(instance->dwDimension == 0, "unexpected dwDimension %#x\n", instance->dwDimension);
+        ok(instance->wExponent == 0, "unexpected wExponent %04x\n", instance->wExponent);
+        ok(instance->wReportId == 0, "unexpected wReportId %04x\n", instance->wReportId);
+    }
+
+    ok(1, "%s %4x %4x %4x %04x:%04x %d %d %3x %3x %3x %3x %3x %s\n",
+       debugstr_guid(&instance->guidType), instance->dwOfs, instance->dwType, instance->dwFlags,
+       instance->wUsagePage, instance->wUsage, instance->wReportId, instance->wCollectionNumber,
+       instance->wDesignatorIndex, instance->dwDimension, instance->wExponent,
+       instance->dwFFMaxForce, instance->dwFFForceResolution, debugstr_w(instance->tszName));
+
+    if (DIDFT_GETTYPE(instance->dwType) & DIDFT_BUTTON)
+    {
+        ok( dev_caps->dwButtons, "unexpected spurious button enumerated\n" );
+        if (dev_caps->dwButtons) dev_caps->dwButtons--;
+    }
+    else if (DIDFT_GETTYPE(instance->dwType) & DIDFT_AXIS)
+    {
+        ok( dev_caps->dwAxes, "unexpected spurious axis enumerated\n" );
+        if (dev_caps->dwAxes) dev_caps->dwAxes--;
+    }
+    else if (DIDFT_GETTYPE(instance->dwType) == DIDFT_POV)
+    {
+        ok( dev_caps->dwPOVs, "unexpected spurious pov enumerated\n" );
+        if (dev_caps->dwPOVs) dev_caps->dwPOVs--;
+    }
+    else
+    {
+        ok( !dev_caps->dwButtons && !dev_caps->dwAxes && !dev_caps->dwPOVs, "unexpected collection\n" );
+        ok( instance->dwOfs == 0, "unexpected object offset %x\n", instance->dwOfs);
+        ok( DIDFT_GETTYPE(instance->dwType) == (DIDFT_COLLECTION|DIDFT_NODATA), "unexpected object type %x\n", instance->dwType);
+    }
+
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK dump_devices_effects_callback(const DIEFFECTINFOW *info, void *ref)
+{
+    ok(1, "effect guid %s, type %#x, dynamic %#x, static %#x, name %s\n",
+       debugstr_guid(&info->guid), info->dwEffType, info->dwDynamicParams, info->dwStaticParams,
+       debugstr_w(info->tszName));
+    return TRUE;
+}
+
+struct dump_devices_params
+{
+    IDirectInput8W *dinput;
+    HWND hwnd;
+};
+
+static BOOL CALLBACK dump_devices_callback(const DIDEVICEINSTANCEW *instance, void *ref)
+{
+    struct dump_devices_params *params = ref;
+    IDirectInputDevice8W *device;
+    DIEFFECTINFOW effect_info = {sizeof(DIEFFECTINFOW)};
+    DIJOYSTATE state;
+    DIDEVCAPS dev_caps;
+    HRESULT hr;
+    DWORD ffstate;
+
+    hr = IDirectInput8_CreateDevice(params->dinput, &instance->guidInstance, &device, NULL);
+    ok(hr == S_OK, "IDirectInput8_CreateDevice returned %#x\n", hr);
+
+    trace("device %s\n", debugstr_w(instance->tszInstanceName));
+    dev_caps.dwSize = sizeof(dev_caps);
+    hr = IDirectInputDevice8_GetCapabilities(device, &dev_caps);
+    ok(hr == S_OK, "IDirectInputDevice8_GetCapabilities returned %#x\n", hr);
+
+    ok(1, "flags %#x axes %#x buttons %#x povs %#x\n", dev_caps.dwFlags, dev_caps.dwAxes, dev_caps.dwButtons, dev_caps.dwPOVs);
+    ok(dev_caps.dwDevType == instance->dwDevType, "unexpected dwDevType %#x, expected %#x\n", dev_caps.dwDevType, instance->dwDevType);
+    ok(dev_caps.dwFFSamplePeriod == 0, "dev_caps dwFFSamplePeriod %#x\n", dev_caps.dwFFSamplePeriod);
+    ok(dev_caps.dwFFMinTimeResolution == 0, "dev_caps dwFFMinTimeResolution %#x\n", dev_caps.dwFFMinTimeResolution);
+    ok(dev_caps.dwFirmwareRevision == 0, "dev_caps dwFirmwareRevision %#x\n", dev_caps.dwFirmwareRevision);
+    ok(dev_caps.dwHardwareRevision == 0, "dev_caps dwHardwareRevision %#x\n", dev_caps.dwHardwareRevision);
+    ok(dev_caps.dwFFDriverVersion == 0, "dev_caps dwFFDriverVersion %#x\n", dev_caps.dwFFDriverVersion);
+
+    ok(0, "                                  guid  ofs type   fl page:usge r c idx dim exp fmx frs name\n");
+    hr = IDirectInputDevice8_EnumObjects(device, dump_devices_objects_callback, &dev_caps, DIDFT_ALL);
+    ok(hr == S_OK, "IDirectInputDevice8_EnumObjects returned %#x\n", hr);
+
+    ok( !dev_caps.dwButtons && !dev_caps.dwAxes && !dev_caps.dwPOVs, "missing objects %d %d %d\n", dev_caps.dwButtons, dev_caps.dwAxes, dev_caps.dwPOVs );
+
+    hr = IDirectInputDevice8_SetDataFormat(device, &c_dfDIJoystick);
+    ok(hr == S_OK, "IDirectInputDevice8_SetDataFormat returned %#x\n", hr);
+
+    if (params->hwnd)
+    {
+        hr = IDirectInputDevice8_SetCooperativeLevel(device, params->hwnd, DISCL_EXCLUSIVE|DISCL_FOREGROUND);
+        ok(hr == S_OK, "IDirectInputDevice8_SetCooperativeLevel returned %#x\n", hr);
+
+        hr = IDirectInputDevice8_Acquire(device);
+        ok(hr == S_OK, "IDirectInputDevice8_Acquire returned %#x\n", hr);
+    }
+
+    hr = IDirectInputDevice8_Poll(device);
+    if (!params->hwnd) ok(hr == DIERR_NOTACQUIRED, "IDirectInputDevice8_Poll returned %#x\n", hr);
+    else ok(hr == DI_NOEFFECT, "IDirectInputDevice8_Poll returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetDeviceState(device, sizeof(state), &state);
+    if (!params->hwnd) ok(hr == DIERR_NOTACQUIRED, "IDirectInputDevice8_GetDeviceState returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetDeviceState returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetForceFeedbackState(device, &ffstate);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_UNSUPPORTED, "IDirectInputDevice8_GetForceFeedbackState returned %#x\n", hr);
+    else if (!params->hwnd) ok(hr == DIERR_NOTEXCLUSIVEACQUIRED, "IDirectInputDevice8_GetForceFeedbackState returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetForceFeedbackState returned %#x\n", hr);
+    if (!dev_caps.dwFFDriverVersion) ok(ffstate == 0, "IDirectInputDevice8_GetForceFeedbackState returned state %#x\n", ffstate);
+    else ok(ffstate == (DIGFFS_USERFFSWITCHON|DIGFFS_SAFETYSWITCHOFF|DIGFFS_POWERON|DIGFFS_ACTUATORSON|DIGFFS_STOPPED|DIGFFS_EMPTY), "IDirectInputDevice8_GetForceFeedbackState returned state %#x\n", ffstate);
+
+#if 0
+    hr = IDirectInputDevice8_SendForceFeedbackCommand(device, ffstate);
+    ok(hr == S_OK, "IDirectInputDevice8_SendForceFeedbackCommand returned %#x\n", hr);
+#endif
+
+    hr = IDirectInputDevice8_EnumEffects(device, dump_devices_effects_callback, NULL, DIEFT_ALL);
+    ok(hr == S_OK, "IDirectInputDevice8_EnumEffects returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_ConstantForce);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_ConstantForce returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_RampForce);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_RampForce returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Square);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Square returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Sine);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Sine returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Triangle);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Triangle returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_SawtoothUp);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_SawtoothUp returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_SawtoothDown);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_SawtoothDown returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Spring);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Spring returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Damper);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Damper returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Inertia);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Inertia returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetEffectInfo(device, &effect_info, &GUID_Friction);
+    if (!dev_caps.dwFFDriverVersion) ok(hr == DIERR_DEVICENOTREG, "IDirectInputDevice8_GetEffectInfo returned %#x\n", hr);
+    else ok(hr == S_OK, "IDirectInputDevice8_GetEffectInfo GUID_Friction returned %#x\n", hr);
+
+#if 0
+    hr = IDirectInputDevice8_GetProperty(device, REFGUID rguidProp, DIPROPHEADER *pdiph);
+    ok(hr == S_OK, "IDirectInputDevice8_GetProperty returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SetProperty(device, REFGUID rguidProp, const DIPROPHEADER *pdiph);
+    ok(hr == S_OK, "IDirectInputDevice8_SetProperty returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_Unacquire(device,);
+    ok(hr == S_OK, "IDirectInputDevice8_Unacquire returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetDeviceState(device, DWORD cbData, VOID *lpvData);
+    ok(hr == S_OK, "IDirectInputDevice8_GetDeviceState returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetDeviceData(device, DWORD cbObjectData, DIDEVICEOBJECTDATA *rgdod, DWORD *pdwInOut, DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_GetDeviceData returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SetDataFormat(device, const DIDATAFORMAT *lpdf);
+    ok(hr == S_OK, "IDirectInputDevice8_SetDataFormat returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SetEventNotification(device, HANDLE hEvent);
+    ok(hr == S_OK, "IDirectInputDevice8_SetEventNotification returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SetCooperativeLevel(device, HWND hwnd, DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_SetCooperativeLevel returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetObjectInfo(device, DIDEVICEOBJECTINSTANCEW *pdidoi, DWORD dwObj, DWORD dwHow);
+    ok(hr == S_OK, "IDirectInputDevice8_GetObjectInfo returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetDeviceInfo(device, DIDEVICEINSTANCEW *pdidi);
+    ok(hr == S_OK, "IDirectInputDevice8_GetDeviceInfo returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_Initialize(device, HINSTANCE hinst, DWORD dwVersion, REFGUID rguid);
+    ok(hr == S_OK, "IDirectInputDevice8_Initialize returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_CreateEffect(device, REFGUID rguid, const DIEFFECT *lpeff, DIRECTINPUTEFFECT **ppdeff, UNKNOWN *punkOuter);
+    ok(hr == S_OK, "IDirectInputDevice8_CreateEffect returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_EnumCreatedEffectObjects(device, DIENUMCREATEDEFFECTOBJECTSCALLBACK *lpCallback, VOID *pvRef, DWORD fl);
+    ok(hr == S_OK, "IDirectInputDevice8_EnumCreatedEffectObjects returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_Escape(device, DIEFFESCAPE *pesc);
+    ok(hr == S_OK, "IDirectInputDevice8_Escape returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SendDeviceData(device, DWORD cbObjectData, const DIDEVICEOBJECTDATA *rgdod, DWORD *pdwInOut, DWORD fl);
+    ok(hr == S_OK, "IDirectInputDevice8_SendDeviceData returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_EnumEffectsInFile(device, const WCHAR* lpszFileName,LPDIENUMEFFECTSINFILECALLBACK pec,LPVOID pvRef,DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_EnumEffectsInFile returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_WriteEffectToFile(device, const WCHAR* lpszFileName,DWORD dwEntries,LPDIFILEEFFECT rgDiFileEft,DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_WriteEffectToFile returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_BuildActionMap(device, DIACTIONFORMATW *lpdiaf, const WCHAR* lpszUserName, DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_BuildActionMap returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_SetActionMap(device, DIACTIONFORMATW *lpdiaf, const WCHAR* lpszUserName, DWORD dwFlags);
+    ok(hr == S_OK, "IDirectInputDevice8_SetActionMap returned %#x\n", hr);
+
+    hr = IDirectInputDevice8_GetImageInfo(device, DIDEVICEIMAGEINFOHEADERW *lpdiDevImageInfoHeader);
+    ok(hr == S_OK, "IDirectInputDevice8_GetImageInfo returned %#x\n", hr);
+#endif
+
+    IDirectInputDevice8_Release(device);
+
+    return DIENUM_CONTINUE;
+}
+
+static void dump_devices(void)
+{
+    IDirectInput8W *dinput;
+    HRESULT hr;
+    HWND hwnd;
+
+    hwnd = CreateWindowExW(WS_EX_TOPMOST, L"static", L"dinput", WS_POPUP | WS_VISIBLE, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
+    ok(!!hwnd, "CreateWindowExW failed\n");
+    flush_events();
+
+    hr = DirectInput8Create(GetModuleHandleW(NULL), DIRECTINPUT_VERSION, &IID_IDirectInput8W, (void **)&dinput, NULL);
+    ok(hr == S_OK, "DirectInput8Create returned %#x\n", hr);
+
+#if 0
+    IDirectInput8_CreateDevice
+    IDirectInput8_EnumDevices
+    IDirectInput8_FindDevice
+    IDirectInput8_EnumDevicesBySemantics
+    IDirectInput8_ConfigureDevices
+#endif
+
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysMouse);
+    ok(hr == S_OK, "IDirectInput8_GetDeviceStatus GUID_SysMouse returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysKeyboard);
+    ok(hr == S_OK, "IDirectInput8_GetDeviceStatus GUID_SysKeyboard returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_Joystick);
+    todo_wine_if(hr != S_OK) ok(hr == S_OK || hr == REGDB_E_CLASSNOTREG, "IDirectInput8_GetDeviceStatus GUID_Joystick returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysMouseEm);
+    ok(hr == S_FALSE, "IDirectInput8_GetDeviceStatus GUID_SysMouseEm returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysMouseEm2);
+    ok(hr == S_FALSE, "IDirectInput8_GetDeviceStatus GUID_SysMouseEm2 returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysKeyboardEm);
+    ok(hr == S_FALSE, "IDirectInput8_GetDeviceStatus GUID_SysKeyboardEm returned %#x\n", hr);
+    hr = IDirectInput8_GetDeviceStatus(dinput, &GUID_SysKeyboardEm2);
+    ok(hr == S_FALSE, "IDirectInput8_GetDeviceStatus GUID_SysKeyboardEm2 returned %#x\n", hr);
+
+
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_ALL, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_DEVICE, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_POINTER, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_KEYBOARD, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, DIDEVTYPE_HID, check_hid_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    todo_wine ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 5, check_devices_callback, hwnd, DIEDFL_ALLDEVICES);
+    ok(hr == DIERR_INVALIDPARAM, "IDirectInput8_EnumDevices returned %#x\n", hr);
+
+    struct dump_devices_params params = {dinput, hwnd};
+    hr = IDirectInput8_EnumDevices(dinput, DI8DEVCLASS_ALL, dump_devices_callback, &params, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+
+#if 0
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_ALLDEVICES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_ATTACHEDONLY);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_FORCEFEEDBACK);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEALIASES);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEPHANTOMS);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+    hr = IDirectInput8_EnumDevices(dinput, 0, dump_devices_callback, NULL, DIEDFL_INCLUDEHIDDEN);
+    ok(hr == S_OK, "IDirectInput8_EnumDevices returned %#x\n", hr);
+#endif
+
+    /* hr = IDirectInput8_FindDevice(p,a,b,c); */
+
+    IDirectInput8_Release(dinput);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(device)
 {
     CoInitialize(NULL);
 
+    dump_devices();
+#if 0
     test_action_mapping();
     test_save_settings();
     test_mouse_keyboard();
     test_keyboard_events();
     test_appdata_property();
+#endif
 
     CoUninitialize();
 }
