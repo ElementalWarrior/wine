@@ -505,6 +505,8 @@ static BOOL set_property_prop_range( struct hid_joystick *impl, struct hid_objec
     if (object->type != VALUE_CAPS) return TRUE;
     object->value->PhysicalMin = value->lMin;
     object->value->PhysicalMax = value->lMax;
+
+    if (instance->dwType & DIDFT_POV) object->value->PhysicalMax -= value->lMax / (object->value->LogicalMax - object->value->LogicalMin + 1);
     return TRUE;
 }
 
@@ -1223,6 +1225,12 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     range.lMin = 0;
     range.lMax = 65535;
     enum_hid_objects( impl, &range.diph, DIDFT_AXIS, set_property_prop_range, &range );
+
+    range.diph.dwHow = DIPH_DEVICE;
+    range.diph.dwObj = 0;
+    range.lMin = 0;
+    range.lMax = 36000;
+    enum_hid_objects( impl, &range.diph, DIDFT_POV, set_property_prop_range, &range );
 
     *out = &impl->base.IDirectInputDevice8W_iface;
     return DI_OK;
