@@ -56,6 +56,7 @@ struct hid_joystick
     PHIDP_PREPARSED_DATA preparsed;
 
     DIDEVICEINSTANCEW instance;
+    HIDD_ATTRIBUTES attrs;
 };
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
@@ -119,6 +120,13 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     {
         DIPROPSTRING *value = (DIPROPSTRING *)header;
         lstrcpynW( value->wsz, impl->instance.tszInstanceName, MAX_PATH );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_VIDPID:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)header;
+        if (!impl->attrs.VendorID || !impl->attrs.ProductID) return DIERR_UNSUPPORTED;
+        value->dwData = MAKELONG( impl->attrs.VendorID, impl->attrs.ProductID );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_JOYSTICKID:
@@ -499,6 +507,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     impl->preparsed = preparsed;
 
     impl->instance = instance;
+    impl->attrs = attrs;
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
     impl->base.data_format.wine_df = format;
