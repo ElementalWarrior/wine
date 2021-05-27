@@ -779,17 +779,93 @@ static HRESULT WINAPI hid_joystick_GetEffectInfo( IDirectInputDevice8W *iface, D
 
 static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *iface, DWORD *out )
 {
-    FIXME( "iface %p, out %p stub!\n", iface, out );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    NTSTATUS status;
+    ULONG value, flags = 0;
+
+    TRACE( "iface %p, out %p.\n", iface, out );
 
     if (!out) return E_POINTER;
 
-    return E_NOTIMPL;
+    (*out) = 0;
+
+    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength + 1);
+
+    if (!HidD_GetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 ))
+        WARN( "HidD_GetFeature failed, error %u\n", GetLastError() );
+
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, &value,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_GetUsageValue returned %x\n", status );
+    if (value) flags |= DIGFFS_EMPTY;
+
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, &value,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_GetUsageValue returned %x\n", status );
+    if (value) flags |= DIGFFS_STOPPED;
+
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, &value,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_GetUsageValue returned %x\n", status );
+    if (value) flags |= DIGFFS_PAUSED;
+
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, &value,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_GetUsageValue returned %x\n", status );
+    if (value) flags |= DIGFFS_ACTUATORSON;
+
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, &value,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_GetUsageValue returned %x\n", status );
+    if (value) flags |= DIGFFS_ACTUATORSOFF;
+
+    *out = flags;
+
+#if 0
+#define DIGFFS_POWERON          0x00000040
+#define DIGFFS_POWEROFF         0x00000080
+#define DIGFFS_SAFETYSWITCHON   0x00000100
+#define DIGFFS_SAFETYSWITCHOFF  0x00000200
+#define DIGFFS_USERFFSWITCHON   0x00000400
+#define DIGFFS_USERFFSWITCHOFF  0x00000800
+#define DIGFFS_DEVICELOST       0x80000000
+#endif
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_SendForceFeedbackCommand( IDirectInputDevice8W *iface, DWORD flags )
 {
-    FIXME( "iface %p, flags %x stub!\n", iface, flags );
-    return E_NOTIMPL;
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    NTSTATUS status;
+
+    TRACE( "iface %p, flags %x.\n", iface, flags );
+
+    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength + 1);
+
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, flags & DISFFC_RESET ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, flags & DISFFC_STOPALL ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, flags & DISFFC_PAUSE ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_CONTINUE, flags & DISFFC_CONTINUE ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, flags & DISFFC_SETACTUATORSON ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, flags & DISFFC_SETACTUATORSOFF ? 1 : 0,
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+
+    if (!HidD_SetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 ))
+        WARN( "HidD_SetFeature failed, error %u\n", GetLastError() );
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_EnumCreatedEffectObjects( IDirectInputDevice8W *iface,
