@@ -567,12 +567,12 @@ HRESULT WINAPI JoystickWGenericImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface,
     if (res != DI_OK) return res;
 
     if (pdidoi->dwType & DIDFT_AXIS) {
-        sprintfW(pdidoi->tszName, axisW, DIDFT_GETINSTANCE(pdidoi->dwType));
+        swprintf(pdidoi->tszName, MAX_PATH, axisW, DIDFT_GETINSTANCE(pdidoi->dwType));
         pdidoi->dwFlags |= DIDOI_ASPECTPOSITION;
     } else if (pdidoi->dwType & DIDFT_POV)
-        sprintfW(pdidoi->tszName, povW, DIDFT_GETINSTANCE(pdidoi->dwType));
+        swprintf(pdidoi->tszName, MAX_PATH, povW, DIDFT_GETINSTANCE(pdidoi->dwType));
     else if (pdidoi->dwType & DIDFT_BUTTON)
-        sprintfW(pdidoi->tszName, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType));
+        swprintf(pdidoi->tszName, MAX_PATH, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType));
 
     _dump_OBJECTINSTANCEW(pdidoi);
     return res;

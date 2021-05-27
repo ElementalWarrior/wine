@@ -25,7 +25,6 @@
 #include "winbase.h"
 #include "dinput.h"
 #include "wine/list.h"
-#include "wine/unicode.h"
 #include "dinput_private.h"
 #include "device_private.h"
 

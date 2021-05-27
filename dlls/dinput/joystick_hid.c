@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
+#include <wchar.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -32,7 +33,6 @@
 #include "setupapi.h"
 #include "devguid.h"
 #include "dinput.h"
-#include "setupapi.h"
 
 #include "wine/debug.h"
 
@@ -1246,7 +1246,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     hr = direct_input_device_alloc( size, &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) goto failed;
 
-    impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": hid_joystick.base.crit");
+    /* impl->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": hid_joystick.base.crit"); */
     impl->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
     impl->base.read_event = CreateEventA( NULL, FALSE, FALSE, NULL );
     impl->base.read_callback = hid_joystick_read_state;

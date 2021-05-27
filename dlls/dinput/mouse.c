@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <string.h>
 
@@ -37,7 +34,6 @@
 #include "dinput_private.h"
 #include "device_private.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
@@ -684,9 +680,9 @@ static HRESULT WINAPI SysMouseWImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface,
     res = IDirectInputDevice2WImpl_GetObjectInfo(iface, pdidoi, dwObj, dwHow);
     if (res != DI_OK) return res;
 
-    if      (IsEqualGUID(&pdidoi->guidType, &GUID_XAxis)) strcpyW(pdidoi->tszName, x_axisW);
-    else if (IsEqualGUID(&pdidoi->guidType, &GUID_YAxis)) strcpyW(pdidoi->tszName, y_axisW);
-    else if (IsEqualGUID(&pdidoi->guidType, &GUID_ZAxis)) strcpyW(pdidoi->tszName, wheelW);
+    if      (IsEqualGUID(&pdidoi->guidType, &GUID_XAxis)) wcscpy(pdidoi->tszName, x_axisW);
+    else if (IsEqualGUID(&pdidoi->guidType, &GUID_YAxis)) wcscpy(pdidoi->tszName, y_axisW);
+    else if (IsEqualGUID(&pdidoi->guidType, &GUID_ZAxis)) wcscpy(pdidoi->tszName, wheelW);
     else if (pdidoi->dwType & DIDFT_BUTTON)
         wsprintfW(pdidoi->tszName, buttonW, DIDFT_GETINSTANCE(pdidoi->dwType) - 3);
 

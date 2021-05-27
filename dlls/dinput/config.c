@@ -18,7 +18,6 @@
 
 #define NONAMELESSUNION
 
-#include "wine/unicode.h"
 #include "objbase.h"
 #include "dinput_private.h"
 #include "device_private.h"

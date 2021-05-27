@@ -24,12 +24,10 @@
 
    It also contains all the helper functions.
 */
-#include "config.h"
 
 #include <stdarg.h>
 #include <string.h>
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -669,10 +667,11 @@ static HKEY get_mapping_key(const WCHAR *device, const WCHAR *username, const WC
         'M','a','p','p','i','n','g','s','\\','%','s','\\','%','s','\\','%','s','\0'};
     HKEY hkey;
     WCHAR *keyname;
+	DWORD len;
 
-    keyname = HeapAlloc(GetProcessHeap(), 0,
-        sizeof(WCHAR) * (lstrlenW(subkey) + strlenW(username) + strlenW(device) + strlenW(guid)));
-    sprintfW(keyname, subkey, username, device, guid);
+	len = wcslen(subkey) + wcslen(username) + wcslen(device) + wcslen(guid);
+    keyname = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * len);
+    swprintf(keyname, len, subkey, username, device, guid);
 
     /* The key used is HKCU\Software\Wine\DirectInput\Mappings\[username]\[device]\[mapping_guid] */
     if (RegCreateKeyW(HKEY_CURRENT_USER, keyname, &hkey))
@@ -715,7 +714,7 @@ static HRESULT save_mapping_settings(IDirectInputDevice8W *iface, LPDIACTIONFORM
         if (IsEqualGUID(&didev.guidInstance, &lpdiaf->rgoAction[i].guidInstance) &&
             lpdiaf->rgoAction[i].dwHow != DIAH_UNMAPPED)
         {
-             sprintfW(label, format, lpdiaf->rgoAction[i].dwSemantic);
+             swprintf(label, 9, format, lpdiaf->rgoAction[i].dwSemantic);
              RegSetValueExW(hkey, label, 0, REG_DWORD, (const BYTE*) &lpdiaf->rgoAction[i].dwObjID, sizeof(DWORD));
         }
     }
@@ -754,7 +753,7 @@ static BOOL load_mapping_settings(IDirectInputDeviceImpl *This, LPDIACTIONFORMAT
         DWORD id, size = sizeof(DWORD);
         WCHAR label[9];
 
-        sprintfW(label, format, lpdiaf->rgoAction[i].dwSemantic);
+        swprintf(label, 9, format, lpdiaf->rgoAction[i].dwSemantic);
 
         if (!RegQueryValueExW(hkey, label, 0, NULL, (LPBYTE) &id, &size))
         {
@@ -1196,7 +1195,7 @@ ULONG WINAPI IDirectInputDevice2WImpl_Release(LPDIRECTINPUTDEVICE8W iface)
     HeapFree(GetProcessHeap(), 0, This->action_map);
 
     IDirectInput_Release(&This->dinput->IDirectInput7A_iface);
-    This->crit.DebugInfo->Spare[0] = 0;
+    /* This->crit.DebugInfo->Spare[0] = 0; */
     DeleteCriticalSection(&This->crit);
 
     HeapFree(GetProcessHeap(), 0, This);

@@ -30,7 +30,6 @@
  * - Fallout : works great in X and DGA mode
  */
 
-#include "config.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -39,7 +38,6 @@
 #define NONAMELESSUNION
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wine/asm.h"
 #include "windef.h"
 #include "winbase.h"
@@ -76,11 +74,10 @@ static inline IDirectInputDeviceImpl *impl_from_IDirectInputDevice8W(IDirectInpu
 
 static const struct dinput_device *dinput_devices[] =
 {
+#if 0
     &mouse_device,
     &keyboard_device,
-    &joystick_linuxinput_device,
-    &joystick_linux_device,
-    &joystick_osx_device,
+#endif
     &joystick_hid_device,
 };
 
