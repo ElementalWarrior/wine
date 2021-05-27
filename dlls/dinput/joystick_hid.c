@@ -436,6 +436,16 @@ static HRESULT WINAPI hid_joystick_EnumObjects( IDirectInputDevice8W *iface, LPD
     return S_OK;
 }
 
+static BOOL get_property_prop_range( struct hid_joystick *impl, struct hid_object *object,
+                                     DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    DIPROPRANGE *value = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    value->lMin = object->value->PhysicalMin;
+    value->lMax = object->value->PhysicalMax;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REFGUID guid, DIPROPHEADER *header )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -447,6 +457,12 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
 
     switch (LOWORD( guid ))
     {
+    case (DWORD_PTR)DIPROP_RANGE:
+    {
+        DIPROPRANGE *value = (DIPROPRANGE *)header;
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_range, value );
+        return DI_OK;
+    }
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
     {
         DIPROPSTRING *value = (DIPROPSTRING *)header;
@@ -482,15 +498,33 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     }
 }
 
+static BOOL set_property_prop_range( struct hid_joystick *impl, struct hid_object *object,
+                                     DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    DIPROPRANGE *value = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    object->value->PhysicalMin = value->lMin;
+    object->value->PhysicalMax = value->lMax;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REFGUID guid, const DIPROPHEADER *header )
 {
-    FIXME( "iface %p, guid %s, header %p stub!\n", iface, debugstr_guid( guid ), header );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
 
     if (!header) return DIERR_INVALIDPARAM;
     if (!IS_DIPROP( guid )) return DI_OK;
 
     switch (LOWORD( guid ))
     {
+    case (DWORD_PTR)DIPROP_RANGE:
+    {
+        DIPROPRANGE *value = (DIPROPRANGE *)header;
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_range, (void *)value );
+        return DI_OK;
+    }
     default: return IDirectInputDevice2WImpl_SetProperty( iface, guid, header );
     }
 }
