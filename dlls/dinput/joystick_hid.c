@@ -761,20 +761,282 @@ static HRESULT WINAPI hid_joystick_CreateEffect( IDirectInputDevice8W *iface, RE
 static HRESULT WINAPI hid_joystick_EnumEffects( IDirectInputDevice8W *iface, LPDIENUMEFFECTSCALLBACKW callback,
                                                 void *ref, DWORD type )
 {
-    FIXME( "iface %p, callback %p, ref %p, type %#x stub!\n", iface, callback, ref, type );
+    DIEFFECTINFOW info = {sizeof(info)};
+    HRESULT hr;
+
+    TRACE( "iface %p, callback %p, ref %p, type %#x.\n", iface, callback, ref, type );
 
     if (!callback) return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    type = DIEFT_GETTYPE(type);
+
+    if (type == DIEFT_ALL || type == DIEFT_CONSTANTFORCE)
+    {
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_ConstantForce);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+    }
+
+    if (type == DIEFT_ALL || type == DIEFT_RAMPFORCE)
+    {
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_RampForce);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+    }
+
+    if (type == DIEFT_ALL || type == DIEFT_PERIODIC)
+    {
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Square);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Sine);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Triangle);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_SawtoothUp);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_SawtoothDown);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+    }
+
+    if (type == DIEFT_ALL || type == DIEFT_CONDITION)
+    {
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Spring);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Damper);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Inertia);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+
+        hr = IDirectInputDevice8_GetEffectInfo(iface, &info, &GUID_Friction);
+        if (hr == S_OK && !callback(&info, ref)) return DI_OK;
+        else if (FAILED(hr) && hr != DIERR_DEVICENOTREG) return hr;
+    }
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_GetEffectInfo( IDirectInputDevice8W *iface, DIEFFECTINFOW *info, REFGUID guid )
 {
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    HIDP_BUTTON_CAPS button;
+    HIDP_VALUE_CAPS value;
+    NTSTATUS status;
+    USHORT i, collection, count;
+    USAGE usage = 0;
+
     FIXME( "iface %p, info %p, guid %s stub!\n", iface, info, debugstr_guid( guid ) );
 
     if (!info) return E_POINTER;
+    if (info->dwSize != sizeof(DIEFFECTINFOW)) return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    info->guid = *guid;
+#if 0
+    DWORD dwStaticParams;
+    DWORD dwDynamicParams;
+    WCHAR tszName[MAX_PATH];
+#endif
+
+    if (IsEqualGUID(guid, &GUID_ConstantForce))
+    {
+        usage = HID_USAGE_PID_ET_CONSTANT_FORCE;
+        info->dwEffType = DIEFT_CONSTANTFORCE;
+    }
+
+    if (IsEqualGUID(guid, &GUID_RampForce))
+    {
+        usage = HID_USAGE_PID_ET_RAMP;
+        info->dwEffType = DIEFT_RAMPFORCE;
+    }
+
+    if (IsEqualGUID(guid, &GUID_Square))
+    {
+        usage = HID_USAGE_PID_ET_SQUARE;
+        info->dwEffType = DIEFT_PERIODIC;
+    }
+    if (IsEqualGUID(guid, &GUID_Sine))
+    {
+        usage = HID_USAGE_PID_ET_SINE;
+        info->dwEffType = DIEFT_PERIODIC;
+    }
+    if (IsEqualGUID(guid, &GUID_Triangle))
+    {
+        usage = HID_USAGE_PID_ET_TRIANGLE;
+        info->dwEffType = DIEFT_PERIODIC;
+    }
+    if (IsEqualGUID(guid, &GUID_SawtoothUp))
+    {
+        usage = HID_USAGE_PID_ET_SAWTOOTH_UP;
+        info->dwEffType = DIEFT_PERIODIC;
+    }
+    if (IsEqualGUID(guid, &GUID_SawtoothDown))
+    {
+        usage = HID_USAGE_PID_ET_SAWTOOTH_DOWN;
+        info->dwEffType = DIEFT_PERIODIC;
+    }
+
+    if (IsEqualGUID(guid, &GUID_Spring))
+    {
+        usage = HID_USAGE_PID_ET_SPRING;
+        info->dwEffType = DIEFT_CONDITION;
+    }
+    if (IsEqualGUID(guid, &GUID_Damper))
+    {
+        usage = HID_USAGE_PID_ET_DAMPER;
+        info->dwEffType = DIEFT_CONDITION;
+    }
+    if (IsEqualGUID(guid, &GUID_Inertia))
+    {
+        usage = HID_USAGE_PID_ET_INERTIA;
+        info->dwEffType = DIEFT_CONDITION;
+    }
+    if (IsEqualGUID(guid, &GUID_Friction))
+    {
+        usage = HID_USAGE_PID_ET_FRICTION;
+        info->dwEffType = DIEFT_CONDITION;
+    }
+
+    if (!usage) return DI_NOEFFECT;
+
+    for (i = 0; i < impl->caps.NumberLinkCollectionNodes; ++i)
+    {
+        if (impl->collection_nodes[i].LinkUsagePage != HID_USAGE_PAGE_PID) continue;
+        if (impl->collection_nodes[i].LinkUsage == usage) break;
+    }
+
+    if (i == impl->caps.NumberLinkCollectionNodes) return DIERR_DEVICENOTREG;
+    else collection = i;
+
+    /* check for HID_USAGE_PID_OP_EFFECT_START */
+    usage = HID_USAGE_PID_OP_EFFECT_START;
+    for (i = 0; i < impl->caps.NumberOutputButtonCaps; ++i)
+    {
+        button = impl->feature_button_caps[i];
+        if (button.LinkCollection != collection) continue;
+        if (button.UsagePage != HID_USAGE_PAGE_PID) continue;
+        if (button.IsRange && button.Range.UsageMin <= usage && button.Range.UsageMax >= usage) break;
+        if (!button.IsRange && button.NotRange.Usage == usage) break;
+    }
+    if (i == impl->caps.NumberOutputButtonCaps) return DIERR_DEVICENOTREG;
+
+    for (i = HidP_Output; i <= HidP_Feature; ++i)
+    {
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_ATTACK_LEVEL, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFATTACK;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_ATTACK_TIME, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFATTACK;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_FADE_LEVEL, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFFADE;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_FADE_TIME, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFFADE;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DEAD_BAND, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_DEADBAND;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_STARTDELAY;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DURATION, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_DURATION;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_SAMPLE_PERIOD, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_SAMPLEPERIOD;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_GAIN, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_GAIN;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TRIGGER_BUTTON, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TRIGGERBUTTON;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TRIGGER_REPEAT_INTERVAL, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TRIGGERREPEATINTERVAL;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_AXES_ENABLE, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_AXES;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DIRECTION, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_DIRECTION;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_SET_ENVELOPE_REPORT, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_ENVELOPE;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TYPE_SPECIFIC_BLOCK_OFFSET, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_STARTDELAY;
+
+#if 0
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_OP_EFFECT_START, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_START;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_NORESTART;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_NODOWNLOAD;
+
+        count = 1;
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEB_NOTRIGGER;
+#endif
+
+        if (info->dwEffType & DIEFT_CONDITION)
+        {
+            count = 1;
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_POSITIVE_SATURATION, &value, &count, impl->preparsed );
+            if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_SATURATION | DIEFT_POSNEGSATURATION;
+
+            count = 1;
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_NEGATIVE_SATURATION, &value, &count, impl->preparsed );
+            if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_SATURATION | DIEFT_POSNEGSATURATION;
+
+            count = 1;
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_POSITIVE_COEFFICIENT, &value, &count, impl->preparsed );
+            if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_POSNEGCOEFFICIENTS;
+
+            count = 1;
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_NEGATIVE_COEFFICIENT, &value, &count, impl->preparsed );
+            if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_POSNEGCOEFFICIENTS;
+        }
+    }
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *iface, DWORD *out )
