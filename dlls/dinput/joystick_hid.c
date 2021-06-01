@@ -59,6 +59,7 @@ struct hid_joystick
     DIDEVICEINSTANCEW instance;
     WCHAR device_path[MAX_PATH];
     HIDD_ATTRIBUTES attrs;
+    DIDEVCAPS dev_caps;
 };
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
@@ -84,11 +85,14 @@ static ULONG WINAPI hid_joystick_Release( IDirectInputDevice8W *iface )
 
 static HRESULT WINAPI hid_joystick_GetCapabilities( IDirectInputDevice8W *iface, DIDEVCAPS *caps )
 {
-    FIXME( "iface %p, caps %p stub!\n", iface, caps );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p, caps %p.\n", iface, caps );
 
     if (!caps) return E_POINTER;
 
-    return E_NOTIMPL;
+    *caps = impl->dev_caps;
+    return DI_OK;
 }
 
 static HRESULT WINAPI hid_joystick_EnumObjects( IDirectInputDevice8W *iface, LPDIENUMDEVICEOBJECTSCALLBACKW callback,
@@ -485,6 +489,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     DIDEVICEINSTANCEW instance = {.dwSize = sizeof(instance), .guidProduct = *guid, .guidInstance = *guid};
     DWORD size = sizeof(struct hid_joystick);
     HIDD_ATTRIBUTES attrs = {sizeof(attrs)};
+    DIDEVCAPS dev_caps = {sizeof(dev_caps)};
     struct hid_joystick *impl = NULL;
     PHIDP_PREPARSED_DATA preparsed;
     DIDATAFORMAT *format = NULL;
@@ -509,6 +514,9 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
                                    &attrs, &caps, dinput->dwVersion );
     if (hr != DI_OK) return hr;
 
+    dev_caps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
+    dev_caps.dwDevType = instance.dwDevType;
+
     hr = direct_input_device_alloc( size, &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) goto failed;
 
@@ -521,6 +529,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     impl->instance = instance;
     lstrcpynW( impl->device_path, device_path, MAX_PATH );
     impl->attrs = attrs;
+    impl->dev_caps = dev_caps;
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
     impl->base.data_format.wine_df = format;
