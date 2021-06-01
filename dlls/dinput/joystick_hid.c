@@ -281,17 +281,30 @@ static HRESULT WINAPI hid_joystick_GetDeviceState( IDirectInputDevice8W *iface, 
     return DI_OK;
 }
 
+static BOOL get_object_info( struct hid_joystick *impl, struct hid_object *object,
+                             DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    DIDEVICEOBJECTINSTANCEW *dest = data;
+    memcpy( dest, instance, dest->dwSize );
+    return FALSE;
+}
+
 static HRESULT WINAPI hid_joystick_GetObjectInfo( IDirectInputDevice8W *iface, DIDEVICEOBJECTINSTANCEW *instance,
                                                   DWORD obj, DWORD how )
 {
-    FIXME( "iface %p, instance %p, obj %#x, how %#x stub!\n", iface, instance, obj, how );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    DIPROPHEADER header = {sizeof(header), sizeof(header), how, obj};
+
+    TRACE( "iface %p, instance %p, obj %#x, how %#x.\n", iface, instance, obj, how );
 
     if (!instance) return E_POINTER;
     if (instance->dwSize != sizeof(DIDEVICEOBJECTINSTANCE_DX3W) &&
         instance->dwSize != sizeof(DIDEVICEOBJECTINSTANCEW))
         return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    enum_hid_objects( impl, &header, DIDFT_ALL, get_object_info, NULL );
+
+    return S_OK;
 }
 
 static HRESULT WINAPI hid_joystick_GetDeviceInfo( IDirectInputDevice8W *iface, DIDEVICEINSTANCEW *instance )
