@@ -215,6 +215,8 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
 
         if (object.value->IsAlias)
             TRACE( "Ignoring input value %s, aliased.\n", debugstr_hidp_value_caps( object.value ) );
+        else if (object.value->UsagePage >= HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN)
+            TRACE( "Ignoring input value %s, vendor specific.\n", debugstr_hidp_value_caps( object.value ) );
         else if (object.value->UsagePage != HID_USAGE_PAGE_GENERIC)
             FIXME( "Ignoring input value %s, usage page not implemented.\n", debugstr_hidp_value_caps( object.value ) );
         else if (object.value->IsRange)
@@ -327,6 +329,8 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
 
         if (object.button->IsAlias)
             TRACE( "Ignoring input button %s, aliased.\n", debugstr_hidp_button_caps( object.button ) );
+        else if (object.button->UsagePage >= HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN)
+            TRACE( "Ignoring input button %s, vendor specific.\n", debugstr_hidp_button_caps( object.button ) );
         else if (object.button->UsagePage != HID_USAGE_PAGE_BUTTON)
             FIXME( "Ignoring input button %s, usage page not implemented.\n", debugstr_hidp_button_caps( object.button ) );
         else if (object.button->IsRange)
@@ -369,6 +373,8 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
 
         if (object.node->IsAlias)
             TRACE( "Ignoring collection %s, aliased.\n", debugstr_hidp_link_collection_node( object.node ) );
+        else if (object.node->LinkUsagePage >= HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN)
+            TRACE( "Ignoring collection %s, vendor specific.\n", debugstr_hidp_link_collection_node( object.node ) );
         else if (object.node->LinkUsagePage != HID_USAGE_PAGE_GENERIC)
             FIXME( "Ignoring collection %s, link usage page not implemented.\n", debugstr_hidp_link_collection_node( object.node ) );
         else
