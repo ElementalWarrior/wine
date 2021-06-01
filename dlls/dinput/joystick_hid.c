@@ -58,13 +58,40 @@ static inline const char *debugstr_hidp_link_collection_node( HIDP_LINK_COLLECTI
                              node->NextSibling, node->FirstChild, node->CollectionType, node->IsAlias, node->UserContext );
 }
 
+static inline const char *debugstr_hidp_button_caps( HIDP_BUTTON_CAPS *caps )
+{
+    const char *str;
+
+    if (!caps->IsRange)
+        str = wine_dbg_sprintf( "Usage %04x:%04x, Idx %02x,", caps->UsagePage, caps->NotRange.Usage,
+                                caps->NotRange.DataIndex );
+    else
+        str = wine_dbg_sprintf( "Usage %04x:%04x-%04x, Idx %02x-%02x,", caps->UsagePage, caps->Range.UsageMin,
+                                caps->Range.UsageMax, caps->Range.DataIndexMin, caps->Range.DataIndexMax );
+
+    if (!caps->IsStringRange)
+        str = wine_dbg_sprintf( "%s Str %d,", str, caps->NotRange.StringIndex );
+    else
+        str = wine_dbg_sprintf( "%s Str %d-%d,", str, caps->Range.StringMin, caps->Range.StringMax );
+
+    if (!caps->IsDesignatorRange)
+        str = wine_dbg_sprintf( "%s DIdx %d,", str, caps->NotRange.DesignatorIndex );
+    else
+        str = wine_dbg_sprintf( "%s DIdx %d-%d,", str, caps->Range.DesignatorMin, caps->Range.DesignatorMax );
+
+    return wine_dbg_sprintf( "%s RId %2x, Alias %d, Bit %d, LnkCol %d, LnkUsg %04x:%04x, Abs %d", str,
+                             caps->ReportID, caps->IsAlias, caps->BitField, caps->LinkCollection,
+                             caps->LinkUsagePage, caps->LinkUsage, caps->IsAbsolute );
+}
+
 struct hid_object
 {
-    enum { LINK_COLLECTION_NODE } type;
+    enum { LINK_COLLECTION_NODE, BUTTON_CAPS } type;
     DWORD index;
     union
     {
         HIDP_LINK_COLLECTION_NODE *node;
+        HIDP_BUTTON_CAPS *button;
     };
 };
 
@@ -83,6 +110,10 @@ struct hid_joystick
     HIDP_CAPS caps;
 
     HIDP_LINK_COLLECTION_NODE *collection_nodes;
+
+    HIDP_BUTTON_CAPS *input_button_caps;
+    HIDP_BUTTON_CAPS *output_button_caps;
+    HIDP_BUTTON_CAPS *feature_button_caps;
 };
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
@@ -125,7 +156,47 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
 {
     DIDEVICEOBJECTINSTANCEW instance = {sizeof(DIDEVICEOBJECTINSTANCEW)};
     struct hid_object object = {0};
-    DWORD i;
+    DWORD button = 0, i, j;
+
+    for (i = 0; i < impl->caps.NumberInputButtonCaps; ++i)
+    {
+        object.type = BUTTON_CAPS;
+        object.button = impl->input_button_caps + i;
+
+        if (object.button->IsAlias)
+            TRACE( "Ignoring input button %s, aliased.\n", debugstr_hidp_button_caps( object.button ) );
+        else if (object.button->UsagePage != HID_USAGE_PAGE_BUTTON)
+            FIXME( "Ignoring input button %s, usage page not implemented.\n", debugstr_hidp_button_caps( object.button ) );
+        else if (object.button->IsRange)
+        {
+            if (object.button->Range.UsageMin <= 0 || object.button->Range.UsageMax >= 128)
+                FIXME( "Ignoring input button %s, invalid usage.\n", debugstr_hidp_button_caps( object.button ) );
+            else for (j = object.button->Range.UsageMin; j <= object.button->Range.UsageMax; ++j)
+            {
+                instance.guidType = GUID_Button;
+                instance.dwOfs = DIJOFS_BUTTON( j );
+                instance.dwType = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( button++ );
+                instance.dwFlags = 0;
+                instance.wUsagePage = object.button->UsagePage;
+                instance.wUsage = j;
+                if (!enum_hid_objects_if( impl, header, flags, callback, &object, &instance, data )) return;
+                object.index++;
+            }
+        }
+        else if (object.button->NotRange.Usage <= 0 || object.button->NotRange.Usage >= 128)
+            FIXME( "Ignoring input button %s, invalid usage.\n", debugstr_hidp_button_caps( object.button ) );
+        else
+        {
+            instance.guidType = GUID_Button;
+            instance.dwOfs = DIJOFS_BUTTON( object.button->NotRange.Usage );
+            instance.dwType = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( button++ );
+            instance.dwFlags = 0;
+            instance.wUsagePage = object.button->UsagePage;
+            instance.wUsage = object.button->NotRange.Usage;
+            if (!enum_hid_objects_if( impl, header, flags, callback, &object, &instance, data )) return;
+            object.index++;
+        }
+    }
 
     for (i = 0; i < impl->caps.NumberLinkCollectionNodes; ++i)
     {
@@ -608,6 +679,7 @@ static BOOL init_data_format( struct hid_joystick *impl, struct hid_object *obje
     {
         obj_format = format->rgodf + object->index;
         if (IsEqualGUID( &instance->guidType, &GUID_Unknown )) obj_format->pguid = &GUID_Unknown;
+        else if (IsEqualGUID( &instance->guidType, &GUID_Button )) obj_format->pguid = &GUID_Button;
         else obj_format->pguid = NULL;
         obj_format->dwOfs = instance->dwOfs;
         obj_format->dwType = instance->dwType;
@@ -662,6 +734,9 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     size = ALIGN_SIZE( size, sizeof(void *) );
     size += caps.NumberLinkCollectionNodes * sizeof(HIDP_LINK_COLLECTION_NODE);
 
+    size = ALIGN_SIZE( size, sizeof(void *) );
+    size += (caps.NumberInputButtonCaps + caps.NumberOutputButtonCaps + caps.NumberFeatureButtonCaps) * sizeof(HIDP_BUTTON_CAPS);
+
     hr = direct_input_device_alloc( size, &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) goto failed;
 
@@ -682,6 +757,14 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     size = caps.NumberLinkCollectionNodes;
     if (HidP_GetLinkCollectionNodes( impl->collection_nodes, &size, preparsed ) != HIDP_STATUS_SUCCESS) goto failed;
     caps.NumberLinkCollectionNodes = size;
+
+    impl->input_button_caps = ALIGN_PTR( impl->collection_nodes + caps.NumberLinkCollectionNodes, sizeof(void *) );
+    impl->output_button_caps = impl->input_button_caps + caps.NumberInputButtonCaps;
+    impl->feature_button_caps = impl->output_button_caps + caps.NumberOutputButtonCaps;
+
+    HidP_GetButtonCaps( HidP_Input, impl->input_button_caps, &caps.NumberInputButtonCaps, preparsed );
+    HidP_GetButtonCaps( HidP_Output, impl->output_button_caps, &caps.NumberOutputButtonCaps, preparsed );
+    HidP_GetButtonCaps( HidP_Feature, impl->feature_button_caps, &caps.NumberFeatureButtonCaps, preparsed );
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
 
