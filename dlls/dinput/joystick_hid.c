@@ -127,6 +127,7 @@ struct hid_object
 struct hid_extra_value_caps
 {
     LONG deadzone;
+    LONG saturation;
 };
 
 struct hid_joystick
@@ -464,6 +465,17 @@ static BOOL get_property_prop_deadzone( struct hid_joystick *impl, struct hid_ob
     return TRUE;
 }
 
+static BOOL get_property_prop_saturation( struct hid_joystick *impl, struct hid_object *object,
+                                          DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct hid_extra_value_caps *extra;
+    DIPROPDWORD *deadzone = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    extra = impl->extra_value_caps + (object->value - impl->input_value_caps);
+    deadzone->dwData = extra->saturation;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REFGUID guid, DIPROPHEADER *header )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -484,6 +496,11 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     case (DWORD_PTR)DIPROP_DEADZONE:
     {
         enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_deadzone, header );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_SATURATION:
+    {
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_saturation, header );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
@@ -544,6 +561,17 @@ static BOOL set_property_prop_deadzone( struct hid_joystick *impl, struct hid_ob
     return TRUE;
 }
 
+static BOOL set_property_prop_saturation( struct hid_joystick *impl, struct hid_object *object,
+                                          DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct hid_extra_value_caps *extra;
+    DIPROPDWORD *saturation = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    extra = impl->extra_value_caps + (object->value - impl->input_value_caps);
+    extra->saturation = saturation->dwData;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REFGUID guid, const DIPROPHEADER *header )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -564,6 +592,11 @@ static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REF
     case (DWORD_PTR)DIPROP_DEADZONE:
     {
         enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_deadzone, (void *)header );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_SATURATION:
+    {
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_saturation, (void *)header );
         return DI_OK;
     }
     default: return IDirectInputDevice2WImpl_SetProperty( iface, guid, header );
@@ -767,6 +800,8 @@ static BOOL parse_input_report( struct hid_joystick *impl, struct hid_object *ob
         {
             neutral = (caps->PhysicalMax + caps->PhysicalMin) / 2;
             if (abs( (LONG)value - neutral ) <= extra->deadzone) value = neutral;
+            if ((LONG)value >= caps->PhysicalMax - extra->saturation) value = caps->PhysicalMax;
+            if ((LONG)value <= caps->PhysicalMin + extra->saturation) value = caps->PhysicalMin;
         }
 
         switch (instance->dwOfs)
