@@ -124,6 +124,11 @@ struct hid_object
     };
 };
 
+struct hid_extra_value_caps
+{
+    LONG deadzone;
+};
+
 struct hid_joystick
 {
     IDirectInputDeviceImpl base;
@@ -156,6 +161,8 @@ struct hid_joystick
     char *input_report_buf;
     char *output_report_buf;
     char *feature_report_buf;
+
+    struct hid_extra_value_caps *extra_value_caps;
 };
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
@@ -446,6 +453,17 @@ static BOOL get_property_prop_range( struct hid_joystick *impl, struct hid_objec
     return TRUE;
 }
 
+static BOOL get_property_prop_deadzone( struct hid_joystick *impl, struct hid_object *object,
+                                        DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct hid_extra_value_caps *extra;
+    DIPROPDWORD *deadzone = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    extra = impl->extra_value_caps + (object->value - impl->input_value_caps);
+    deadzone->dwData = extra->deadzone;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REFGUID guid, DIPROPHEADER *header )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -461,6 +479,11 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     {
         DIPROPRANGE *value = (DIPROPRANGE *)header;
         enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_range, value );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    {
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_deadzone, header );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
@@ -510,6 +533,17 @@ static BOOL set_property_prop_range( struct hid_joystick *impl, struct hid_objec
     return TRUE;
 }
 
+static BOOL set_property_prop_deadzone( struct hid_joystick *impl, struct hid_object *object,
+                                        DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct hid_extra_value_caps *extra;
+    DIPROPDWORD *deadzone = data;
+    if (object->type != VALUE_CAPS) return TRUE;
+    extra = impl->extra_value_caps + (object->value - impl->input_value_caps);
+    extra->deadzone = deadzone->dwData;
+    return TRUE;
+}
+
 static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REFGUID guid, const DIPROPHEADER *header )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -525,6 +559,11 @@ static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REF
     {
         DIPROPRANGE *value = (DIPROPRANGE *)header;
         enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_range, (void *)value );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_DEADZONE:
+    {
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_deadzone, (void *)header );
         return DI_OK;
     }
     default: return IDirectInputDevice2WImpl_SetProperty( iface, guid, header );
@@ -694,7 +733,7 @@ static BOOL parse_input_report( struct hid_joystick *impl, struct hid_object *ob
     NTSTATUS status;
     DWORD i = DIDFT_GETINSTANCE( instance->dwType );
     ULONG logical_value;
-    LONG value;
+    LONG value, neutral;
 
     if (instance->dwType & DIDFT_BUTTON)
     {
@@ -708,12 +747,14 @@ static BOOL parse_input_report( struct hid_joystick *impl, struct hid_object *ob
     }
     else if (instance->dwType & (DIDFT_POV | DIDFT_AXIS))
     {
+        struct hid_extra_value_caps *extra;
         HIDP_VALUE_CAPS *caps = object->value;
         if (object->type != VALUE_CAPS)
         {
             FIXME( "Unimplemented axis / pov object type %x", object->type );
             return TRUE;
         }
+        extra = impl->extra_value_caps + (caps - impl->input_value_caps);
 
         if ((status = HidP_GetUsageValue( HidP_Input, instance->wUsagePage, 0, instance->wUsage, &logical_value,
                                           impl->preparsed, params->report_buf, params->report_len )) != HIDP_STATUS_SUCCESS)
@@ -721,6 +762,12 @@ static BOOL parse_input_report( struct hid_joystick *impl, struct hid_object *ob
 
         if ((LONG)logical_value < caps->LogicalMin || (LONG)logical_value > caps->LogicalMax) value = -1;
         else value = MulDiv( logical_value - caps->LogicalMin, caps->PhysicalMax - caps->PhysicalMin, caps->LogicalMax - caps->LogicalMin ) + caps->PhysicalMin;
+
+        if (instance->dwType & DIDFT_AXIS)
+        {
+            neutral = (caps->PhysicalMax + caps->PhysicalMin) / 2;
+            if (abs( (LONG)value - neutral ) <= extra->deadzone) value = neutral;
+        }
 
         switch (instance->dwOfs)
         {
@@ -1112,6 +1159,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     DIDEVICEINSTANCEW instance = {.dwSize = sizeof(instance), .guidProduct = *guid, .guidInstance = *guid};
     DIPROPHEADER header = {sizeof(header), sizeof(header), DIPH_DEVICE, 0};
     DIPROPRANGE range = {{sizeof(range), sizeof(DIPROPHEADER)}};
+    DIPROPDWORD value = {{sizeof(value), sizeof(DIPROPHEADER)}};
     DWORD size = sizeof(struct hid_joystick);
     HIDD_ATTRIBUTES attrs = {sizeof(attrs)};
     DIDEVCAPS dev_caps = {sizeof(dev_caps)};
@@ -1156,6 +1204,9 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     size += HidP_MaxUsageListLength( HidP_Input, HID_USAGE_PAGE_BUTTON, preparsed ) * sizeof(USAGE_AND_PAGE);
 
     size += (caps.InputReportByteLength + caps.OutputReportByteLength + caps.FeatureReportByteLength);
+
+    size = ALIGN_SIZE( size, sizeof(void *) );
+    size += (caps.NumberInputValueCaps + caps.NumberOutputValueCaps + caps.NumberFeatureValueCaps) * sizeof(struct hid_extra_value_caps);
 
     hr = direct_input_device_alloc( size, &hid_joystick_vtbl, guid, dinput, (void **)&impl );
     if (FAILED(hr)) goto failed;
@@ -1202,6 +1253,8 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     impl->input_report_buf = (char *)(impl->usages_buf + impl->usages_count);
     impl->output_report_buf = impl->input_report_buf + caps.InputReportByteLength;
     impl->feature_report_buf = impl->output_report_buf + caps.OutputReportByteLength;
+
+    impl->extra_value_caps = ALIGN_PTR( impl->feature_report_buf + caps.FeatureReportByteLength, sizeof(void *) );
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
 
