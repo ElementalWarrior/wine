@@ -202,7 +202,7 @@ static BOOL enum_hid_objects_if( struct hid_joystick *impl, const DIPROPHEADER *
 }
 
 static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *header, DWORD flags,
-                              enum_hid_objects_callback callback, void *data )
+                              enum_hid_objects_callback callback, void *data, BOOL verbose )
 {
     DIDEVICEOBJECTINSTANCEW instance = {sizeof(DIDEVICEOBJECTINSTANCEW)};
     struct hid_object object = {0};
@@ -229,6 +229,7 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
             FIXME( "Ignoring input value %s, array not implemented.\n", debugstr_hidp_value_caps( object.value ) );
         else
         {
+            if (verbose) TRACE( "Found input value %s.\n", debugstr_hidp_value_caps( object.value ) );
             switch (object.value->NotRange.Usage)
             {
             case HID_USAGE_GENERIC_X:
@@ -326,6 +327,22 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
         }
     }
 
+    for (i = 0; i < impl->caps.NumberOutputValueCaps; ++i)
+    {
+        object.type = VALUE_CAPS;
+        object.value = impl->output_value_caps + i;
+
+        if (verbose) TRACE( "Found output value %s.\n", debugstr_hidp_value_caps( object.value ) );
+    }
+
+    for (i = 0; i < impl->caps.NumberFeatureValueCaps; ++i)
+    {
+        object.type = VALUE_CAPS;
+        object.value = impl->feature_value_caps + i;
+
+        if (verbose) TRACE( "Found feature value %s.\n", debugstr_hidp_value_caps( object.value ) );
+    }
+
     for (i = 0; i < impl->caps.NumberInputButtonCaps; ++i)
     {
         object.type = BUTTON_CAPS;
@@ -347,6 +364,7 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
                 FIXME( "Ignoring input button %s, invalid usage.\n", debugstr_hidp_button_caps( object.button ) );
             else for (j = object.button->Range.UsageMin; j <= object.button->Range.UsageMax; ++j)
             {
+                if (verbose) TRACE( "Found input button %s.\n", debugstr_hidp_button_caps( object.button ) );
                 instance.guidType = GUID_Button;
                 instance.dwOfs = DIJOFS_BUTTON( j );
                 instance.dwType = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( button++ );
@@ -362,6 +380,7 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
             FIXME( "Ignoring input button %s, invalid usage.\n", debugstr_hidp_button_caps( object.button ) );
         else
         {
+            if (verbose) TRACE( "Found input button %s.\n", debugstr_hidp_button_caps( object.button ) );
             instance.guidType = GUID_Button;
             instance.dwOfs = DIJOFS_BUTTON( object.button->NotRange.Usage );
             instance.dwType = DIDFT_PSHBUTTON | DIDFT_MAKEINSTANCE( button++ );
@@ -372,6 +391,22 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
             if (!enum_hid_objects_if( impl, header, flags, callback, &object, &instance, data )) return;
             object.index++;
         }
+    }
+
+    for (i = 0; i < impl->caps.NumberOutputButtonCaps; ++i)
+    {
+        object.type = BUTTON_CAPS;
+        object.button = impl->output_button_caps + i;
+
+        if (verbose) TRACE( "Found output button %s.\n", debugstr_hidp_button_caps( object.button ) );
+    }
+
+    for (i = 0; i < impl->caps.NumberFeatureButtonCaps; ++i)
+    {
+        object.type = BUTTON_CAPS;
+        object.button = impl->feature_button_caps + i;
+
+        if (verbose) TRACE( "Found feature button %s.\n", debugstr_hidp_button_caps( object.button ) );
     }
 
     for (i = 0; i < impl->caps.NumberLinkCollectionNodes; ++i)
@@ -391,6 +426,7 @@ static void enum_hid_objects( struct hid_joystick *impl, const DIPROPHEADER *hea
             FIXME( "Ignoring collection %s, link usage page not implemented.\n", debugstr_hidp_link_collection_node( object.node ) );
         else
         {
+            if (verbose) TRACE( "Found collection %s.\n", debugstr_hidp_link_collection_node( object.node ) );
             instance.guidType = GUID_Unknown;
             instance.dwOfs = 0;
             instance.dwType = DIDFT_COLLECTION | DIDFT_NODATA;
@@ -457,7 +493,7 @@ static HRESULT WINAPI hid_joystick_EnumObjects( IDirectInputDevice8W *iface, LPD
 
     if (!callback) return DIERR_INVALIDPARAM;
 
-    enum_hid_objects( impl, &header, flags, enum_objects_callback, &params );
+    enum_hid_objects( impl, &header, flags, enum_objects_callback, &params, FALSE );
 
     return S_OK;
 }
@@ -508,17 +544,17 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     case (DWORD_PTR)DIPROP_RANGE:
     {
         DIPROPRANGE *value = (DIPROPRANGE *)header;
-        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_range, value );
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_range, value, FALSE );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_DEADZONE:
     {
-        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_deadzone, header );
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_deadzone, header, FALSE );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_SATURATION:
     {
-        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_saturation, header );
+        enum_hid_objects( impl, header, DIDFT_AXIS, get_property_prop_saturation, header, FALSE );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_PRODUCTNAME:
@@ -604,17 +640,17 @@ static HRESULT WINAPI hid_joystick_SetProperty( IDirectInputDevice8W *iface, REF
     case (DWORD_PTR)DIPROP_RANGE:
     {
         DIPROPRANGE *value = (DIPROPRANGE *)header;
-        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_range, (void *)value );
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_range, (void *)value, FALSE );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_DEADZONE:
     {
-        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_deadzone, (void *)header );
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_deadzone, (void *)header, FALSE );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_SATURATION:
     {
-        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_saturation, (void *)header );
+        enum_hid_objects( impl, header, DIDFT_AXIS, set_property_prop_saturation, (void *)header, FALSE );
         return DI_OK;
     }
     default: return IDirectInputDevice2WImpl_SetProperty( iface, guid, header );
@@ -689,7 +725,7 @@ static HRESULT WINAPI hid_joystick_GetObjectInfo( IDirectInputDevice8W *iface, D
         instance->dwSize != sizeof(DIDEVICEOBJECTINSTANCEW))
         return DIERR_INVALIDPARAM;
 
-    enum_hid_objects( impl, &header, DIDFT_ALL, get_object_info, NULL );
+    enum_hid_objects( impl, &header, DIDFT_ALL, get_object_info, NULL, FALSE );
 
     return S_OK;
 }
@@ -908,7 +944,7 @@ static HRESULT WINAPI hid_joystick_Poll( IDirectInputDevice8W *iface )
             else impl->state.rgbButtons[button->Usage] = 0x80;
         }
 
-        enum_hid_objects( impl, &header, DIDFT_ALL, parse_input_report, &params );
+        enum_hid_objects( impl, &header, DIDFT_ALL, parse_input_report, &params, FALSE );
     }
 
     if (!impl->base.acquired) return DIERR_NOTACQUIRED;
@@ -1026,7 +1062,7 @@ static HRESULT hid_joystick_read_state( IDirectInputDevice8W *iface )
             else impl->state.rgbButtons[button->Usage] = 0x80;
         }
 
-        enum_hid_objects( impl, &header, DIDFT_ALL, parse_input_report, &params );
+        enum_hid_objects( impl, &header, DIDFT_ALL, parse_input_report, &params, FALSE );
 
         memset( &impl->read_ovl, 0, sizeof(impl->read_ovl) );
         impl->read_ovl.hEvent = impl->base.read_event;
@@ -1311,7 +1347,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
 
-    enum_hid_objects( impl, &header, DIDFT_ALL, init_data_format, format );
+    enum_hid_objects( impl, &header, DIDFT_ALL, init_data_format, format, TRUE );
     if (!(obj_format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, format->dwNumObjs * sizeof(*format->rgodf) ))) goto failed;
 
     format->dwSize = sizeof(*format);
@@ -1319,7 +1355,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     format->dwFlags = DIDF_ABSAXIS;
     format->dwDataSize = sizeof(impl->state);
     format->rgodf = obj_format;
-    enum_hid_objects( impl, &header, DIDFT_ALL, init_data_format, format );
+    enum_hid_objects( impl, &header, DIDFT_ALL, init_data_format, format, FALSE );
 
     impl->base.data_format.wine_df = format;
 
@@ -1330,13 +1366,13 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     range.diph.dwObj = 0;
     range.lMin = 0;
     range.lMax = 65535;
-    enum_hid_objects( impl, &range.diph, DIDFT_AXIS, set_property_prop_range, &range );
+    enum_hid_objects( impl, &range.diph, DIDFT_AXIS, set_property_prop_range, &range, FALSE );
 
     range.diph.dwHow = DIPH_DEVICE;
     range.diph.dwObj = 0;
     range.lMin = 0;
     range.lMax = 36000;
-    enum_hid_objects( impl, &range.diph, DIDFT_POV, set_property_prop_range, &range );
+    enum_hid_objects( impl, &range.diph, DIDFT_POV, set_property_prop_range, &range, FALSE );
 
     *out = &impl->base.IDirectInputDevice8W_iface;
     return DI_OK;
