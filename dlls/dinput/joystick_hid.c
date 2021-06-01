@@ -177,14 +177,33 @@ static HRESULT WINAPI hid_joystick_GetCapabilities( IDirectInputDevice8W *iface,
     return DI_OK;
 }
 
+struct enum_objects_params
+{
+    LPDIENUMDEVICEOBJECTSCALLBACKW callback;
+    void *ref;
+};
+
+static BOOL enum_objects_callback( struct hid_joystick *impl, struct hid_object *object,
+                                   DIDEVICEOBJECTINSTANCEW *instance, void *data )
+{
+    struct enum_objects_params *params = data;
+    return params->callback( instance, params->ref ) == DIENUM_CONTINUE;
+}
+
 static HRESULT WINAPI hid_joystick_EnumObjects( IDirectInputDevice8W *iface, LPDIENUMDEVICEOBJECTSCALLBACKW callback,
                                                 void *ref, DWORD flags )
 {
-    FIXME( "iface %p, callback %p, ref %p, flags %#x stub!\n", iface, callback, ref, flags );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+    struct enum_objects_params params = {callback, ref};
+    DIPROPHEADER header = {sizeof(header), sizeof(header), DIPH_DEVICE, 0};
+
+    TRACE( "iface %p, callback %p, ref %p, flags %#x.\n", iface, callback, ref, flags );
 
     if (!callback) return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    enum_hid_objects( impl, &header, flags, enum_objects_callback, &params );
+
+    return S_OK;
 }
 
 static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REFGUID guid, DIPROPHEADER *header )
