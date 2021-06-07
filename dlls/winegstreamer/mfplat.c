@@ -413,6 +413,11 @@ static HRESULT aac_decoder_create(REFIID riid, void **ret)
     return decode_transform_create(riid, ret, DECODER_TYPE_AAC);
 }
 
+static HRESULT wma_decoder_create(REFIID riid, void **ret)
+{
+    return decode_transform_create(riid, ret, DECODER_TYPE_WMA);
+}
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -426,6 +431,7 @@ class_objects[] =
     { &CLSID_CColorConvertDMO, &color_converter_create },
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
+    { &CLSID_CWMADecMediaObject, &wma_decoder_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -506,6 +512,20 @@ static const GUID *aac_decoder_output_types[] =
     &MFAudioFormat_PCM,
 };
 
+static WCHAR wma_decoderW[] = L"WMA Decoder";
+static const GUID *wma_decoder_input_types[] =
+{
+    &MFAudioFormat_WMAudioV8,
+    &MFAudioFormat_WMAudioV9,
+    &MFAudioFormat_WMAudio_Lossless,
+    &MFAudioFormat_XMAudio2,
+};
+static const GUID *wma_decoder_output_types[] =
+{
+    &MFAudioFormat_Float,
+    &MFAudioFormat_PCM,
+};
+
 static const struct mft
 {
     const GUID *clsid;
@@ -563,6 +583,17 @@ mfts[] =
         aac_decoder_input_types,
         ARRAY_SIZE(aac_decoder_output_types),
         aac_decoder_output_types,
+    },
+    {
+        &CLSID_CWMADecMediaObject,
+        &MFT_CATEGORY_AUDIO_DECODER,
+        wma_decoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(wma_decoder_input_types),
+        wma_decoder_input_types,
+        ARRAY_SIZE(wma_decoder_output_types),
+        wma_decoder_output_types,
     },
 };
 

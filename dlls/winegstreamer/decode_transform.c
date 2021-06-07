@@ -36,6 +36,9 @@ const GUID *h264_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_I420, &MF
 const GUID *aac_input_types[] = {&MFAudioFormat_AAC};
 const GUID *aac_output_types[] = {&MFAudioFormat_Float};
 
+const GUID *wma_input_types[] = {&MFAudioFormat_WMAudioV8, &MFAudioFormat_WMAudioV9, &MFAudioFormat_WMAudio_Lossless, &MFAudioFormat_XMAudio2};
+const GUID *wma_output_types[] = {&MFAudioFormat_Float};
+
 static struct decoder_desc
 {
     const GUID *major_type;
@@ -58,6 +61,13 @@ static struct decoder_desc
         ARRAY_SIZE(aac_input_types),
         aac_output_types,
         ARRAY_SIZE(aac_output_types),
+    },
+    { /* DECODER_TYPE_WMA */
+        &MFMediaType_Audio,
+        wma_input_types,
+        ARRAY_SIZE(wma_input_types),
+        wma_output_types,
+        ARRAY_SIZE(wma_output_types),
     }
 };
 
