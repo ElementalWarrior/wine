@@ -2049,7 +2049,7 @@ static HRESULT WINAPI XA20_GetDeviceCount(IXAudio20 *iface, UINT32 *pCount)
 {
     IXAudio2Impl *This = impl_from_IXAudio20(iface);
     TRACE("%p, %p\n", This, pCount);
-    return FAudio_GetDeviceCount(This->faudio, pCount);
+    return pFAudio_GetDeviceCount(This->faudio, pCount);
 }
 
 static HRESULT WINAPI XA20_GetDeviceDetails(IXAudio20 *iface, UINT32 index,
@@ -2057,7 +2057,7 @@ static HRESULT WINAPI XA20_GetDeviceDetails(IXAudio20 *iface, UINT32 index,
 {
     IXAudio2Impl *This = impl_from_IXAudio20(iface);
     TRACE("%p, %u, %p\n", This, index, pDeviceDetails);
-    return FAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
+    return pFAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
 }
 
 static HRESULT WINAPI XA20_Initialize(IXAudio20 *iface, UINT32 flags,
@@ -2170,9 +2170,9 @@ static HRESULT WINAPI XA20_CreateMasteringVoice(IXAudio20 *iface,
 
     pthread_mutex_unlock(&This->mst.engine_lock);
 
-    FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
 
-    FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
+    pFAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
 
     This->mst.in_use = TRUE;
@@ -2284,7 +2284,7 @@ static HRESULT WINAPI XA22_GetDeviceCount(IXAudio22 *iface, UINT32 *pCount)
 {
     IXAudio2Impl *This = impl_from_IXAudio22(iface);
     TRACE("%p, %p\n", This, pCount);
-    return FAudio_GetDeviceCount(This->faudio, pCount);
+    return pFAudio_GetDeviceCount(This->faudio, pCount);
 }
 
 static HRESULT WINAPI XA22_GetDeviceDetails(IXAudio22 *iface, UINT32 index,
@@ -2292,7 +2292,7 @@ static HRESULT WINAPI XA22_GetDeviceDetails(IXAudio22 *iface, UINT32 index,
 {
     IXAudio2Impl *This = impl_from_IXAudio22(iface);
     TRACE("%p, %u, %p\n", This, index, pDeviceDetails);
-    return FAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
+    return pFAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
 }
 
 static HRESULT WINAPI XA22_Initialize(IXAudio22 *iface, UINT32 flags,
@@ -2405,9 +2405,9 @@ static HRESULT WINAPI XA22_CreateMasteringVoice(IXAudio22 *iface,
 
     pthread_mutex_unlock(&This->mst.engine_lock);
 
-    FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
 
-    FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
+    pFAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
 
     This->mst.in_use = TRUE;
@@ -2518,7 +2518,7 @@ static HRESULT WINAPI XA23_GetDeviceCount(IXAudio23 *iface, UINT32 *pCount)
 {
     IXAudio2Impl *This = impl_from_IXAudio23(iface);
     TRACE("%p, %p\n", This, pCount);
-    return FAudio_GetDeviceCount(This->faudio, pCount);
+    return pFAudio_GetDeviceCount(This->faudio, pCount);
 }
 
 static HRESULT WINAPI XA23_GetDeviceDetails(IXAudio23 *iface, UINT32 index,
@@ -2526,7 +2526,7 @@ static HRESULT WINAPI XA23_GetDeviceDetails(IXAudio23 *iface, UINT32 index,
 {
     IXAudio2Impl *This = impl_from_IXAudio23(iface);
     TRACE("%p, %u, %p\n", This, index, pDeviceDetails);
-    return FAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
+    return pFAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
 }
 
 static HRESULT WINAPI XA23_Initialize(IXAudio23 *iface, UINT32 flags,
@@ -2639,9 +2639,9 @@ static HRESULT WINAPI XA23_CreateMasteringVoice(IXAudio23 *iface,
 
     pthread_mutex_unlock(&This->mst.engine_lock);
 
-    FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
 
-    FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
+    pFAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
 
     This->mst.in_use = TRUE;
@@ -2734,7 +2734,7 @@ static HRESULT WINAPI XA27_GetDeviceCount(IXAudio27 *iface, UINT32 *pCount)
 {
     IXAudio2Impl *This = impl_from_IXAudio27(iface);
     TRACE("%p, %p\n", This, pCount);
-    return FAudio_GetDeviceCount(This->faudio, pCount);
+    return pFAudio_GetDeviceCount(This->faudio, pCount);
 }
 
 static HRESULT WINAPI XA27_GetDeviceDetails(IXAudio27 *iface, UINT32 index,
@@ -2742,7 +2742,7 @@ static HRESULT WINAPI XA27_GetDeviceDetails(IXAudio27 *iface, UINT32 index,
 {
     IXAudio2Impl *This = impl_from_IXAudio27(iface);
     TRACE("%p, %u, %p\n", This, index, pDeviceDetails);
-    return FAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
+    return pFAudio_GetDeviceDetails(This->faudio, index, (FAudioDeviceDetails *)pDeviceDetails);
 }
 
 static HRESULT WINAPI XA27_Initialize(IXAudio27 *iface, UINT32 flags,
@@ -2827,9 +2827,9 @@ static HRESULT WINAPI XA27_CreateMasteringVoice(IXAudio27 *iface,
 
     pthread_mutex_unlock(&This->mst.engine_lock);
 
-    FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
 
-    FAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
+    pFAudio_CreateMasteringVoice(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, deviceIndex, This->mst.effect_chain);
 
     This->mst.in_use = TRUE;

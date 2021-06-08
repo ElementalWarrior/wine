@@ -24,6 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "x3daudio.h"
+#include "xaudio_private.h"
 
 #include "wine/debug.h"
 
@@ -42,6 +43,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinstDLL );
+        if (!load_faudio()) return FALSE;
+        break;
+    case DLL_PROCESS_DETACH:
+        unload_faudio();
         break;
     }
     return TRUE;
@@ -54,9 +59,9 @@ HRESULT CDECL X3DAudioInitialize(UINT32 chanmask, float speedofsound,
 {
     TRACE("0x%x, %f, %p\n", chanmask, speedofsound, handle);
 #ifdef HAVE_F3DAUDIOINITIALIZE8
-    return F3DAudioInitialize8(chanmask, speedofsound, handle);
+    return pF3DAudioInitialize8(chanmask, speedofsound, handle);
 #else
-    F3DAudioInitialize(chanmask, speedofsound, handle);
+    pF3DAudioInitialize(chanmask, speedofsound, handle);
     return S_OK;
 #endif
 }
@@ -72,7 +77,7 @@ void CDECL LEGACY_X3DAudioInitialize(UINT32 chanmask, float speedofsound,
 #endif
 {
     TRACE("0x%x, %f, %p\n", chanmask, speedofsound, handle);
-    F3DAudioInitialize(chanmask, speedofsound, handle);
+    pF3DAudioInitialize(chanmask, speedofsound, handle);
 }
 #endif /* X3DAUDIO1_VER */
 
@@ -88,7 +93,7 @@ void CDECL X3DAudioCalculate(const X3DAUDIO_HANDLE handle,
 #endif
 {
     TRACE("%p, %p, %p, 0x%x, %p\n", handle, listener, emitter, flags, out);
-    F3DAudioCalculate(
+    pF3DAudioCalculate(
         handle,
         (const F3DAUDIO_LISTENER*) listener,
         (const F3DAUDIO_EMITTER*) emitter,

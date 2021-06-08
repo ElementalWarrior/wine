@@ -2,12 +2,13 @@ MODULE    = xactengine3_6.dll
 IMPORTS   = ole32 uuid
 EXTRADEFS = -DXACT3_VER=0x0306
 PARENTSRC = ../xaudio2_7
-EXTRALIBS = $(FAUDIO_LIBS)
+EXTRALIBS = $(DL_LIBS)
 EXTRAINCL = $(FAUDIO_CFLAGS)
 
 EXTRADLLFLAGS = $(XAUDIO_NATIVE_SWITCH)
 
 C_SRCS = \
+	faudio.c \
 	xact_dll.c
 
 IDL_SRCS = xact_classes.idl

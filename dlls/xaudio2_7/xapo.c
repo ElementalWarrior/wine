@@ -306,7 +306,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
 {
 #ifndef XAPOFX1_VER
     if(IsEqualGUID(clsid, &CLSID_AudioVolumeMeter27))
-        return FAudioCreateVolumeMeterWithCustomAllocatorEXT(
+        return pFAudioCreateVolumeMeterWithCustomAllocatorEXT(
             fapo,
             0,
             XAudio_Internal_Malloc,
@@ -315,7 +315,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
         );
 #if XAUDIO2_VER >= 9 && HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
     if(IsEqualGUID(clsid, &CLSID_AudioReverb27))
-        return FAudioCreateReverb9WithCustomAllocatorEXT(
+        return pFAudioCreateReverb9WithCustomAllocatorEXT(
             fapo,
             0,
             XAudio_Internal_Malloc,
@@ -324,7 +324,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
         );
 #else
     if(IsEqualGUID(clsid, &CLSID_AudioReverb27))
-        return FAudioCreateReverbWithCustomAllocatorEXT(
+        return pFAudioCreateReverbWithCustomAllocatorEXT(
             fapo,
             0,
             XAudio_Internal_Malloc,
@@ -338,7 +338,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
             IsEqualGUID(clsid, &CLSID_FXEQ) ||
             IsEqualGUID(clsid, &CLSID_FXEcho) ||
             IsEqualGUID(clsid, &CLSID_FXMasteringLimiter))
-        return FAPOFX_CreateFXWithCustomAllocatorEXT(
+        return pFAPOFX_CreateFXWithCustomAllocatorEXT(
             (const FAudioGUID*) clsid,
             fapo,
             NULL,

@@ -23,10 +23,159 @@
 #include "xaudio2.h"
 #include "xapo.h"
 
-#include <FAudio.h>
+#include <F3DAudio.h>
+#include <FACT.h>
+#include <FACT3D.h>
 #include <FAPO.h>
+#include <FAPOBase.h>
+#include <FAPOFX.h>
+#include <FAudio.h>
+#include <FAudioFX.h>
 
 #include <pthread.h>
+
+#define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
+MAKE_FUNCPTR(FAudio_AddRef)
+#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
+MAKE_FUNCPTR(FAudio_CommitOperationSet)
+#else
+MAKE_FUNCPTR(FAudio_CommitChanges)
+#endif
+MAKE_FUNCPTR(FAudio_CreateMasteringVoice)
+MAKE_FUNCPTR(FAudio_CreateMasteringVoice8)
+MAKE_FUNCPTR(FAudio_CreateSourceVoice)
+MAKE_FUNCPTR(FAudio_CreateSubmixVoice)
+MAKE_FUNCPTR(FAudio_GetDeviceCount)
+MAKE_FUNCPTR(FAudio_GetDeviceDetails)
+MAKE_FUNCPTR(FAudio_GetPerformanceData)
+MAKE_FUNCPTR(FAudio_Initialize)
+MAKE_FUNCPTR(FAudio_RegisterForCallbacks)
+MAKE_FUNCPTR(FAudio_Release)
+MAKE_FUNCPTR(FAudio_SetDebugConfiguration)
+MAKE_FUNCPTR(FAudio_StartEngine)
+MAKE_FUNCPTR(FAudio_StopEngine)
+
+MAKE_FUNCPTR(FAudioVoice_DestroyVoice)
+MAKE_FUNCPTR(FAudioVoice_DisableEffect)
+MAKE_FUNCPTR(FAudioVoice_EnableEffect)
+MAKE_FUNCPTR(FAudioVoice_GetChannelVolumes)
+MAKE_FUNCPTR(FAudioVoice_GetEffectParameters)
+MAKE_FUNCPTR(FAudioVoice_GetEffectState)
+MAKE_FUNCPTR(FAudioVoice_GetFilterParameters)
+MAKE_FUNCPTR(FAudioVoice_GetOutputFilterParameters)
+MAKE_FUNCPTR(FAudioVoice_GetOutputMatrix)
+MAKE_FUNCPTR(FAudioVoice_GetVoiceDetails)
+MAKE_FUNCPTR(FAudioVoice_GetVolume)
+MAKE_FUNCPTR(FAudioVoice_SetChannelVolumes)
+MAKE_FUNCPTR(FAudioVoice_SetEffectChain)
+MAKE_FUNCPTR(FAudioVoice_SetEffectParameters)
+MAKE_FUNCPTR(FAudioVoice_SetFilterParameters)
+MAKE_FUNCPTR(FAudioVoice_SetOutputFilterParameters)
+MAKE_FUNCPTR(FAudioVoice_SetOutputMatrix)
+MAKE_FUNCPTR(FAudioVoice_SetOutputVoices)
+MAKE_FUNCPTR(FAudioVoice_SetVolume)
+
+MAKE_FUNCPTR(FAudioSourceVoice_Discontinuity)
+MAKE_FUNCPTR(FAudioSourceVoice_ExitLoop)
+MAKE_FUNCPTR(FAudioSourceVoice_FlushSourceBuffers)
+MAKE_FUNCPTR(FAudioSourceVoice_GetFrequencyRatio)
+MAKE_FUNCPTR(FAudioSourceVoice_GetState)
+MAKE_FUNCPTR(FAudioSourceVoice_SetFrequencyRatio)
+MAKE_FUNCPTR(FAudioSourceVoice_SetSourceSampleRate)
+MAKE_FUNCPTR(FAudioSourceVoice_Start)
+MAKE_FUNCPTR(FAudioSourceVoice_Stop)
+MAKE_FUNCPTR(FAudioSourceVoice_SubmitSourceBuffer)
+
+MAKE_FUNCPTR(FAudioMasteringVoice_GetChannelMask)
+
+MAKE_FUNCPTR(FAudioCOMConstructWithCustomAllocatorEXT)
+MAKE_FUNCPTR(FAudioCreate)
+MAKE_FUNCPTR(FAudioCreateReverb)
+MAKE_FUNCPTR(FAudioCreateReverb9)
+#ifdef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
+MAKE_FUNCPTR(FAudioCreateReverb9WithCustomAllocatorEXT)
+#endif
+MAKE_FUNCPTR(FAudioCreateReverbWithCustomAllocatorEXT)
+MAKE_FUNCPTR(FAudioCreateVolumeMeter)
+MAKE_FUNCPTR(FAudioCreateVolumeMeterWithCustomAllocatorEXT)
+#ifdef HAVE_FAUDIOLINKEDVERSION
+MAKE_FUNCPTR(FAudioLinkedVersion)
+#endif
+
+MAKE_FUNCPTR(F3DAudioCalculate)
+MAKE_FUNCPTR(F3DAudioInitialize)
+#ifdef HAVE_F3DAUDIOINITIALIZE8
+MAKE_FUNCPTR(F3DAudioInitialize8)
+#endif
+
+MAKE_FUNCPTR(FACTAudioEngine_AddRef)
+MAKE_FUNCPTR(FACTAudioEngine_CreateInMemoryWaveBank)
+MAKE_FUNCPTR(FACTAudioEngine_CreateSoundBank)
+MAKE_FUNCPTR(FACTAudioEngine_CreateStreamingWaveBank)
+MAKE_FUNCPTR(FACTAudioEngine_DoWork)
+MAKE_FUNCPTR(FACTAudioEngine_GetCategory)
+MAKE_FUNCPTR(FACTAudioEngine_GetFinalMixFormat)
+MAKE_FUNCPTR(FACTAudioEngine_GetGlobalVariable)
+MAKE_FUNCPTR(FACTAudioEngine_GetGlobalVariableIndex)
+MAKE_FUNCPTR(FACTAudioEngine_GetRendererCount)
+MAKE_FUNCPTR(FACTAudioEngine_GetRendererDetails)
+MAKE_FUNCPTR(FACTAudioEngine_Initialize)
+MAKE_FUNCPTR(FACTAudioEngine_Pause)
+MAKE_FUNCPTR(FACTAudioEngine_PrepareWave)
+MAKE_FUNCPTR(FACTAudioEngine_RegisterNotification)
+MAKE_FUNCPTR(FACTAudioEngine_Release)
+MAKE_FUNCPTR(FACTAudioEngine_SetGlobalVariable)
+MAKE_FUNCPTR(FACTAudioEngine_SetVolume)
+MAKE_FUNCPTR(FACTAudioEngine_ShutDown)
+MAKE_FUNCPTR(FACTAudioEngine_Stop)
+MAKE_FUNCPTR(FACTAudioEngine_UnRegisterNotification)
+
+MAKE_FUNCPTR(FACTCreateEngineWithCustomAllocatorEXT)
+
+MAKE_FUNCPTR(FACTCue_Destroy)
+MAKE_FUNCPTR(FACTCue_GetProperties)
+MAKE_FUNCPTR(FACTCue_GetState)
+MAKE_FUNCPTR(FACTCue_GetVariable)
+MAKE_FUNCPTR(FACTCue_GetVariableIndex)
+MAKE_FUNCPTR(FACTCue_Pause)
+MAKE_FUNCPTR(FACTCue_Play)
+MAKE_FUNCPTR(FACTCue_SetMatrixCoefficients)
+MAKE_FUNCPTR(FACTCue_SetVariable)
+MAKE_FUNCPTR(FACTCue_Stop)
+
+MAKE_FUNCPTR(FACTSoundBank_Destroy)
+MAKE_FUNCPTR(FACTSoundBank_GetCueIndex)
+MAKE_FUNCPTR(FACTSoundBank_GetCueProperties)
+MAKE_FUNCPTR(FACTSoundBank_GetNumCues)
+MAKE_FUNCPTR(FACTSoundBank_GetState)
+MAKE_FUNCPTR(FACTSoundBank_Play)
+MAKE_FUNCPTR(FACTSoundBank_Prepare)
+MAKE_FUNCPTR(FACTSoundBank_Stop)
+
+MAKE_FUNCPTR(FACTWave_Destroy)
+MAKE_FUNCPTR(FACTWave_GetProperties)
+MAKE_FUNCPTR(FACTWave_GetState)
+MAKE_FUNCPTR(FACTWave_Pause)
+MAKE_FUNCPTR(FACTWave_Play)
+MAKE_FUNCPTR(FACTWave_SetMatrixCoefficients)
+MAKE_FUNCPTR(FACTWave_SetPitch)
+MAKE_FUNCPTR(FACTWave_SetVolume)
+MAKE_FUNCPTR(FACTWave_Stop)
+
+MAKE_FUNCPTR(FACTWaveBank_Destroy)
+MAKE_FUNCPTR(FACTWaveBank_GetNumWaves)
+MAKE_FUNCPTR(FACTWaveBank_GetState)
+MAKE_FUNCPTR(FACTWaveBank_GetWaveIndex)
+MAKE_FUNCPTR(FACTWaveBank_GetWaveProperties)
+MAKE_FUNCPTR(FACTWaveBank_Play)
+MAKE_FUNCPTR(FACTWaveBank_Prepare)
+MAKE_FUNCPTR(FACTWaveBank_Stop)
+
+MAKE_FUNCPTR(FAPOFX_CreateFXWithCustomAllocatorEXT)
+#undef MAKE_FUNCPTR
+
+extern BOOL load_faudio(void) DECLSPEC_HIDDEN;
+extern void unload_faudio(void) DECLSPEC_HIDDEN;
 
 #if XAUDIO2_VER == 0
 #define COMPAT_E_INVALID_CALL E_INVALIDARG

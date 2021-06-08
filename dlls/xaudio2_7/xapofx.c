@@ -45,6 +45,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinstDLL );
+        if (!load_faudio()) return FALSE;
+        break;
+    case DLL_PROCESS_DETACH:
+        unload_faudio();
         break;
     }
     return TRUE;

@@ -93,9 +93,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
     case DLL_PROCESS_ATTACH:
         instance = hinstDLL;
         DisableThreadLibraryCalls( hinstDLL );
+        if (!load_faudio()) return FALSE;
 #ifdef HAVE_FAUDIOLINKEDVERSION
-        TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
+        TRACE("Using FAudio version %d\n", pFAudioLinkedVersion() );
 #endif
+        break;
+    case DLL_PROCESS_DETACH:
+        unload_faudio();
         break;
     }
     return TRUE;
@@ -517,7 +521,7 @@ static const FAudioEngineCallback FAudioEngineCallback_Vtbl = {
 
 static inline void destroy_voice(XA2VoiceImpl *This)
 {
-    FAudioVoice_DestroyVoice(This->faudio_voice);
+    pFAudioVoice_DestroyVoice(This->faudio_voice);
     free_effect_chain(This->effect_chain);
     This->effect_chain = NULL;
     This->in_use = FALSE;
@@ -535,7 +539,7 @@ static void WINAPI XA2SRC_GetVoiceDetails(IXAudio2SourceVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %p\n", This, pVoiceDetails);
-    FAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
+    pFAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
 }
 
 static HRESULT WINAPI XA2SRC_SetOutputVoices(IXAudio2SourceVoice *iface,
@@ -549,7 +553,7 @@ static HRESULT WINAPI XA2SRC_SetOutputVoices(IXAudio2SourceVoice *iface,
 
     faudio_sends = wrap_voice_sends(pSendList);
 
-    hr = FAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
+    hr = pFAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
 
     free_voice_sends(faudio_sends);
 
@@ -567,7 +571,7 @@ static HRESULT WINAPI XA2SRC_SetEffectChain(IXAudio2SourceVoice *iface,
     free_effect_chain(This->effect_chain);
     This->effect_chain = wrap_effect_chain(pEffectChain);
 
-    hr = FAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
+    hr = pFAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
 
     return hr;
 }
@@ -577,7 +581,7 @@ static HRESULT WINAPI XA2SRC_EnableEffect(IXAudio2SourceVoice *iface, UINT32 Eff
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static HRESULT WINAPI XA2SRC_DisableEffect(IXAudio2SourceVoice *iface, UINT32 EffectIndex,
@@ -585,7 +589,7 @@ static HRESULT WINAPI XA2SRC_DisableEffect(IXAudio2SourceVoice *iface, UINT32 Ef
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static void WINAPI XA2SRC_GetEffectState(IXAudio2SourceVoice *iface, UINT32 EffectIndex,
@@ -593,7 +597,7 @@ static void WINAPI XA2SRC_GetEffectState(IXAudio2SourceVoice *iface, UINT32 Effe
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, %p\n", This, EffectIndex, pEnabled);
-    FAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
+    pFAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
 }
 
 static HRESULT WINAPI XA2SRC_SetEffectParameters(IXAudio2SourceVoice *iface,
@@ -603,7 +607,7 @@ static HRESULT WINAPI XA2SRC_SetEffectParameters(IXAudio2SourceVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, %p, 0x%x, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize, OperationSet);
-    return FAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize, OperationSet);
 }
 
@@ -613,7 +617,7 @@ static HRESULT WINAPI XA2SRC_GetEffectParameters(IXAudio2SourceVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize);
-    return FAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize);
 }
 
@@ -622,7 +626,7 @@ static HRESULT WINAPI XA2SRC_SetFilterParameters(IXAudio2SourceVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %p, 0x%x\n", This, pParameters, OperationSet);
-    return FAudioVoice_SetFilterParameters(This->faudio_voice,
+    return pFAudioVoice_SetFilterParameters(This->faudio_voice,
             (const FAudioFilterParameters *)pParameters, OperationSet);
 }
 
@@ -631,7 +635,7 @@ static void WINAPI XA2SRC_GetFilterParameters(IXAudio2SourceVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %p\n", This, pParameters);
-    FAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
+    pFAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
 }
 
 static HRESULT WINAPI XA2SRC_SetOutputFilterParameters(IXAudio2SourceVoice *iface,
@@ -643,7 +647,7 @@ static HRESULT WINAPI XA2SRC_SetOutputFilterParameters(IXAudio2SourceVoice *ifac
 
     TRACE("%p, %p, %p, 0x%x\n", This, pDestinationVoice, pParameters, OperationSet);
 
-    return FAudioVoice_SetOutputFilterParameters(This->faudio_voice,
+    return pFAudioVoice_SetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (const FAudioFilterParameters *)pParameters, OperationSet);
 }
 
@@ -656,7 +660,7 @@ static void WINAPI XA2SRC_GetOutputFilterParameters(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %p, %p\n", This, pDestinationVoice, pParameters);
 
-    FAudioVoice_GetOutputFilterParameters(This->faudio_voice,
+    pFAudioVoice_GetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (FAudioFilterParameters *)pParameters);
 }
 
@@ -665,14 +669,14 @@ static HRESULT WINAPI XA2SRC_SetVolume(IXAudio2SourceVoice *iface, float Volume,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %f, 0x%x\n", This, Volume, OperationSet);
-    return FAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
+    return pFAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
 }
 
 static void WINAPI XA2SRC_GetVolume(IXAudio2SourceVoice *iface, float *pVolume)
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %p\n", This, pVolume);
-    return FAudioVoice_GetVolume(This->faudio_voice, pVolume);
+    return pFAudioVoice_GetVolume(This->faudio_voice, pVolume);
 }
 
 static HRESULT WINAPI XA2SRC_SetChannelVolumes(IXAudio2SourceVoice *iface, UINT32 Channels,
@@ -680,7 +684,7 @@ static HRESULT WINAPI XA2SRC_SetChannelVolumes(IXAudio2SourceVoice *iface, UINT3
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, Channels, pVolumes, OperationSet);
-    return FAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
             pVolumes, OperationSet);
 }
 
@@ -689,7 +693,7 @@ static void WINAPI XA2SRC_GetChannelVolumes(IXAudio2SourceVoice *iface, UINT32 C
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SourceVoice(iface);
     TRACE("%p, %u, %p\n", This, Channels, pVolumes);
-    return FAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
             pVolumes);
 }
 
@@ -704,7 +708,7 @@ static HRESULT WINAPI XA2SRC_SetOutputMatrix(IXAudio2SourceVoice *iface,
     TRACE("%p, %p, %u, %u, %p, 0x%x\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 
-    return FAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    return pFAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 }
 
@@ -718,7 +722,7 @@ static void WINAPI XA2SRC_GetOutputMatrix(IXAudio2SourceVoice *iface,
     TRACE("%p, %p, %u, %u, %p\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix);
 
-    FAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    pFAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix);
 }
 
@@ -742,7 +746,7 @@ static HRESULT WINAPI XA2SRC_Start(IXAudio2SourceVoice *iface, UINT32 Flags,
 
     TRACE("%p, 0x%x, 0x%x\n", This, Flags, OperationSet);
 
-    return FAudioSourceVoice_Start(This->faudio_voice, Flags, OperationSet);
+    return pFAudioSourceVoice_Start(This->faudio_voice, Flags, OperationSet);
 }
 
 static HRESULT WINAPI XA2SRC_Stop(IXAudio2SourceVoice *iface, UINT32 Flags,
@@ -752,7 +756,7 @@ static HRESULT WINAPI XA2SRC_Stop(IXAudio2SourceVoice *iface, UINT32 Flags,
 
     TRACE("%p, 0x%x, 0x%x\n", This, Flags, OperationSet);
 
-    return FAudioSourceVoice_Stop(This->faudio_voice, Flags, OperationSet);
+    return pFAudioSourceVoice_Stop(This->faudio_voice, Flags, OperationSet);
 }
 
 static HRESULT WINAPI XA2SRC_SubmitSourceBuffer(IXAudio2SourceVoice *iface,
@@ -762,7 +766,7 @@ static HRESULT WINAPI XA2SRC_SubmitSourceBuffer(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %p, %p\n", This, pBuffer, pBufferWMA);
 
-    return FAudioSourceVoice_SubmitSourceBuffer(This->faudio_voice, (FAudioBuffer*)pBuffer, (FAudioBufferWMA*)pBufferWMA);
+    return pFAudioSourceVoice_SubmitSourceBuffer(This->faudio_voice, (FAudioBuffer*)pBuffer, (FAudioBufferWMA*)pBufferWMA);
 }
 
 static HRESULT WINAPI XA2SRC_FlushSourceBuffers(IXAudio2SourceVoice *iface)
@@ -771,7 +775,7 @@ static HRESULT WINAPI XA2SRC_FlushSourceBuffers(IXAudio2SourceVoice *iface)
 
     TRACE("%p\n", This);
 
-    return FAudioSourceVoice_FlushSourceBuffers(This->faudio_voice);
+    return pFAudioSourceVoice_FlushSourceBuffers(This->faudio_voice);
 }
 
 static HRESULT WINAPI XA2SRC_Discontinuity(IXAudio2SourceVoice *iface)
@@ -780,7 +784,7 @@ static HRESULT WINAPI XA2SRC_Discontinuity(IXAudio2SourceVoice *iface)
 
     TRACE("%p\n", This);
 
-    return FAudioSourceVoice_Discontinuity(This->faudio_voice);
+    return pFAudioSourceVoice_Discontinuity(This->faudio_voice);
 }
 
 static HRESULT WINAPI XA2SRC_ExitLoop(IXAudio2SourceVoice *iface, UINT32 OperationSet)
@@ -789,7 +793,7 @@ static HRESULT WINAPI XA2SRC_ExitLoop(IXAudio2SourceVoice *iface, UINT32 Operati
 
     TRACE("%p, 0x%x\n", This, OperationSet);
 
-    return FAudioSourceVoice_ExitLoop(This->faudio_voice, OperationSet);
+    return pFAudioSourceVoice_ExitLoop(This->faudio_voice, OperationSet);
 }
 
 static void WINAPI XA2SRC_GetState(IXAudio2SourceVoice *iface,
@@ -799,7 +803,7 @@ static void WINAPI XA2SRC_GetState(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %p, 0x%x\n", This, pVoiceState, Flags);
 
-    return FAudioSourceVoice_GetState(This->faudio_voice, (FAudioVoiceState*)pVoiceState, Flags);
+    return pFAudioSourceVoice_GetState(This->faudio_voice, (FAudioVoiceState*)pVoiceState, Flags);
 }
 
 static HRESULT WINAPI XA2SRC_SetFrequencyRatio(IXAudio2SourceVoice *iface,
@@ -809,7 +813,7 @@ static HRESULT WINAPI XA2SRC_SetFrequencyRatio(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %f, 0x%x\n", This, Ratio, OperationSet);
 
-    return FAudioSourceVoice_SetFrequencyRatio(This->faudio_voice, Ratio, OperationSet);
+    return pFAudioSourceVoice_SetFrequencyRatio(This->faudio_voice, Ratio, OperationSet);
 }
 
 static void WINAPI XA2SRC_GetFrequencyRatio(IXAudio2SourceVoice *iface, float *pRatio)
@@ -818,7 +822,7 @@ static void WINAPI XA2SRC_GetFrequencyRatio(IXAudio2SourceVoice *iface, float *p
 
     TRACE("%p, %p\n", This, pRatio);
 
-    return FAudioSourceVoice_GetFrequencyRatio(This->faudio_voice, pRatio);
+    return pFAudioSourceVoice_GetFrequencyRatio(This->faudio_voice, pRatio);
 }
 
 static HRESULT WINAPI XA2SRC_SetSourceSampleRate(
@@ -829,7 +833,7 @@ static HRESULT WINAPI XA2SRC_SetSourceSampleRate(
 
     TRACE("%p, %u\n", This, NewSourceSampleRate);
 
-    return FAudioSourceVoice_SetSourceSampleRate(This->faudio_voice, NewSourceSampleRate);
+    return pFAudioSourceVoice_SetSourceSampleRate(This->faudio_voice, NewSourceSampleRate);
 }
 
 static const IXAudio2SourceVoiceVtbl XAudio2SourceVoice_Vtbl = {
@@ -876,7 +880,7 @@ static void WINAPI XA2SUB_GetVoiceDetails(IXAudio2SubmixVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %p\n", This, pVoiceDetails);
-    FAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
+    pFAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
 }
 
 static HRESULT WINAPI XA2SUB_SetOutputVoices(IXAudio2SubmixVoice *iface,
@@ -890,7 +894,7 @@ static HRESULT WINAPI XA2SUB_SetOutputVoices(IXAudio2SubmixVoice *iface,
 
     faudio_sends = wrap_voice_sends(pSendList);
 
-    hr = FAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
+    hr = pFAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
 
     free_voice_sends(faudio_sends);
 
@@ -908,7 +912,7 @@ static HRESULT WINAPI XA2SUB_SetEffectChain(IXAudio2SubmixVoice *iface,
     free_effect_chain(This->effect_chain);
     This->effect_chain = wrap_effect_chain(pEffectChain);
 
-    hr = FAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
+    hr = pFAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
 
     return hr;
 }
@@ -918,7 +922,7 @@ static HRESULT WINAPI XA2SUB_EnableEffect(IXAudio2SubmixVoice *iface, UINT32 Eff
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static HRESULT WINAPI XA2SUB_DisableEffect(IXAudio2SubmixVoice *iface, UINT32 EffectIndex,
@@ -926,7 +930,7 @@ static HRESULT WINAPI XA2SUB_DisableEffect(IXAudio2SubmixVoice *iface, UINT32 Ef
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static void WINAPI XA2SUB_GetEffectState(IXAudio2SubmixVoice *iface, UINT32 EffectIndex,
@@ -934,7 +938,7 @@ static void WINAPI XA2SUB_GetEffectState(IXAudio2SubmixVoice *iface, UINT32 Effe
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, %p\n", This, EffectIndex, pEnabled);
-    FAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
+    pFAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
 }
 
 static HRESULT WINAPI XA2SUB_SetEffectParameters(IXAudio2SubmixVoice *iface,
@@ -944,7 +948,7 @@ static HRESULT WINAPI XA2SUB_SetEffectParameters(IXAudio2SubmixVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, %p, 0x%x, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize, OperationSet);
-    return FAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize, OperationSet);
 }
 
@@ -954,7 +958,7 @@ static HRESULT WINAPI XA2SUB_GetEffectParameters(IXAudio2SubmixVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize);
-    return FAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize);
 }
 
@@ -963,7 +967,7 @@ static HRESULT WINAPI XA2SUB_SetFilterParameters(IXAudio2SubmixVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %p, 0x%x\n", This, pParameters, OperationSet);
-    return FAudioVoice_SetFilterParameters(This->faudio_voice, (const FAudioFilterParameters *)pParameters,
+    return pFAudioVoice_SetFilterParameters(This->faudio_voice, (const FAudioFilterParameters *)pParameters,
             OperationSet);
 }
 
@@ -972,7 +976,7 @@ static void WINAPI XA2SUB_GetFilterParameters(IXAudio2SubmixVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %p\n", This, pParameters);
-    FAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
+    pFAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
 }
 
 static HRESULT WINAPI XA2SUB_SetOutputFilterParameters(IXAudio2SubmixVoice *iface,
@@ -984,7 +988,7 @@ static HRESULT WINAPI XA2SUB_SetOutputFilterParameters(IXAudio2SubmixVoice *ifac
 
     TRACE("%p, %p, %p, 0x%x\n", This, pDestinationVoice, pParameters, OperationSet);
 
-    return FAudioVoice_SetOutputFilterParameters(This->faudio_voice,
+    return pFAudioVoice_SetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (const FAudioFilterParameters *)pParameters, OperationSet);
 }
 
@@ -997,7 +1001,7 @@ static void WINAPI XA2SUB_GetOutputFilterParameters(IXAudio2SubmixVoice *iface,
 
     TRACE("%p, %p, %p\n", This, pDestinationVoice, pParameters);
 
-    FAudioVoice_GetOutputFilterParameters(This->faudio_voice,
+    pFAudioVoice_GetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (FAudioFilterParameters *)pParameters);
 }
 
@@ -1006,14 +1010,14 @@ static HRESULT WINAPI XA2SUB_SetVolume(IXAudio2SubmixVoice *iface, float Volume,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %f, 0x%x\n", This, Volume, OperationSet);
-    return FAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
+    return pFAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
 }
 
 static void WINAPI XA2SUB_GetVolume(IXAudio2SubmixVoice *iface, float *pVolume)
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %p\n", This, pVolume);
-    return FAudioVoice_GetVolume(This->faudio_voice, pVolume);
+    return pFAudioVoice_GetVolume(This->faudio_voice, pVolume);
 }
 
 static HRESULT WINAPI XA2SUB_SetChannelVolumes(IXAudio2SubmixVoice *iface, UINT32 Channels,
@@ -1021,7 +1025,7 @@ static HRESULT WINAPI XA2SUB_SetChannelVolumes(IXAudio2SubmixVoice *iface, UINT3
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, Channels, pVolumes, OperationSet);
-    return FAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
             pVolumes, OperationSet);
 }
 
@@ -1030,7 +1034,7 @@ static void WINAPI XA2SUB_GetChannelVolumes(IXAudio2SubmixVoice *iface, UINT32 C
 {
     XA2VoiceImpl *This = impl_from_IXAudio2SubmixVoice(iface);
     TRACE("%p, %u, %p\n", This, Channels, pVolumes);
-    return FAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
             pVolumes);
 }
 
@@ -1045,7 +1049,7 @@ static HRESULT WINAPI XA2SUB_SetOutputMatrix(IXAudio2SubmixVoice *iface,
     TRACE("%p, %p, %u, %u, %p, 0x%x\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 
-    return FAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    return pFAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 }
 
@@ -1059,7 +1063,7 @@ static void WINAPI XA2SUB_GetOutputMatrix(IXAudio2SubmixVoice *iface,
     TRACE("%p, %p, %u, %u, %p\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix);
 
-    FAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    pFAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix);
 }
 
@@ -1110,7 +1114,7 @@ static void WINAPI XA2M_GetVoiceDetails(IXAudio2MasteringVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %p\n", This, pVoiceDetails);
-    FAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
+    pFAudioVoice_GetVoiceDetails(This->faudio_voice, (FAudioVoiceDetails *)pVoiceDetails);
 }
 
 static HRESULT WINAPI XA2M_SetOutputVoices(IXAudio2MasteringVoice *iface,
@@ -1124,7 +1128,7 @@ static HRESULT WINAPI XA2M_SetOutputVoices(IXAudio2MasteringVoice *iface,
 
     faudio_sends = wrap_voice_sends(pSendList);
 
-    hr = FAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
+    hr = pFAudioVoice_SetOutputVoices(This->faudio_voice, faudio_sends);
 
     free_voice_sends(faudio_sends);
 
@@ -1142,7 +1146,7 @@ static HRESULT WINAPI XA2M_SetEffectChain(IXAudio2MasteringVoice *iface,
     free_effect_chain(This->effect_chain);
     This->effect_chain = wrap_effect_chain(pEffectChain);
 
-    hr = FAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
+    hr = pFAudioVoice_SetEffectChain(This->faudio_voice, This->effect_chain);
 
     return hr;
 }
@@ -1152,7 +1156,7 @@ static HRESULT WINAPI XA2M_EnableEffect(IXAudio2MasteringVoice *iface, UINT32 Ef
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_EnableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static HRESULT WINAPI XA2M_DisableEffect(IXAudio2MasteringVoice *iface, UINT32 EffectIndex,
@@ -1160,7 +1164,7 @@ static HRESULT WINAPI XA2M_DisableEffect(IXAudio2MasteringVoice *iface, UINT32 E
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, 0x%x\n", This, EffectIndex, OperationSet);
-    return FAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
+    return pFAudioVoice_DisableEffect(This->faudio_voice, EffectIndex, OperationSet);
 }
 
 static void WINAPI XA2M_GetEffectState(IXAudio2MasteringVoice *iface, UINT32 EffectIndex,
@@ -1168,7 +1172,7 @@ static void WINAPI XA2M_GetEffectState(IXAudio2MasteringVoice *iface, UINT32 Eff
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, %p\n", This, EffectIndex, pEnabled);
-    FAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
+    pFAudioVoice_GetEffectState(This->faudio_voice, EffectIndex, (int32_t*)pEnabled);
 }
 
 static HRESULT WINAPI XA2M_SetEffectParameters(IXAudio2MasteringVoice *iface,
@@ -1178,7 +1182,7 @@ static HRESULT WINAPI XA2M_SetEffectParameters(IXAudio2MasteringVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, %p, 0x%x, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize, OperationSet);
-    return FAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_SetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize, OperationSet);
 }
 
@@ -1188,7 +1192,7 @@ static HRESULT WINAPI XA2M_GetEffectParameters(IXAudio2MasteringVoice *iface,
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, EffectIndex, pParameters,
             ParametersByteSize);
-    return FAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
+    return pFAudioVoice_GetEffectParameters(This->faudio_voice, EffectIndex,
             pParameters, ParametersByteSize);
 }
 
@@ -1197,7 +1201,7 @@ static HRESULT WINAPI XA2M_SetFilterParameters(IXAudio2MasteringVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %p, 0x%x\n", This, pParameters, OperationSet);
-    return FAudioVoice_SetFilterParameters(This->faudio_voice, (const FAudioFilterParameters *)pParameters,
+    return pFAudioVoice_SetFilterParameters(This->faudio_voice, (const FAudioFilterParameters *)pParameters,
             OperationSet);
 }
 
@@ -1206,7 +1210,7 @@ static void WINAPI XA2M_GetFilterParameters(IXAudio2MasteringVoice *iface,
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %p\n", This, pParameters);
-    FAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
+    pFAudioVoice_GetFilterParameters(This->faudio_voice, (FAudioFilterParameters *)pParameters);
 }
 
 static HRESULT WINAPI XA2M_SetOutputFilterParameters(IXAudio2MasteringVoice *iface,
@@ -1218,7 +1222,7 @@ static HRESULT WINAPI XA2M_SetOutputFilterParameters(IXAudio2MasteringVoice *ifa
 
     TRACE("%p, %p, %p, 0x%x\n", This, pDestinationVoice, pParameters, OperationSet);
 
-    return FAudioVoice_SetOutputFilterParameters(This->faudio_voice,
+    return pFAudioVoice_SetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (const FAudioFilterParameters *)pParameters, OperationSet);
 }
 
@@ -1231,7 +1235,7 @@ static void WINAPI XA2M_GetOutputFilterParameters(IXAudio2MasteringVoice *iface,
 
     TRACE("%p, %p, %p\n", This, pDestinationVoice, pParameters);
 
-    FAudioVoice_GetOutputFilterParameters(This->faudio_voice,
+    pFAudioVoice_GetOutputFilterParameters(This->faudio_voice,
             dst ? dst->faudio_voice : NULL, (FAudioFilterParameters *)pParameters);
 }
 
@@ -1240,14 +1244,14 @@ static HRESULT WINAPI XA2M_SetVolume(IXAudio2MasteringVoice *iface, float Volume
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %f, 0x%x\n", This, Volume, OperationSet);
-    return FAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
+    return pFAudioVoice_SetVolume(This->faudio_voice, Volume, OperationSet);
 }
 
 static void WINAPI XA2M_GetVolume(IXAudio2MasteringVoice *iface, float *pVolume)
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %p\n", This, pVolume);
-    return FAudioVoice_GetVolume(This->faudio_voice, pVolume);
+    return pFAudioVoice_GetVolume(This->faudio_voice, pVolume);
 }
 
 static HRESULT WINAPI XA2M_SetChannelVolumes(IXAudio2MasteringVoice *iface, UINT32 Channels,
@@ -1255,7 +1259,7 @@ static HRESULT WINAPI XA2M_SetChannelVolumes(IXAudio2MasteringVoice *iface, UINT
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, %p, 0x%x\n", This, Channels, pVolumes, OperationSet);
-    return FAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_SetChannelVolumes(This->faudio_voice, Channels,
             pVolumes, OperationSet);
 }
 
@@ -1264,7 +1268,7 @@ static void WINAPI XA2M_GetChannelVolumes(IXAudio2MasteringVoice *iface, UINT32 
 {
     XA2VoiceImpl *This = impl_from_IXAudio2MasteringVoice(iface);
     TRACE("%p, %u, %p\n", This, Channels, pVolumes);
-    return FAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
+    return pFAudioVoice_GetChannelVolumes(This->faudio_voice, Channels,
             pVolumes);
 }
 
@@ -1279,7 +1283,7 @@ static HRESULT WINAPI XA2M_SetOutputMatrix(IXAudio2MasteringVoice *iface,
     TRACE("%p, %p, %u, %u, %p, 0x%x\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 
-    return FAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    return pFAudioVoice_SetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix, OperationSet);
 }
 
@@ -1293,7 +1297,7 @@ static void WINAPI XA2M_GetOutputMatrix(IXAudio2MasteringVoice *iface,
     TRACE("%p, %p, %u, %u, %p\n", This, pDestinationVoice,
             SourceChannels, DestinationChannels, pLevelMatrix);
 
-    FAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
+    pFAudioVoice_GetOutputMatrix(This->faudio_voice, dst ? dst->faudio_voice : NULL,
             SourceChannels, DestinationChannels, pLevelMatrix);
 }
 
@@ -1318,7 +1322,7 @@ static void WINAPI XA2M_GetChannelMask(IXAudio2MasteringVoice *iface,
 
     TRACE("%p, %p\n", This, pChannelMask);
 
-    FAudioMasteringVoice_GetChannelMask(This->faudio_voice, pChannelMask);
+    pFAudioMasteringVoice_GetChannelMask(This->faudio_voice, pChannelMask);
 }
 
 static const struct IXAudio2MasteringVoiceVtbl XAudio2MasteringVoice_Vtbl = {
@@ -1429,7 +1433,7 @@ static HRESULT WINAPI IXAudio2Impl_QueryInterface(IXAudio2 *iface, REFIID riid,
 static ULONG WINAPI IXAudio2Impl_AddRef(IXAudio2 *iface)
 {
     IXAudio2Impl *This = impl_from_IXAudio2(iface);
-    ULONG ref = FAudio_AddRef(This->faudio);
+    ULONG ref = pFAudio_AddRef(This->faudio);
     TRACE("(%p)->(): Refcount now %u\n", This, ref);
     return ref;
 }
@@ -1437,7 +1441,7 @@ static ULONG WINAPI IXAudio2Impl_AddRef(IXAudio2 *iface)
 static ULONG WINAPI IXAudio2Impl_Release(IXAudio2 *iface)
 {
     IXAudio2Impl *This = impl_from_IXAudio2(iface);
-    ULONG ref = FAudio_Release(This->faudio);
+    ULONG ref = pFAudio_Release(This->faudio);
 
     TRACE("(%p)->(): Refcount now %u\n", This, ref);
 
@@ -1587,7 +1591,7 @@ static HRESULT WINAPI IXAudio2Impl_CreateSourceVoice(IXAudio2 *iface,
     src->effect_chain = wrap_effect_chain(pEffectChain);
     faudio_sends = wrap_voice_sends(pSendList);
 
-    hr = FAudio_CreateSourceVoice(This->faudio, &src->faudio_voice,
+    hr = pFAudio_CreateSourceVoice(This->faudio, &src->faudio_voice,
             (FAudioWaveFormatEx*)pSourceFormat, flags, maxFrequencyRatio,
             &src->FAudioVoiceCallback_vtbl, faudio_sends,
             src->effect_chain);
@@ -1650,7 +1654,7 @@ static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface,
     sub->effect_chain = wrap_effect_chain(pEffectChain);
     faudio_sends = wrap_voice_sends(pSendList);
 
-    hr = FAudio_CreateSubmixVoice(This->faudio, &sub->faudio_voice, inputChannels,
+    hr = pFAudio_CreateSubmixVoice(This->faudio, &sub->faudio_voice, inputChannels,
             inputSampleRate, flags, processingStage, faudio_sends,
             sub->effect_chain);
     free_voice_sends(faudio_sends);
@@ -1789,9 +1793,9 @@ static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
 
     start_engine_thread(&This->mst);
 
-    FAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
+    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
 
-    FAudio_CreateMasteringVoice8(This->faudio, &This->mst.faudio_voice, inputChannels,
+    pFAudio_CreateMasteringVoice8(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, NULL /* TODO: (uint16_t*)deviceId */,
             This->mst.effect_chain, (FAudioStreamCategory)streamCategory);
 
@@ -1810,7 +1814,7 @@ static HRESULT WINAPI IXAudio2Impl_StartEngine(IXAudio2 *iface)
 
     start_engine_thread(&This->mst);
 
-    return FAudio_StartEngine(This->faudio);
+    return pFAudio_StartEngine(This->faudio);
 }
 
 static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
@@ -1819,7 +1823,7 @@ static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
 
     TRACE("(%p)->()\n", This);
 
-    FAudio_StopEngine(This->faudio);
+    pFAudio_StopEngine(This->faudio);
 
     stop_engine_thread(&This->mst);
 }
@@ -1832,9 +1836,9 @@ static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
     TRACE("(%p)->(0x%x)\n", This, operationSet);
 
 #ifdef HAVE_FAUDIO_COMMITOPERATIONSET
-    return FAudio_CommitOperationSet(This->faudio, operationSet);
+    return pFAudio_CommitOperationSet(This->faudio, operationSet);
 #else
-    return FAudio_CommitChanges(This->faudio);
+    return pFAudio_CommitChanges(This->faudio);
 #endif
 }
 
@@ -1845,7 +1849,7 @@ static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface,
 
     TRACE("(%p)->(%p)\n", This, pPerfData);
 
-    FAudio_GetPerformanceData(This->faudio, (FAudioPerformanceData *)pPerfData);
+    pFAudio_GetPerformanceData(This->faudio, (FAudioPerformanceData *)pPerfData);
 }
 
 static void WINAPI IXAudio2Impl_SetDebugConfiguration(IXAudio2 *iface,
@@ -1856,7 +1860,7 @@ static void WINAPI IXAudio2Impl_SetDebugConfiguration(IXAudio2 *iface,
 
     TRACE("(%p)->(%p, %p)\n", This, pDebugConfiguration, pReserved);
 
-    FAudio_SetDebugConfiguration(This->faudio, (FAudioDebugConfiguration *)pDebugConfiguration, pReserved);
+    pFAudio_SetDebugConfiguration(This->faudio, (FAudioDebugConfiguration *)pDebugConfiguration, pReserved);
 }
 
 /* XAudio2 2.8 */
@@ -1996,7 +2000,7 @@ static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *p
         HeapFree(GetProcessHeap(), 0, str);
     }
 
-    FAudioCOMConstructWithCustomAllocatorEXT(
+    pFAudioCOMConstructWithCustomAllocatorEXT(
         &object->faudio,
         XAUDIO2_VER,
         XAudio_Internal_Malloc,
@@ -2004,7 +2008,7 @@ static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *p
         XAudio_Internal_Realloc
     );
 
-    FAudio_RegisterForCallbacks(object->faudio, &object->FAudioEngineCallback_vtbl);
+    pFAudio_RegisterForCallbacks(object->faudio, &object->FAudioEngineCallback_vtbl);
 
     hr = IXAudio2_QueryInterface(&object->IXAudio2_iface, riid, ppobj);
     IXAudio2_Release(&object->IXAudio2_iface);
@@ -2051,7 +2055,7 @@ HRESULT xaudio2_initialize(IXAudio2Impl *This, UINT32 flags, XAUDIO2_PROCESSOR p
 {
     if(proc != XAUDIO2_ANY_PROCESSOR)
         WARN("Processor affinity not implemented in FAudio\n");
-    return FAudio_Initialize(This->faudio, flags, FAUDIO_DEFAULT_PROCESSOR);
+    return pFAudio_Initialize(This->faudio, flags, FAUDIO_DEFAULT_PROCESSOR);
 }
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
