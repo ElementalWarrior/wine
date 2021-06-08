@@ -1,7 +1,7 @@
 MODULE    = xactengine3_4.dll
 IMPORTS   = ole32 uuid
 EXTRADEFS = -DXACT3_VER=0x0304
-PARENTSRC = ../xactengine3_7
+PARENTSRC = ../xaudio2_7
 EXTRALIBS = $(FAUDIO_LIBS)
 EXTRAINCL = $(FAUDIO_CFLAGS)
 
