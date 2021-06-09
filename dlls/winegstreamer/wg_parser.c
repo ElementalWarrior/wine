@@ -1818,8 +1818,7 @@ static void *push_data(void *arg)
                 last_buffer = NULL;
             }
 
-            gst_pad_push_event(parser->my_src, gst_event_new_seek(1.0f,
-                GST_FORMAT_BYTES, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_NONE, 0, GST_SEEK_TYPE_NONE, 0));
+            gst_pad_push_event(parser->my_src, gst_event_new_flush_start());
 
             continue;
         }
