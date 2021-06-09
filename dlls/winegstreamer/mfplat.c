@@ -662,6 +662,8 @@ static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *
             IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, format->u.audio.channels);
             if (format->u.audio.channel_mask)
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, format->u.audio.channel_mask);
+            if (format->u.audio.depth)
+                IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, format->u.audio.depth);
 
             return type;
         }
@@ -762,6 +764,7 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_forma
     format->u.audio.channels = channels;
     format->u.audio.channel_mask = channel_mask;
     format->u.audio.rate = rate;
+    format->u.audio.depth = depth;
 
     if (IsEqualGUID(&subtype, &MFAudioFormat_AAC))
     {

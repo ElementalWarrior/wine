@@ -134,6 +134,7 @@ struct wg_format
             uint32_t channels;
             uint32_t channel_mask; /* In WinMM format. */
             uint32_t rate;
+            uint32_t depth;
 
             union
             {
