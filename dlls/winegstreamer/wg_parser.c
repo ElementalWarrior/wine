@@ -1791,7 +1791,7 @@ static void *push_data(void *arg)
         gst_pad_push_event(parser->my_src, gst_event_new_caps(wg_format_to_caps(&parser->input_format)));
 
     segment = gst_segment_new();
-    gst_segment_init(segment, GST_FORMAT_BYTES);
+    gst_segment_init(segment, GST_FORMAT_TIME);
     gst_pad_push_event(parser->my_src, gst_event_new_segment(segment));
 
     assert(!(GST_PAD_IS_FLUSHING(parser->my_src)));
@@ -1851,7 +1851,7 @@ static void *push_data(void *arg)
             pthread_mutex_unlock(&parser->mutex);
 
             segment = gst_segment_new();
-            gst_segment_init(segment, GST_FORMAT_BYTES);
+            gst_segment_init(segment, GST_FORMAT_TIME);
             gst_pad_push_event(parser->my_src, gst_event_new_segment(segment));
 
             continue;
