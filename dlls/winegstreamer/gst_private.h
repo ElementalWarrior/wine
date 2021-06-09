@@ -136,6 +136,7 @@ struct wg_format
             uint32_t rate;
             uint32_t depth;
             uint32_t bitrate;
+            uint32_t block_alignment;
 
             union
             {

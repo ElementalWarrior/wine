@@ -666,6 +666,8 @@ static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, format->u.audio.depth);
             if (format->u.audio.bitrate)
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, format->u.audio.bitrate);
+            if (format->u.audio.block_alignment)
+                IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, format->u.audio.block_alignment);
 
             return type;
         }
@@ -723,7 +725,7 @@ IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format)
 
 static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_format *format)
 {
-    UINT32 rate, channels, channel_mask, depth, bitrate;
+    UINT32 rate, channels, channel_mask, depth, bitrate, block_alignment;
     unsigned int i;
     GUID subtype;
 
@@ -768,12 +770,19 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_forma
         bitrate = 0;
     }
 
+    if (FAILED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &block_alignment)))
+    {
+        FIXME("Block alignment is not set.\n");
+        block_alignment = 0;
+    }
+
     format->major_type = WG_MAJOR_TYPE_AUDIO;
     format->u.audio.channels = channels;
     format->u.audio.channel_mask = channel_mask;
     format->u.audio.rate = rate;
     format->u.audio.depth = depth;
     format->u.audio.bitrate = bitrate;
+    format->u.audio.block_alignment = block_alignment;
 
     if (IsEqualGUID(&subtype, &MFAudioFormat_AAC))
     {
