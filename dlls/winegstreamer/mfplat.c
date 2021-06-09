@@ -664,6 +664,8 @@ static IMFMediaType *mf_media_type_from_wg_format_audio(const struct wg_format *
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_CHANNEL_MASK, format->u.audio.channel_mask);
             if (format->u.audio.depth)
                 IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, format->u.audio.depth);
+            if (format->u.audio.bitrate)
+                IMFMediaType_SetUINT32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, format->u.audio.bitrate);
 
             return type;
         }
@@ -721,7 +723,7 @@ IMFMediaType *mf_media_type_from_wg_format(const struct wg_format *format)
 
 static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_format *format)
 {
-    UINT32 rate, channels, channel_mask, depth;
+    UINT32 rate, channels, channel_mask, depth, bitrate;
     unsigned int i;
     GUID subtype;
 
@@ -760,11 +762,18 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_forma
         }
     }
 
+    if (FAILED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bitrate)))
+    {
+        FIXME("Average bitrate is not set.\n");
+        bitrate = 0;
+    }
+
     format->major_type = WG_MAJOR_TYPE_AUDIO;
     format->u.audio.channels = channels;
     format->u.audio.channel_mask = channel_mask;
     format->u.audio.rate = rate;
     format->u.audio.depth = depth;
+    format->u.audio.bitrate = bitrate;
 
     if (IsEqualGUID(&subtype, &MFAudioFormat_AAC))
     {

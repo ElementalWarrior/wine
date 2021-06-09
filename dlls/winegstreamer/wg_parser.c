@@ -407,6 +407,8 @@ static void wg_set_caps_from_wg_format(GstCaps *caps, const struct wg_format *fo
                 gst_caps_set_simple(caps, "channel-mask", G_TYPE_INT, format->u.audio.channel_mask, NULL);
             if (format->u.audio.depth)
                 gst_caps_set_simple(caps, "depth", G_TYPE_INT, format->u.audio.depth, NULL);
+            if (format->u.audio.bitrate)
+                gst_caps_set_simple(caps, "bitrate", G_TYPE_INT, format->u.audio.bitrate, NULL);
         }
         default:
             break;
