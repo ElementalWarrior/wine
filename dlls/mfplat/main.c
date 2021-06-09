@@ -1960,6 +1960,7 @@ const char *debugstr_mf_guid(const GUID *guid)
         X(MFAudioFormat_WMAudioV9),
         X(MFAudioFormat_AMR_WB),
         X(MFAudioFormat_WMAudio_Lossless),
+        X(MFAudioFormat_XMAudio2),
         X(MFAudioFormat_AMR_WP),
         X(MFAudioFormat_WMASPDIF),
         X(MFVideoFormat_DV25),

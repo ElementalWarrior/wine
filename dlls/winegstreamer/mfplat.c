@@ -836,6 +836,54 @@ static void mf_media_type_to_wg_format_audio(IMFMediaType *type, struct wg_forma
         return;
     }
 
+    if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8))
+    {
+        format->u.audio.format = WG_AUDIO_FORMAT_WMA;
+        format->u.audio.compressed.wma.version = 2;
+    }
+    else if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9))
+    {
+        format->u.audio.format = WG_AUDIO_FORMAT_WMA;
+        format->u.audio.compressed.wma.version = 3;
+    }
+    else if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless))
+    {
+        format->u.audio.format = WG_AUDIO_FORMAT_WMA;
+        format->u.audio.compressed.wma.version = 4;
+    }
+    else if (IsEqualGUID(&subtype, &MFAudioFormat_XMAudio2))
+    {
+        format->u.audio.format = WG_AUDIO_FORMAT_XMA;
+        format->u.audio.compressed.wma.version = 2;
+    }
+
+    if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8) ||
+        IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
+        IsEqualGUID(&subtype, &MFAudioFormat_WMAudio_Lossless) ||
+        IsEqualGUID(&subtype, &MFAudioFormat_XMAudio2))
+    {
+        unsigned char *user_data;
+        UINT32 user_data_size;
+
+        if (SUCCEEDED(IMFMediaType_GetBlobSize(type, &MF_MT_USER_DATA, &user_data_size)))
+        {
+            user_data = malloc(user_data_size);
+            if (SUCCEEDED(IMFMediaType_GetBlob(type, &MF_MT_USER_DATA, user_data, user_data_size, NULL)))
+            {
+                if (user_data_size > sizeof(format->u.audio.compressed.wma.audio_specifc_config))
+                {
+                    FIXME("Encountered Audio-Specific-Config with a size larger than we support %u\n", user_data_size);
+                    user_data_size = sizeof(format->u.audio.compressed.wma.audio_specifc_config);
+                }
+
+                memcpy(format->u.audio.compressed.wma.audio_specifc_config, user_data, user_data_size);
+                format->u.audio.compressed.wma.asp_size = user_data_size;
+            }
+            free(user_data);
+        }
+        return;
+    }
+
     for (i = 0; i < ARRAY_SIZE(audio_formats); ++i)
     {
         if (IsEqualGUID(&subtype, audio_formats[i].subtype) && depth == audio_formats[i].depth)

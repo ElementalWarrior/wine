@@ -261,6 +261,55 @@ static void wg_format_from_caps_audio_mpeg(struct wg_format *format, const GstCa
     format->u.audio.rate = rate;
 }
 
+static void wg_format_from_caps_audio_wma(struct wg_format *format, const GstCaps *caps)
+{
+    const GstStructure *structure = gst_caps_get_structure(caps, 0);
+    gint version, channels, rate, depth, bitrate, block_alignment;
+
+    if (gst_structure_get_int(structure, "wmaversion", &version))
+        format->u.audio.format = WG_AUDIO_FORMAT_WMA;
+    else if (gst_structure_get_int(structure, "xmaversion", &version))
+        format->u.audio.format = WG_AUDIO_FORMAT_XMA;
+    else
+    {
+        GST_WARNING("Missing \"wmaversion\" / \"xmaversion\" value.");
+        return;
+    }
+    if (!gst_structure_get_int(structure, "channels", &channels))
+    {
+        GST_WARNING("Missing \"channels\" value.");
+        return;
+    }
+    if (!gst_structure_get_int(structure, "rate", &rate))
+    {
+        GST_WARNING("Missing \"rate\" value.");
+        return;
+    }
+    if (!gst_structure_get_int(structure, "depth", &depth))
+    {
+        GST_WARNING("Missing \"depth\" value.");
+        return;
+    }
+    if (!gst_structure_get_int(structure, "bitrate", &bitrate))
+    {
+        GST_WARNING("Missing \"bitrate\" value.");
+        return;
+    }
+    if (!gst_structure_get_int(structure, "block_align", &block_alignment))
+    {
+        GST_WARNING("Missing \"block_align\" value.");
+        return;
+    }
+
+    format->major_type = WG_MAJOR_TYPE_AUDIO;
+    format->u.audio.compressed.wma.version = version;
+    format->u.audio.channels = channels;
+    format->u.audio.rate = rate;
+    format->u.audio.depth = depth;
+    format->u.audio.bitrate = bitrate;
+    format->u.audio.block_alignment = block_alignment;
+}
+
 static void wg_format_from_caps_video_cinepak(struct wg_format *format, const GstCaps *caps)
 {
     const GstStructure *structure = gst_caps_get_structure(caps, 0);
@@ -314,6 +363,10 @@ static void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
     else if (!strcmp(name, "audio/mpeg"))
     {
         wg_format_from_caps_audio_mpeg(format, caps);
+    }
+    else if (!strcmp(name, "audio/x-wma") || !strcmp(name, "audio/x-xma"))
+    {
+        wg_format_from_caps_audio_wma(format, caps);
     }
     else if (!strcmp(name, "video/x-cinepak"))
     {
@@ -470,6 +523,21 @@ static GstCaps *wg_format_to_caps_audio(const struct wg_format *format)
 
         audio_specific_config = gst_buffer_new_allocate(NULL, format->u.audio.compressed.aac.asp_size, NULL);
         gst_buffer_fill(audio_specific_config, 0, format->u.audio.compressed.aac.audio_specifc_config, format->u.audio.compressed.aac.asp_size);
+        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, audio_specific_config, NULL);
+        gst_buffer_unref(audio_specific_config);
+
+        return caps;
+    }
+
+    if (format->u.audio.format == WG_AUDIO_FORMAT_WMA || format->u.audio.format == WG_AUDIO_FORMAT_XMA)
+    {
+        GstBuffer *audio_specific_config;
+        GstCaps *caps = gst_caps_new_empty_simple(format->u.audio.format == WG_AUDIO_FORMAT_WMA ? "audio/x-wma" : "audio/x-xma");
+        wg_set_caps_from_wg_format(caps, format);
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, format->u.audio.compressed.wma.version, NULL);
+
+        audio_specific_config = gst_buffer_new_allocate(NULL, format->u.audio.compressed.wma.asp_size, NULL);
+        gst_buffer_fill(audio_specific_config, 0, format->u.audio.compressed.wma.audio_specifc_config, format->u.audio.compressed.wma.asp_size);
         gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, audio_specific_config, NULL);
         gst_buffer_unref(audio_specific_config);
 

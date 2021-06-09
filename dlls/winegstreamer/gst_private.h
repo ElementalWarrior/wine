@@ -129,6 +129,8 @@ struct wg_format
                 WG_AUDIO_FORMAT_MPEG1_LAYER3,
 
                 WG_AUDIO_FORMAT_AAC,
+                WG_AUDIO_FORMAT_WMA,
+                WG_AUDIO_FORMAT_XMA,
             } format;
 
             uint32_t channels;
@@ -150,6 +152,12 @@ struct wg_format
                     unsigned char audio_specifc_config[2];
                     uint32_t asp_size;
                 } aac;
+                struct
+                {
+                    uint32_t version;
+                    unsigned char audio_specifc_config[64];
+                    uint32_t asp_size;
+                } wma;
             } compressed;
         } audio;
     } u;
