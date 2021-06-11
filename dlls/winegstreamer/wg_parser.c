@@ -2261,6 +2261,11 @@ static void CDECL wg_parser_disconnect(struct wg_parser *parser)
         parser->streams[i]->flushing = true;
         pthread_cond_signal(&parser->streams[i]->event_empty_cond);
     }
+    if (!parser->no_more_pads)
+    {
+        parser->no_more_pads = true;
+        pthread_cond_signal(&parser->init_cond);
+    }
     pthread_mutex_unlock(&parser->mutex);
 
     gst_element_set_state(parser->container, GST_STATE_NULL);

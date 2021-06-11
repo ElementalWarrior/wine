@@ -169,8 +169,7 @@ static ULONG WINAPI mf_decoder_Release(IMFTransform *iface)
             decoder->output_type = NULL;
         }
 
-        if (decoder->wg_stream)
-            unix_funcs->wg_parser_disconnect(decoder->wg_parser);
+        unix_funcs->wg_parser_disconnect(decoder->wg_parser);
 
         WakeAllConditionVariable(&decoder->help_cv);
         WakeAllConditionVariable(&decoder->event_cv);
