@@ -109,7 +109,7 @@ static XAUDIO2_SEND_DESCRIPTOR *convert_send_descriptors23(const XAUDIO23_VOICE_
     XAUDIO2_SEND_DESCRIPTOR *ret;
     DWORD i;
 
-    ret = HeapAlloc(GetProcessHeap(), 0, sends->OutputCount * sizeof(XAUDIO2_SEND_DESCRIPTOR));
+    ret = malloc(sends->OutputCount * sizeof(XAUDIO2_SEND_DESCRIPTOR));
 
     for(i = 0; i < sends->OutputCount; ++i){
         ret[i].Flags = 0;
@@ -158,7 +158,7 @@ static HRESULT WINAPI XA20SRC_SetOutputVoices(IXAudio20SourceVoice *iface,
     hr = IXAudio2SourceVoice_SetOutputVoices(&This->IXAudio2SourceVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -415,7 +415,7 @@ static HRESULT WINAPI XA23SRC_SetOutputVoices(IXAudio23SourceVoice *iface,
     hr = IXAudio2SourceVoice_SetOutputVoices(&This->IXAudio2SourceVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -935,7 +935,7 @@ static HRESULT WINAPI XA20SUB_SetOutputVoices(IXAudio20SubmixVoice *iface,
     hr = IXAudio2SubmixVoice_SetOutputVoices(&This->IXAudio2SubmixVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -1120,7 +1120,7 @@ static HRESULT WINAPI XA23SUB_SetOutputVoices(IXAudio23SubmixVoice *iface,
     hr = IXAudio2SubmixVoice_SetOutputVoices(&This->IXAudio2SubmixVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -1495,7 +1495,7 @@ static HRESULT WINAPI XA20M_SetOutputVoices(IXAudio20MasteringVoice *iface,
     hr = IXAudio2MasteringVoice_SetOutputVoices(&This->IXAudio2MasteringVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -1680,7 +1680,7 @@ static HRESULT WINAPI XA23M_SetOutputVoices(IXAudio23MasteringVoice *iface,
     hr = IXAudio2MasteringVoice_SetOutputVoices(&This->IXAudio2MasteringVoice_iface, psends);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2101,7 +2101,7 @@ static HRESULT WINAPI XA20_CreateSourceVoice(IXAudio20 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2127,7 +2127,7 @@ static HRESULT WINAPI XA20_CreateSubmixVoice(IXAudio20 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2326,7 +2326,7 @@ static HRESULT WINAPI XA22_CreateSourceVoice(IXAudio22 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2352,7 +2352,7 @@ static HRESULT WINAPI XA22_CreateSubmixVoice(IXAudio22 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2550,7 +2550,7 @@ static HRESULT WINAPI XA23_CreateSourceVoice(IXAudio23 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }
@@ -2576,7 +2576,7 @@ static HRESULT WINAPI XA23_CreateSubmixVoice(IXAudio23 *iface,
             pEffectChain);
 
     if(pSendList)
-        HeapFree(GetProcessHeap(), 0, sends.pSends);
+        free(sends.pSends);
 
     return hr;
 }

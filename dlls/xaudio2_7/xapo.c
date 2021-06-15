@@ -28,7 +28,6 @@
 #include "xapofx.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
@@ -82,7 +81,7 @@ static ULONG WINAPI XAPOFX_Release(IXAPO *iface)
     TRACE("(%p)->(): Refcount now %u\n", This, ref);
 
     if(!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
 
     return ref;
 }
@@ -292,7 +291,7 @@ static ULONG WINAPI xapocf_Release(IClassFactory *iface)
     ULONG ref = InterlockedDecrement(&This->ref);
     TRACE("(%p)->(): Refcount now %u\n", This, ref);
     if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     return ref;
 }
 
@@ -360,14 +359,14 @@ static HRESULT WINAPI xapocf_CreateInstance(IClassFactory *iface, IUnknown *pOut
     if(pOuter)
         return CLASS_E_NOAGGREGATION;
 
-    object = heap_alloc(sizeof(*object));
+    object = malloc(sizeof(*object));
     object->IXAPO_iface.lpVtbl = &XAPOFX_Vtbl;
     object->IXAPOParameters_iface.lpVtbl = &XAPOFXParameters_Vtbl;
 
     hr = get_fapo_from_clsid(This->class, &object->fapo);
 
     if(FAILED(hr)){
-        HeapFree(GetProcessHeap(), 0, object);
+        free(object);
         return hr;
     }
 
@@ -396,12 +395,12 @@ static const IClassFactoryVtbl xapo_Vtbl =
 HRESULT make_xapo_factory(REFCLSID clsid, REFIID riid, void **ppv)
 {
     HRESULT hr;
-    struct xapo_cf *ret = HeapAlloc(GetProcessHeap(), 0, sizeof(struct xapo_cf));
+    struct xapo_cf *ret = malloc(sizeof(struct xapo_cf));
     ret->IClassFactory_iface.lpVtbl = &xapo_Vtbl;
     ret->class = clsid;
     ret->ref = 0;
     hr = IClassFactory_QueryInterface(&ret->IClassFactory_iface, riid, ppv);
     if(FAILED(hr))
-        HeapFree(GetProcessHeap(), 0, ret);
+        free(ret);
     return hr;
 }

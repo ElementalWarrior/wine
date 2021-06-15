@@ -78,7 +78,7 @@ static HRESULT WINAPI IXACT3CueImpl_Destroy(IXACT3Cue *iface)
     ret = pFACTCue_Destroy(This->fact_cue);
     if (ret != 0)
         WARN("pFACTCue_Destroy returned %d\n", ret);
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This);
     return S_OK;
 }
 
@@ -247,7 +247,7 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
         return E_FAIL;
     }
 
-    cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
+    cue = calloc(1, sizeof(*cue));
     if (!cue)
     {
         pFACTCue_Destroy(fcue);
@@ -289,7 +289,7 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Play(IXACT3SoundBank *iface,
         if(FAILED(hr))
             return hr;
 
-        cue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cue));
+        cue = calloc(1, sizeof(*cue));
         if (!cue)
         {
             pFACTCue_Destroy(fcue);
@@ -323,7 +323,7 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Destroy(IXACT3SoundBank *iface)
     TRACE("(%p)\n", This);
 
     hr = pFACTSoundBank_Destroy(This->fact_soundbank);
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This);
     return hr;
 }
 
@@ -368,7 +368,7 @@ static HRESULT WINAPI IXACT3WaveImpl_Destroy(IXACT3Wave *iface)
     TRACE("(%p)\n", This);
 
     hr = pFACTWave_Destroy(This->fact_wave);
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This);
     return hr;
 }
 
@@ -482,7 +482,7 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Destroy(IXACT3WaveBank *iface)
     TRACE("(%p)\n", This);
 
     hr = pFACTWaveBank_Destroy(This->fact_wavebank);
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This);
     return hr;
 }
 
@@ -537,7 +537,7 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Prepare(IXACT3WaveBank *iface,
         return E_FAIL;
     }
 
-    wave = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wave));
+    wave = calloc(1, sizeof(*wave));
     if (!wave)
     {
         pFACTWave_Destroy(fwave);
@@ -579,7 +579,7 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Play(IXACT3WaveBank *iface,
         if(FAILED(hr))
             return hr;
 
-        wave = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wave));
+        wave = calloc(1, sizeof(*wave));
         if (!wave)
         {
             pFACTWave_Destroy(fwave);
@@ -710,7 +710,7 @@ static ULONG WINAPI IXACT3EngineImpl_Release(IXACT3Engine *iface)
     TRACE("(%p)->(): Refcount now %u\n", This, ref);
 
     if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     return ref;
 }
 
@@ -864,7 +864,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
         return E_FAIL;
     }
 
-    sb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*sb));
+    sb = calloc(1, sizeof(*sb));
     if (!sb)
     {
         pFACTSoundBank_Destroy(fsb);
@@ -901,7 +901,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
         return E_FAIL;
     }
 
-    wb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wb));
+    wb = calloc(1, sizeof(*wb));
     if (!wb)
     {
         pFACTWaveBank_Destroy(fwb);
@@ -949,7 +949,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
         return E_FAIL;
     }
 
-    wb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wb));
+    wb = calloc(1, sizeof(*wb));
     if (!wb)
     {
         pFACTWaveBank_Destroy(fwb);
@@ -1008,7 +1008,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
         return E_FAIL;
     }
 
-    wave = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wave));
+    wave = calloc(1, sizeof(*wave));
     if (!wave)
     {
         pFACTWave_Destroy(fwave);
@@ -1287,7 +1287,7 @@ static HRESULT WINAPI XACT3CF_CreateInstance(IClassFactory *iface, IUnknown *pOu
     if(pOuter)
         return CLASS_E_NOAGGREGATION;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    object = calloc(1, sizeof(*object));
     if(!object)
         return E_OUTOFMEMORY;
 
@@ -1303,7 +1303,7 @@ static HRESULT WINAPI XACT3CF_CreateInstance(IClassFactory *iface, IUnknown *pOu
 
     hr = IXACT3Engine_QueryInterface(&object->IXACT3Engine_iface, riid, ppobj);
     if(FAILED(hr)){
-        HeapFree(GetProcessHeap(), 0, object);
+        free(object);
         return hr;
     }
 
