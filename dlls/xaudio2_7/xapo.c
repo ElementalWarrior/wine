@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -31,10 +29,6 @@
 
 #include "wine/debug.h"
 #include "wine/heap.h"
-
-#include <FAPO.h>
-#include <FAPOFX.h>
-#include <FAudioFX.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
@@ -313,7 +307,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
             XAudio_Internal_Free,
             XAudio_Internal_Realloc
         );
-#if XAUDIO2_VER >= 9 && HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
+#if XAUDIO2_VER >= 9
     if(IsEqualGUID(clsid, &CLSID_AudioReverb27))
         return pFAudioCreateReverb9WithCustomAllocatorEXT(
             fapo,

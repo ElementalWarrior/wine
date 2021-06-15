@@ -16,10 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <dlfcn.h>
 
 #define NONAMELESSUNION
 #define COBJMACROS
@@ -31,11 +28,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
 #define MAKE_FUNCPTR(f) typeof(f) * p##f = NULL;
 MAKE_FUNCPTR(FAudio_AddRef)
-#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
 MAKE_FUNCPTR(FAudio_CommitOperationSet)
-#else
-MAKE_FUNCPTR(FAudio_CommitChanges)
-#endif
 MAKE_FUNCPTR(FAudio_CreateMasteringVoice)
 MAKE_FUNCPTR(FAudio_CreateMasteringVoice8)
 MAKE_FUNCPTR(FAudio_CreateSourceVoice)
@@ -87,21 +80,15 @@ MAKE_FUNCPTR(FAudioCOMConstructWithCustomAllocatorEXT)
 MAKE_FUNCPTR(FAudioCreate)
 MAKE_FUNCPTR(FAudioCreateReverb)
 MAKE_FUNCPTR(FAudioCreateReverb9)
-#ifdef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
 MAKE_FUNCPTR(FAudioCreateReverb9WithCustomAllocatorEXT)
-#endif
 MAKE_FUNCPTR(FAudioCreateReverbWithCustomAllocatorEXT)
 MAKE_FUNCPTR(FAudioCreateVolumeMeter)
 MAKE_FUNCPTR(FAudioCreateVolumeMeterWithCustomAllocatorEXT)
-#ifdef HAVE_FAUDIOLINKEDVERSION
 MAKE_FUNCPTR(FAudioLinkedVersion)
-#endif
 
 MAKE_FUNCPTR(F3DAudioCalculate)
 MAKE_FUNCPTR(F3DAudioInitialize)
-#ifdef HAVE_F3DAUDIOINITIALIZE8
 MAKE_FUNCPTR(F3DAudioInitialize8)
-#endif
 
 MAKE_FUNCPTR(FACTAudioEngine_AddRef)
 MAKE_FUNCPTR(FACTAudioEngine_CreateInMemoryWaveBank)
@@ -169,31 +156,26 @@ MAKE_FUNCPTR(FACTWaveBank_Stop)
 MAKE_FUNCPTR(FAPOFX_CreateFXWithCustomAllocatorEXT)
 #undef MAKE_FUNCPTR
 
-#ifdef SONAME_LIBFAUDIO
+static HMODULE faudio;
 
 BOOL load_faudio(void)
 {
-    void *faudio;
-
-    if (!(faudio = dlopen( SONAME_LIBFAUDIO, RTLD_NOW )))
+    if (!(faudio = LoadLibraryA( "FAudio" )))
     {
-        ERR( "FAudio library %s not found.\n", SONAME_LIBFAUDIO );
+        ERR( "FAudio library not found.\n" );
         return FALSE;
     }
 
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = dlsym( faudio, #f )))                \
-    {                                                 \
-        ERR( "FAudio function %s not found\n", #f );  \
-        dlclose( faudio );                            \
-        return FALSE;                                 \
+    if (!(p##f = (void *)GetProcAddress( faudio, #f )))  \
+    {                                                    \
+        ERR( "FAudio function %s not found\n", #f );     \
+        FreeLibrary( faudio );                           \
+        faudio = NULL;                                   \
+        return FALSE;                                    \
     }
 LOAD_FUNCPTR(FAudio_AddRef)
-#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
 LOAD_FUNCPTR(FAudio_CommitOperationSet)
-#else
-LOAD_FUNCPTR(FAudio_CommitChanges)
-#endif
 LOAD_FUNCPTR(FAudio_CreateMasteringVoice)
 LOAD_FUNCPTR(FAudio_CreateMasteringVoice8)
 LOAD_FUNCPTR(FAudio_CreateSourceVoice)
@@ -245,21 +227,15 @@ LOAD_FUNCPTR(FAudioCOMConstructWithCustomAllocatorEXT)
 LOAD_FUNCPTR(FAudioCreate)
 LOAD_FUNCPTR(FAudioCreateReverb)
 LOAD_FUNCPTR(FAudioCreateReverb9)
-#ifdef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
 LOAD_FUNCPTR(FAudioCreateReverb9WithCustomAllocatorEXT)
-#endif
 LOAD_FUNCPTR(FAudioCreateReverbWithCustomAllocatorEXT)
 LOAD_FUNCPTR(FAudioCreateVolumeMeter)
 LOAD_FUNCPTR(FAudioCreateVolumeMeterWithCustomAllocatorEXT)
-#ifdef HAVE_FAUDIOLINKEDVERSION
 LOAD_FUNCPTR(FAudioLinkedVersion)
-#endif
 
 LOAD_FUNCPTR(F3DAudioCalculate)
 LOAD_FUNCPTR(F3DAudioInitialize)
-#ifdef HAVE_F3DAUDIOINITIALIZE8
 LOAD_FUNCPTR(F3DAudioInitialize8)
-#endif
 
 LOAD_FUNCPTR(FACTAudioEngine_AddRef)
 LOAD_FUNCPTR(FACTAudioEngine_CreateInMemoryWaveBank)
@@ -330,16 +306,7 @@ LOAD_FUNCPTR(FAPOFX_CreateFXWithCustomAllocatorEXT)
     return TRUE;
 }
 
-#else /* SONAME_LIBFAUDIO */
-
-BOOL load_faudio(void)
-{
-    ERR( "FAudio support not compiled in.\n" );
-    return FALSE;
-}
-
-#endif /* SONAME_LIBFAUDIO */
-
 void unload_faudio(void)
 {
+    if (faudio) FreeLibrary(faudio);
 }

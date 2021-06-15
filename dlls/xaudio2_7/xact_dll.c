@@ -16,10 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <FACT.h>
 
 #define NONAMELESSUNION
 #define COBJMACROS
@@ -1340,11 +1337,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
         instance = hinstDLL;
         DisableThreadLibraryCalls( hinstDLL );
         if (!load_faudio()) return FALSE;
-
-#ifdef HAVE_FAUDIOLINKEDVERSION
         TRACE("Using FAudio version %d\n", pFAudioLinkedVersion() );
-#endif
-
         break;
     case DLL_PROCESS_DETACH:
         unload_faudio();

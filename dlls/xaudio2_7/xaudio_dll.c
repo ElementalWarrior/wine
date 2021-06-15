@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -38,7 +36,6 @@
 #include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
@@ -82,8 +79,6 @@ static HINSTANCE instance;
 
 static XA2VoiceImpl *impl_from_IXAudio2Voice(IXAudio2Voice *iface);
 
-static void stop_engine_thread(XA2VoiceImpl *This);
-
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
 {
     TRACE("(%p, %d, %p)\n", hinstDLL, reason, pReserved);
@@ -94,9 +89,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
         instance = hinstDLL;
         DisableThreadLibraryCalls( hinstDLL );
         if (!load_faudio()) return FALSE;
-#ifdef HAVE_FAUDIOLINKEDVERSION
         TRACE("Using FAudio version %d\n", pFAudioLinkedVersion() );
-#endif
         break;
     case DLL_PROCESS_DETACH:
         unload_faudio();
@@ -1310,7 +1303,6 @@ static void WINAPI XA2M_DestroyVoice(IXAudio2MasteringVoice *iface)
     EnterCriticalSection(&This->lock);
 
     destroy_voice(This);
-    stop_engine_thread(This);
 
     LeaveCriticalSection(&This->lock);
 }
@@ -1681,83 +1673,6 @@ static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface,
     return S_OK;
 }
 
-/* called thread created by SDL, must not access Wine TEB */
-void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float *stream, void *user)
-{
-    XA2VoiceImpl *This = user;
-
-    pthread_mutex_lock(&This->engine_lock);
-
-    This->engine_params.proc = proc;
-    This->engine_params.stream = stream;
-    This->engine_params.faudio = faudio;
-
-    pthread_cond_broadcast(&This->engine_ready);
-
-    while(This->engine_params.proc)
-        pthread_cond_wait(&This->engine_done, &This->engine_lock);
-
-    pthread_mutex_unlock(&This->engine_lock);
-}
-
-/* wine thread, OK to access TEB, invoke client code, etc */
-DWORD WINAPI engine_thread(void *user)
-{
-    XA2VoiceImpl *This = user;
-
-    pthread_mutex_lock(&This->engine_lock);
-
-    pthread_cond_broadcast(&This->engine_done);
-
-    do{
-        pthread_cond_wait(&This->engine_ready, &This->engine_lock);
-
-        if(This->engine_params.proc){
-            This->engine_params.proc(This->engine_params.faudio, This->engine_params.stream);
-            This->engine_params.proc = NULL;
-        }
-
-        pthread_cond_broadcast(&This->engine_done);
-    }while(!This->stop_engine_thread);
-
-    pthread_mutex_unlock(&This->engine_lock);
-
-    return 0;
-}
-
-static void start_engine_thread(XA2VoiceImpl *This)
-{
-    pthread_mutex_lock(&This->engine_lock);
-
-    if(!This->engine_thread){
-        This->stop_engine_thread = FALSE;
-
-        This->engine_thread = CreateThread(NULL, 0, &engine_thread, This, 0, NULL);
-
-        pthread_cond_wait(&This->engine_done, &This->engine_lock);
-    }
-
-    pthread_mutex_unlock(&This->engine_lock);
-}
-
-static void stop_engine_thread(XA2VoiceImpl *This)
-{
-    pthread_mutex_lock(&This->engine_lock);
-
-    if(This->engine_thread){
-        This->stop_engine_thread = TRUE;
-
-        pthread_cond_broadcast(&This->engine_ready);
-
-        pthread_cond_wait(&This->engine_done, &This->engine_lock);
-
-        WaitForSingleObject(This->engine_thread, INFINITE);
-        This->engine_thread = NULL;
-    }
-
-    pthread_mutex_unlock(&This->engine_lock);
-}
-
 static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
         IXAudio2MasteringVoice **ppMasteringVoice, UINT32 inputChannels,
         UINT32 inputSampleRate, UINT32 flags, const WCHAR *deviceId,
@@ -1791,10 +1706,6 @@ static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
 
     This->mst.effect_chain = wrap_effect_chain(pEffectChain);
 
-    start_engine_thread(&This->mst);
-
-    pFAudio_SetEngineProcedureEXT(This->faudio, &engine_cb, &This->mst);
-
     pFAudio_CreateMasteringVoice8(This->faudio, &This->mst.faudio_voice, inputChannels,
             inputSampleRate, flags, NULL /* TODO: (uint16_t*)deviceId */,
             This->mst.effect_chain, (FAudioStreamCategory)streamCategory);
@@ -1812,8 +1723,6 @@ static HRESULT WINAPI IXAudio2Impl_StartEngine(IXAudio2 *iface)
 
     TRACE("(%p)->()\n", This);
 
-    start_engine_thread(&This->mst);
-
     return pFAudio_StartEngine(This->faudio);
 }
 
@@ -1824,8 +1733,6 @@ static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
     TRACE("(%p)->()\n", This);
 
     pFAudio_StopEngine(This->faudio);
-
-    stop_engine_thread(&This->mst);
 }
 
 static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
@@ -1835,11 +1742,7 @@ static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
 
     TRACE("(%p)->(0x%x)\n", This, operationSet);
 
-#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
     return pFAudio_CommitOperationSet(This->faudio, operationSet);
-#else
-    return pFAudio_CommitChanges(This->faudio);
-#endif
 }
 
 static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface,
@@ -1975,30 +1878,6 @@ static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *p
 
     InitializeCriticalSection(&object->mst.lock);
     object->mst.lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": XA2MasteringVoice.lock");
-
-    pthread_mutex_init(&object->mst.engine_lock, NULL);
-    pthread_cond_init(&object->mst.engine_done, NULL);
-    pthread_cond_init(&object->mst.engine_ready, NULL);
-
-    /* set PulseAudio's application.name in the environment since FAudio and
-     * SDL provide no way to pass this in */
-    {
-        WCHAR path[MAX_PATH], *name;
-        char *str;
-        DWORD len;
-
-        GetModuleFileNameW(NULL, path, ARRAY_SIZE(path));
-        name = strrchrW(path, '\\');
-        if (!name)
-            name = path;
-        else
-            name++;
-        len = WideCharToMultiByte(CP_UNIXCP, 0, name, -1, NULL, 0, NULL, NULL);
-        str = HeapAlloc(GetProcessHeap(), 0, len);
-        WideCharToMultiByte(CP_UNIXCP, 0, name, -1, str, len, NULL, NULL);
-        setenv("PULSE_PROP_application.name", str, 1);
-        HeapFree(GetProcessHeap(), 0, str);
-    }
 
     pFAudioCOMConstructWithCustomAllocatorEXT(
         &object->faudio,

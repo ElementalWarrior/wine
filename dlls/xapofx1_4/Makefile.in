@@ -2,10 +2,7 @@ EXTRADEFS = -DXAPOFX1_VER=4 -DXAUDIO2_VER=6
 MODULE    = xapofx1_4.dll
 IMPORTS   = ole32
 PARENTSRC = ../xaudio2_7
-EXTRALIBS = $(DL_LIBS)
-EXTRAINCL = $(FAUDIO_CFLAGS)
-
-EXTRADLLFLAGS = -Wb,--prefer-native
+EXTRADLLFLAGS = -mno-cygwin -Wb,--prefer-native
 
 C_SRCS = \
 	faudio.c \

@@ -23,24 +23,18 @@
 #include "xaudio2.h"
 #include "xapo.h"
 
-#include <F3DAudio.h>
-#include <FACT.h>
-#include <FACT3D.h>
-#include <FAPO.h>
-#include <FAPOBase.h>
-#include <FAPOFX.h>
-#include <FAudio.h>
-#include <FAudioFX.h>
-
-#include <pthread.h>
+#include "FAudio/F3DAudio.h"
+#include "FAudio/FACT.h"
+#include "FAudio/FACT3D.h"
+#include "FAudio/FAPO.h"
+#include "FAudio/FAPOBase.h"
+#include "FAudio/FAPOFX.h"
+#include "FAudio/FAudio.h"
+#include "FAudio/FAudioFX.h"
 
 #define MAKE_FUNCPTR(f) extern typeof(f) * p##f DECLSPEC_HIDDEN;
 MAKE_FUNCPTR(FAudio_AddRef)
-#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
 MAKE_FUNCPTR(FAudio_CommitOperationSet)
-#else
-MAKE_FUNCPTR(FAudio_CommitChanges)
-#endif
 MAKE_FUNCPTR(FAudio_CreateMasteringVoice)
 MAKE_FUNCPTR(FAudio_CreateMasteringVoice8)
 MAKE_FUNCPTR(FAudio_CreateSourceVoice)
@@ -92,21 +86,15 @@ MAKE_FUNCPTR(FAudioCOMConstructWithCustomAllocatorEXT)
 MAKE_FUNCPTR(FAudioCreate)
 MAKE_FUNCPTR(FAudioCreateReverb)
 MAKE_FUNCPTR(FAudioCreateReverb9)
-#ifdef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
 MAKE_FUNCPTR(FAudioCreateReverb9WithCustomAllocatorEXT)
-#endif
 MAKE_FUNCPTR(FAudioCreateReverbWithCustomAllocatorEXT)
 MAKE_FUNCPTR(FAudioCreateVolumeMeter)
 MAKE_FUNCPTR(FAudioCreateVolumeMeterWithCustomAllocatorEXT)
-#ifdef HAVE_FAUDIOLINKEDVERSION
 MAKE_FUNCPTR(FAudioLinkedVersion)
-#endif
 
 MAKE_FUNCPTR(F3DAudioCalculate)
 MAKE_FUNCPTR(F3DAudioInitialize)
-#ifdef HAVE_F3DAUDIOINITIALIZE8
 MAKE_FUNCPTR(F3DAudioInitialize8)
-#endif
 
 MAKE_FUNCPTR(FACTAudioEngine_AddRef)
 MAKE_FUNCPTR(FACTAudioEngine_CreateInMemoryWaveBank)
@@ -245,11 +233,6 @@ typedef struct _XA2VoiceImpl {
         FAudio *faudio;
         float *stream;
     } engine_params;
-
-    BOOL stop_engine_thread;
-    HANDLE engine_thread;
-    pthread_cond_t engine_done, engine_ready;
-    pthread_mutex_t engine_lock;
 
     struct list entry;
 } XA2VoiceImpl;

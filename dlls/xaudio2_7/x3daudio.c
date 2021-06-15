@@ -17,8 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -27,8 +25,6 @@
 #include "xaudio_private.h"
 
 #include "wine/debug.h"
-
-#include <F3DAudio.h>
 
 #if XAUDIO2_VER >= 8 || defined X3DAUDIO1_VER
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
@@ -58,12 +54,7 @@ HRESULT CDECL X3DAudioInitialize(UINT32 chanmask, float speedofsound,
         X3DAUDIO_HANDLE handle)
 {
     TRACE("0x%x, %f, %p\n", chanmask, speedofsound, handle);
-#ifdef HAVE_F3DAUDIOINITIALIZE8
     return pF3DAudioInitialize8(chanmask, speedofsound, handle);
-#else
-    pF3DAudioInitialize(chanmask, speedofsound, handle);
-    return S_OK;
-#endif
 }
 #endif /* XAUDIO2_VER >= 8 */
 
