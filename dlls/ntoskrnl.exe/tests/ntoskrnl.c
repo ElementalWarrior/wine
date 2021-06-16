@@ -423,6 +423,7 @@ static void test_basic_ioctl(void)
     ok(!strcmp(buf, teststr), "got '%s'\n", buf);
 
     memset(buf, 0, sizeof(buf));
+    memset(inbuf, 0xcd, sizeof(inbuf));
     res = DeviceIoControl(device, IOCTL_WINETEST_BASIC_IOCTL, inbuf,
             sizeof(inbuf), buf, 10, &written, NULL);
     ok(res, "DeviceIoControl failed: %u\n", GetLastError());
@@ -436,6 +437,7 @@ static void test_mismatched_status_ioctl(void)
     char buf[32];
     BOOL res;
 
+    memset(buf, 0, sizeof(buf));
     res = DeviceIoControl(device, IOCTL_WINETEST_MISMATCHED_STATUS, NULL, 0, buf,
                           sizeof(buf), &written, NULL);
     todo_wine ok(res, "DeviceIoControl failed: %u\n", GetLastError());
@@ -1001,6 +1003,7 @@ static void add_file_to_catalog(HANDLE catalog, const WCHAR *file)
 
     ret = CryptSIPRetrieveSubjectGuidForCatalogFile(file, NULL, &subject_guid);
     todo_wine ok(ret, "Failed to get subject guid, error %u\n", GetLastError());
+    if (!ret) memset(&subject_guid, 0, sizeof(subject_guid));
 
     size = 0;
     subject_info.pgSubjectType = &subject_guid;
