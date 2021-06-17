@@ -789,33 +789,33 @@ static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *
 
     (*out) = 0;
 
-    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength + 1);
+    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength);
 
-    if (!HidD_GetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 ))
+    if (!HidD_GetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength ))
         WARN( "HidD_GetFeature failed, error %u\n", GetLastError() );
 
     if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, &value,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_EMPTY;
 
     if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, &value,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_STOPPED;
 
     if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, &value,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_PAUSED;
 
     if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, &value,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_ACTUATORSON;
 
     if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, &value,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_ACTUATORSOFF;
 
@@ -841,28 +841,28 @@ static HRESULT WINAPI hid_joystick_SendForceFeedbackCommand( IDirectInputDevice8
 
     TRACE( "iface %p, flags %x.\n", iface, flags );
 
-    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength + 1);
+    memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength);
 
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, flags & DISFFC_RESET ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, flags & DISFFC_STOPALL ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, flags & DISFFC_PAUSE ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_CONTINUE, flags & DISFFC_CONTINUE ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, flags & DISFFC_SETACTUATORSON ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
     if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, flags & DISFFC_SETACTUATORSOFF ? 1 : 0,
-                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 )) != HIDP_STATUS_SUCCESS)
+                                      impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
 
-    if (!HidD_SetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength + 1 ))
+    if (!HidD_SetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength ))
         WARN( "HidD_SetFeature failed, error %u\n", GetLastError() );
 
     return DI_OK;
@@ -988,8 +988,28 @@ static HRESULT WINAPI hid_joystick_Poll( IDirectInputDevice8W *iface )
     DIPROPHEADER header = {sizeof(header), sizeof(header), DIPH_DEVICE, 0};
     NTSTATUS status;
     ULONG count, report_len = impl->caps.InputReportByteLength;
+    UINT16 magnitudes[] = {0x7fff, 0x7fff};
 
     TRACE( "iface %p.\n", iface );
+
+#if 1
+    memset( impl->output_report_buf, 0, impl->caps.OutputReportByteLength);
+    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, 1,
+                                      impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+
+    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DURATION, 0xffffffff,
+                                      impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+
+    if ((status = HidP_SetUsageValueArray( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_MAGNITUDE, (char *)&magnitudes, sizeof(magnitudes),
+                                           impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
+        WARN( "HidP_SetUsageValue returned %x\n", status );
+
+    if (HidD_SetOutputReport( impl->device, impl->output_report_buf, impl->caps.OutputReportByteLength ))
+    {
+    }
+#endif
 
 #if 0
     if (!ReadFile( impl->device, impl->input_report_buf, report_len, &count, NULL )) return DIERR_INPUTLOST;
