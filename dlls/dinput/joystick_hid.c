@@ -852,60 +852,60 @@ static HRESULT WINAPI hid_joystick_GetEffectInfo( IDirectInputDevice8W *iface, D
 
     if (IsEqualGUID(guid, &GUID_ConstantForce))
     {
-        usage = HID_USAGE_PID_ET_CONSTANT_FORCE;
+        usage = WINE_HID_USAGE_PID_ET_CONSTANT_FORCE;
         info->dwEffType = DIEFT_CONSTANTFORCE;
     }
 
     if (IsEqualGUID(guid, &GUID_RampForce))
     {
-        usage = HID_USAGE_PID_ET_RAMP;
+        usage = WINE_HID_USAGE_PID_ET_RAMP;
         info->dwEffType = DIEFT_RAMPFORCE;
     }
 
     if (IsEqualGUID(guid, &GUID_Square))
     {
-        usage = HID_USAGE_PID_ET_SQUARE;
+        usage = WINE_HID_USAGE_PID_ET_SQUARE;
         info->dwEffType = DIEFT_PERIODIC;
     }
     if (IsEqualGUID(guid, &GUID_Sine))
     {
-        usage = HID_USAGE_PID_ET_SINE;
+        usage = WINE_HID_USAGE_PID_ET_SINE;
         info->dwEffType = DIEFT_PERIODIC;
     }
     if (IsEqualGUID(guid, &GUID_Triangle))
     {
-        usage = HID_USAGE_PID_ET_TRIANGLE;
+        usage = WINE_HID_USAGE_PID_ET_TRIANGLE;
         info->dwEffType = DIEFT_PERIODIC;
     }
     if (IsEqualGUID(guid, &GUID_SawtoothUp))
     {
-        usage = HID_USAGE_PID_ET_SAWTOOTH_UP;
+        usage = WINE_HID_USAGE_PID_ET_SAWTOOTH_UP;
         info->dwEffType = DIEFT_PERIODIC;
     }
     if (IsEqualGUID(guid, &GUID_SawtoothDown))
     {
-        usage = HID_USAGE_PID_ET_SAWTOOTH_DOWN;
+        usage = WINE_HID_USAGE_PID_ET_SAWTOOTH_DOWN;
         info->dwEffType = DIEFT_PERIODIC;
     }
 
     if (IsEqualGUID(guid, &GUID_Spring))
     {
-        usage = HID_USAGE_PID_ET_SPRING;
+        usage = WINE_HID_USAGE_PID_ET_SPRING;
         info->dwEffType = DIEFT_CONDITION;
     }
     if (IsEqualGUID(guid, &GUID_Damper))
     {
-        usage = HID_USAGE_PID_ET_DAMPER;
+        usage = WINE_HID_USAGE_PID_ET_DAMPER;
         info->dwEffType = DIEFT_CONDITION;
     }
     if (IsEqualGUID(guid, &GUID_Inertia))
     {
-        usage = HID_USAGE_PID_ET_INERTIA;
+        usage = WINE_HID_USAGE_PID_ET_INERTIA;
         info->dwEffType = DIEFT_CONDITION;
     }
     if (IsEqualGUID(guid, &GUID_Friction))
     {
-        usage = HID_USAGE_PID_ET_FRICTION;
+        usage = WINE_HID_USAGE_PID_ET_FRICTION;
         info->dwEffType = DIEFT_CONDITION;
     }
 
@@ -920,8 +920,8 @@ static HRESULT WINAPI hid_joystick_GetEffectInfo( IDirectInputDevice8W *iface, D
     if (i == impl->caps.NumberLinkCollectionNodes) return DIERR_DEVICENOTREG;
     else collection = i;
 
-    /* check for HID_USAGE_PID_OP_EFFECT_START */
-    usage = HID_USAGE_PID_OP_EFFECT_START;
+    /* check for WINE_HID_USAGE_PID_OP_EFFECT_START */
+    usage = WINE_HID_USAGE_PID_OP_EFFECT_START;
     for (i = 0; i < impl->caps.NumberOutputButtonCaps; ++i)
     {
         button = impl->feature_button_caps[i];
@@ -935,103 +935,103 @@ static HRESULT WINAPI hid_joystick_GetEffectInfo( IDirectInputDevice8W *iface, D
     for (i = HidP_Output; i <= HidP_Feature; ++i)
     {
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_ATTACK_LEVEL, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_ATTACK_LEVEL, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFATTACK;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_ATTACK_TIME, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_ATTACK_TIME, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFATTACK;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_FADE_LEVEL, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_FADE_LEVEL, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFFADE;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_FADE_TIME, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_FADE_TIME, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_FFFADE;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DEAD_BAND, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_DEAD_BAND, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_DEADBAND;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_STARTDELAY;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DURATION, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_DURATION, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_DURATION;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_SAMPLE_PERIOD, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_SAMPLE_PERIOD, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_SAMPLEPERIOD;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_GAIN, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_GAIN, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_GAIN;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TRIGGER_BUTTON, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_TRIGGER_BUTTON, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TRIGGERBUTTON;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TRIGGER_REPEAT_INTERVAL, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_TRIGGER_REPEAT_INTERVAL, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TRIGGERREPEATINTERVAL;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_AXES_ENABLE, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_AXES_ENABLE, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_AXES;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_DIRECTION, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_DIRECTION, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_DIRECTION;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_SET_ENVELOPE_REPORT, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_SET_ENVELOPE_REPORT, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_ENVELOPE;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_TYPE_SPECIFIC_BLOCK_OFFSET, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_TYPE_SPECIFIC_BLOCK_OFFSET, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_TYPESPECIFICPARAMS;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_START_DELAY, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_STARTDELAY;
 
 #if 0
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_OP_EFFECT_START, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_OP_EFFECT_START, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_START;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_NORESTART;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEP_NODOWNLOAD;
 
         count = 1;
-        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_, &value, &count, impl->preparsed );
+        status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_, &value, &count, impl->preparsed );
         if (status == HIDP_STATUS_SUCCESS && count) info->dwDynamicParams |= DIEB_NOTRIGGER;
 #endif
 
         if (info->dwEffType & DIEFT_CONDITION)
         {
             count = 1;
-            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_POSITIVE_SATURATION, &value, &count, impl->preparsed );
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_POSITIVE_SATURATION, &value, &count, impl->preparsed );
             if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_SATURATION | DIEFT_POSNEGSATURATION;
 
             count = 1;
-            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_NEGATIVE_SATURATION, &value, &count, impl->preparsed );
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_NEGATIVE_SATURATION, &value, &count, impl->preparsed );
             if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_SATURATION | DIEFT_POSNEGSATURATION;
 
             count = 1;
-            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_POSITIVE_COEFFICIENT, &value, &count, impl->preparsed );
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_POSITIVE_COEFFICIENT, &value, &count, impl->preparsed );
             if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_POSNEGCOEFFICIENTS;
 
             count = 1;
-            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, HID_USAGE_PID_NEGATIVE_COEFFICIENT, &value, &count, impl->preparsed );
+            status = HidP_GetSpecificValueCaps( i, HID_USAGE_PAGE_PID, collection, WINE_HID_USAGE_PID_NEGATIVE_COEFFICIENT, &value, &count, impl->preparsed );
             if (status == HIDP_STATUS_SUCCESS && count) info->dwEffType |= DIEFT_POSNEGCOEFFICIENTS;
         }
     }
@@ -1052,9 +1052,9 @@ static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *
     (*out) = 0;
 
 #if 0
-    HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSOFF
+    WINE_HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSOFF
     The device's force-feedback actuators are disabled. If the device cannot report the actuator state, neither DIGFFS_ACTUATORSON nor DIGFFS_ACTUATORSOFF is returned.
-    HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSON
+    WINE_HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSON
     The device's force-feedback actuators are enabled. If the device cannot report the actuator state, neither DIGFFS_ACTUATORSON nor DIGFFS_ACTUATORSOFF is returned.
 
     DIGFFS_DEVICELOST
@@ -1063,25 +1063,25 @@ static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *
     DIGFFS_EMPTY
     The device has no downloaded effects.
 
-    HID_USAGE_PID_EFFECT_PLAYING / HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_PAUSED
+    WINE_HID_USAGE_PID_EFFECT_PLAYING / WINE_HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_PAUSED
     Playback of all active effects has been paused.
 
-    HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWEROFF
+    WINE_HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWEROFF
     The force-feedback system is not currently available. If the device cannot report the power state, neither DIGFFS_POWERON nor DIGFFS_POWEROFF is returned.
-    HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWERON
+    WINE_HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWERON
     Power to the force-feedback system is currently available. If the device cannot report the power state, neither DIGFFS_POWERON nor DIGFFS_POWEROFF is returned.
 
-    HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHOFF
+    WINE_HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHOFF
     The safety switch is currently off; that is, the device cannot operate. If the device cannot report the state of the safety switch, neither DIGFFS_SAFETYSWITCHON nor DIGFFS_SAFETYSWITCHOFF is returned.
-    HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHON
+    WINE_HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHON
     The safety switch is currently on; that is, the device can operate. If the device cannot report the state of the safety switch, neither DIGFFS_SAFETYSWITCHON nor DIGFFS_SAFETYSWITCHOFF is returned.
 
-    HID_USAGE_PID_EFFECT_PLAYING / HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_STOPPED
+    WINE_HID_USAGE_PID_EFFECT_PLAYING / WINE_HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_STOPPED
     No effects are playing, and the device is not paused.
 
-    HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHOFF
+    WINE_HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHOFF
     The user force-feedback switch is currently off; that is, the device cannot operate. If the device cannot report the state of the user force-feedback switch, neither DIGFFS_USERFFSWITCHON nor DIGFFS_USERFFSWITCHOFF is returned.
-    HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHON
+    WINE_HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHON
     The user force-feedback switch is currently on; that is, the device can operate. If the device cannot report the state of the user force-feedback switch, neither DIGFFS_USERFFSWITCHON nor DIGFFS_USERFFSWITCHOFF is returned.
 #endif
 
@@ -1091,27 +1091,27 @@ static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *
     if (!HidD_GetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength ))
         WARN( "HidD_GetFeature failed, error %u\n", GetLastError() );
 
-    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, &value,
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DEVICE_RESET, &value,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_EMPTY;
 
-    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, &value,
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_STOP_ALL_EFFECTS, &value,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_STOPPED;
 
-    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, &value,
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DEVICE_PAUSE, &value,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_PAUSED;
 
-    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, &value,
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_ENABLE_ACTUATORS, &value,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_ACTUATORSON;
 
-    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, &value,
+    if ((status = HidP_GetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DISABLE_ACTUATORS, &value,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_GetUsageValue returned %x\n", status );
     if (value) flags |= DIGFFS_ACTUATORSOFF;
@@ -1140,22 +1140,22 @@ static HRESULT WINAPI hid_joystick_SendForceFeedbackCommand( IDirectInputDevice8
 
     memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength);
 
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_RESET, flags & DISFFC_RESET ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DEVICE_RESET, flags & DISFFC_RESET ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_STOP_ALL_EFFECTS, flags & DISFFC_STOPALL ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_STOP_ALL_EFFECTS, flags & DISFFC_STOPALL ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_PAUSE, flags & DISFFC_PAUSE ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DEVICE_PAUSE, flags & DISFFC_PAUSE ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DEVICE_CONTINUE, flags & DISFFC_CONTINUE ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DEVICE_CONTINUE, flags & DISFFC_CONTINUE ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, flags & DISFFC_SETACTUATORSON ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_ENABLE_ACTUATORS, flags & DISFFC_SETACTUATORSON ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
-    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_DISABLE_ACTUATORS, flags & DISFFC_SETACTUATORSOFF ? 1 : 0,
+    if ((status = HidP_SetUsageValue( HidP_Feature, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_DISABLE_ACTUATORS, flags & DISFFC_SETACTUATORSOFF ? 1 : 0,
                                       impl->preparsed, impl->feature_report_buf, impl->caps.FeatureReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
 
@@ -1291,15 +1291,15 @@ static HRESULT WINAPI hid_joystick_Poll( IDirectInputDevice8W *iface )
 
 #if 0
     memset( impl->output_report_buf, 0, impl->caps.OutputReportByteLength);
-    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, 1,
+    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DC_ENABLE_ACTUATORS, 1,
                                       impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
 
-    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DURATION, 0xffffffff,
+    if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_DURATION, 0xffffffff,
                                       impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
 
-    if ((status = HidP_SetUsageValueArray( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_MAGNITUDE, (char *)&magnitudes, sizeof(magnitudes),
+    if ((status = HidP_SetUsageValueArray( HidP_Output, HID_USAGE_PAGE_PID, 0, WINE_HID_USAGE_PID_MAGNITUDE, (char *)&magnitudes, sizeof(magnitudes),
                                            impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
         WARN( "HidP_SetUsageValue returned %x\n", status );
 
