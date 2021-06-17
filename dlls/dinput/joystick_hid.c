@@ -1051,6 +1051,41 @@ static HRESULT WINAPI hid_joystick_GetForceFeedbackState( IDirectInputDevice8W *
 
     (*out) = 0;
 
+#if 0
+    HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSOFF
+    The device's force-feedback actuators are disabled. If the device cannot report the actuator state, neither DIGFFS_ACTUATORSON nor DIGFFS_ACTUATORSOFF is returned.
+    HID_USAGE_PID_ACTUATORS_ENABLED -> DIGFFS_ACTUATORSON
+    The device's force-feedback actuators are enabled. If the device cannot report the actuator state, neither DIGFFS_ACTUATORSON nor DIGFFS_ACTUATORSOFF is returned.
+
+    DIGFFS_DEVICELOST
+    The device suffered an unexpected failure and is in an indeterminate state. It must be reset either by unacquiring and reacquiring the device, or by sending a DISFFC_RESET command.
+
+    DIGFFS_EMPTY
+    The device has no downloaded effects.
+
+    HID_USAGE_PID_EFFECT_PLAYING / HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_PAUSED
+    Playback of all active effects has been paused.
+
+    HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWEROFF
+    The force-feedback system is not currently available. If the device cannot report the power state, neither DIGFFS_POWERON nor DIGFFS_POWEROFF is returned.
+    HID_USAGE_PID_ACTUATOR_POWER -> DIGFFS_POWERON
+    Power to the force-feedback system is currently available. If the device cannot report the power state, neither DIGFFS_POWERON nor DIGFFS_POWEROFF is returned.
+
+    HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHOFF
+    The safety switch is currently off; that is, the device cannot operate. If the device cannot report the state of the safety switch, neither DIGFFS_SAFETYSWITCHON nor DIGFFS_SAFETYSWITCHOFF is returned.
+    HID_USAGE_PID_SAFETY_SWITCH -> DIGFFS_SAFETYSWITCHON
+    The safety switch is currently on; that is, the device can operate. If the device cannot report the state of the safety switch, neither DIGFFS_SAFETYSWITCHON nor DIGFFS_SAFETYSWITCHOFF is returned.
+
+    HID_USAGE_PID_EFFECT_PLAYING / HID_USAGE_PID_DEVICE_PAUSED -> DIGFFS_STOPPED
+    No effects are playing, and the device is not paused.
+
+    HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHOFF
+    The user force-feedback switch is currently off; that is, the device cannot operate. If the device cannot report the state of the user force-feedback switch, neither DIGFFS_USERFFSWITCHON nor DIGFFS_USERFFSWITCHOFF is returned.
+    HID_USAGE_PID_ACTUATOR_OVERRIDE_SWITCH -> DIGFFS_USERFFSWITCHON
+    The user force-feedback switch is currently on; that is, the device can operate. If the device cannot report the state of the user force-feedback switch, neither DIGFFS_USERFFSWITCHON nor DIGFFS_USERFFSWITCHOFF is returned.
+#endif
+
+
     memset( impl->feature_report_buf, 0, impl->caps.FeatureReportByteLength);
 
     if (!HidD_GetFeature( impl->device, impl->feature_report_buf, impl->caps.FeatureReportByteLength ))
@@ -1254,7 +1289,7 @@ static HRESULT WINAPI hid_joystick_Poll( IDirectInputDevice8W *iface )
 
     TRACE( "iface %p.\n", iface );
 
-#if 1
+#if 0
     memset( impl->output_report_buf, 0, impl->caps.OutputReportByteLength);
     if ((status = HidP_SetUsageValue( HidP_Output, HID_USAGE_PAGE_PID, 0, HID_USAGE_PID_DC_ENABLE_ACTUATORS, 1,
                                       impl->preparsed, impl->output_report_buf, impl->caps.OutputReportByteLength )) != HIDP_STATUS_SUCCESS)
