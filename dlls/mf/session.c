@@ -2587,7 +2587,11 @@ static void session_set_sink_stream_state(struct media_session *session, IMFStre
                     break;
             }
 
-            if (session->presentation.flags & SESSION_FLAG_END_OF_PRESENTATION || FAILED(hr))
+            if (FAILED(hr))
+                session_set_stopped(session, hr);
+            else if (session->presentation.flags & SESSION_FLAG_FINALIZE_SINKS)
+                session_finalize_sinks(session);
+            else if (session->presentation.flags & SESSION_FLAG_END_OF_PRESENTATION)
                 session_set_stopped(session, hr);
 
             break;
