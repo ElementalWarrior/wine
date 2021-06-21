@@ -806,6 +806,8 @@ static struct topo_node *session_get_node_by_id(const struct media_session *sess
     return NULL;
 }
 
+static void session_command_complete(struct media_session *session);
+
 static void session_start(struct media_session *session, const GUID *time_format, const PROPVARIANT *start_position)
 {
     struct media_source *source;
@@ -840,6 +842,7 @@ static void session_start(struct media_session *session, const GUID *time_format
             break;
         case SESSION_STATE_STARTED:
             FIXME("Seeking is not implemented.\n");
+            session_command_complete(session);
             break;
         case SESSION_STATE_CLOSED:
             IMFMediaEventQueue_QueueEventParamVar(session->event_queue, MESessionStarted, &GUID_NULL,
