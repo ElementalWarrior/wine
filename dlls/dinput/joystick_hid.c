@@ -54,6 +54,8 @@ struct hid_joystick
 
     HANDLE device;
     PHIDP_PREPARSED_DATA preparsed;
+
+    DIDEVICEINSTANCEW instance;
 };
 
 static inline struct hid_joystick *impl_from_IDirectInputDevice8W( IDirectInputDevice8W *iface )
@@ -98,13 +100,33 @@ static HRESULT WINAPI hid_joystick_EnumObjects( IDirectInputDevice8W *iface, LPD
 
 static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REFGUID guid, DIPROPHEADER *header )
 {
-    FIXME( "iface %p, guid %s, header %p stub!\n", iface, debugstr_guid( guid ), header );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p, guid %s, header %p\n", iface, debugstr_guid( guid ), header );
 
     if (!header) return DIERR_INVALIDPARAM;
     if (!IS_DIPROP( guid )) return DI_OK;
 
     switch (LOWORD( guid ))
     {
+    case (DWORD_PTR)DIPROP_PRODUCTNAME:
+    {
+        DIPROPSTRING *value = (DIPROPSTRING *)header;
+        lstrcpynW( value->wsz, impl->instance.tszProductName, MAX_PATH );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_INSTANCENAME:
+    {
+        DIPROPSTRING *value = (DIPROPSTRING *)header;
+        lstrcpynW( value->wsz, impl->instance.tszInstanceName, MAX_PATH );
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_JOYSTICKID:
+    {
+        DIPROPDWORD *value = (DIPROPDWORD *)header;
+        value->dwData = impl->instance.guidInstance.Data3;
+        return DI_OK;
+    }
     default: return IDirectInputDevice2WImpl_GetProperty( iface, guid, header );
     }
 }
@@ -168,14 +190,17 @@ static HRESULT WINAPI hid_joystick_GetObjectInfo( IDirectInputDevice8W *iface, D
 
 static HRESULT WINAPI hid_joystick_GetDeviceInfo( IDirectInputDevice8W *iface, DIDEVICEINSTANCEW *instance )
 {
-    FIXME( "iface %p, instance %p stub!\n", iface, instance );
+    struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
+
+    TRACE( "iface %p, instance %p.\n", iface, instance );
 
     if (!instance) return E_POINTER;
     if (instance->dwSize != sizeof(DIDEVICEINSTANCE_DX3W) &&
         instance->dwSize != sizeof(DIDEVICEINSTANCEW))
         return DIERR_INVALIDPARAM;
 
-    return E_NOTIMPL;
+    memcpy( instance, &impl->instance, instance->dwSize );
+    return S_OK;
 }
 
 static HRESULT WINAPI hid_joystick_CreateEffect( IDirectInputDevice8W *iface, REFGUID rguid,
@@ -472,6 +497,8 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
 
     impl->device = device;
     impl->preparsed = preparsed;
+
+    impl->instance = instance;
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
     impl->base.data_format.wine_df = format;
