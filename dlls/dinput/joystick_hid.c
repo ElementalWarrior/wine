@@ -56,6 +56,7 @@ struct hid_joystick
     PHIDP_PREPARSED_DATA preparsed;
 
     DIDEVICEINSTANCEW instance;
+    WCHAR device_path[MAX_PATH];
     HIDD_ATTRIBUTES attrs;
 };
 
@@ -133,6 +134,12 @@ static HRESULT WINAPI hid_joystick_GetProperty( IDirectInputDevice8W *iface, REF
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
         value->dwData = impl->instance.guidInstance.Data3;
+        return DI_OK;
+    }
+    case (DWORD_PTR)DIPROP_GUIDANDPATH:
+    {
+        DIPROPGUIDANDPATH *value = (DIPROPGUIDANDPATH *)header;
+        lstrcpynW( value->wszPath, impl->device_path, MAX_PATH );
         return DI_OK;
     }
     default: return IDirectInputDevice2WImpl_GetProperty( iface, guid, header );
@@ -507,6 +514,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
     impl->preparsed = preparsed;
 
     impl->instance = instance;
+    lstrcpynW( impl->device_path, device_path, MAX_PATH );
     impl->attrs = attrs;
 
     if (!(format = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*format) ))) goto failed;
