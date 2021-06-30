@@ -1289,6 +1289,10 @@ static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam
 static DWORD WINAPI hook_thread_proc(void *param)
 {
     static HHOOK kbd_hook, mouse_hook;
+    IDirectInputDeviceImpl *dev;
+    SIZE_T events_count = 0;
+    HANDLE events[128];
+    DWORD ret;
     MSG msg;
 
     di_em_win = CreateWindowW( di_em_win_w, di_em_win_w, 0, 0, 0, 0, 0,
@@ -1298,10 +1302,33 @@ static DWORD WINAPI hook_thread_proc(void *param)
     PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );
     SetEvent(param);
 
-    while (GetMessageW( &msg, 0, 0, 0 ))
+    while ((ret = MsgWaitForMultipleObjectsEx( events_count, events, INFINITE, QS_ALLINPUT, 0 )) <= events_count)
     {
+        IDirectInputDevice8W *iface = NULL;
         UINT kbd_cnt = 0, mice_cnt = 0;
 
+        if (ret < events_count)
+        {
+            EnterCriticalSection( &dinput_hook_crit );
+            LIST_FOR_EACH_ENTRY( dev, &acquired_device_list, IDirectInputDeviceImpl, entry )
+            {
+                if (dev->read_event == events[ret])
+                {
+                    iface = &dev->IDirectInputDevice8W_iface;
+                    IDirectInputDevice8_AddRef( iface );
+                    break;
+                }
+            }
+            LeaveCriticalSection( &dinput_hook_crit );
+
+            if (iface)
+            {
+                dev->read_callback( iface );
+                IDirectInputDevice8_Release( iface );
+            }
+        }
+
+        if (!PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) continue;
         if (msg.message == WM_USER+0x10)
         {
             HANDLE finished_event = (HANDLE)msg.lParam;
@@ -1316,9 +1343,16 @@ static DWORD WINAPI hook_thread_proc(void *param)
                 break;
             }
 
+            events_count = 0;
             EnterCriticalSection( &dinput_hook_crit );
             kbd_cnt = list_count( &acquired_keyboard_list );
             mice_cnt = list_count( &acquired_mouse_list );
+            LIST_FOR_EACH_ENTRY( dev, &acquired_device_list, IDirectInputDeviceImpl, entry )
+            {
+                if (!dev->read_event || !dev->read_callback) continue;
+                if (events_count >= ARRAY_SIZE(events)) break;
+                events[events_count++] = dev->read_event;
+            }
             LeaveCriticalSection( &dinput_hook_crit );
 
             if (kbd_cnt && !kbd_hook)

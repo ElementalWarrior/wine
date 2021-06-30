@@ -1716,6 +1716,8 @@ HRESULT direct_input_device_alloc( SIZE_T size, const IDirectInputDevice8WVtbl *
     InitializeCriticalSection( &This->crit );
     This->dinput = dinput;
     IDirectInput_AddRef( &dinput->IDirectInput7A_iface );
+    This->read_event = NULL;
+    This->read_callback = NULL;
 
     *out = This;
     return DI_OK;
