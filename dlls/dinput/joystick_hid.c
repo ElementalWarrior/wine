@@ -1535,8 +1535,9 @@ static HRESULT hid_joystick_device_open( int index, DIDEVICEINSTANCEW *filter, W
         detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
         if (!SetupDiGetDeviceInterfaceDetailW( set, &iface, detail, sizeof(buffer), NULL, &devinfo ))
             continue;
-        if (!SetupDiGetDevicePropertyW( set, &devinfo, &DEVPROPKEY_HID_HANDLE, &type,
-                                        (BYTE *)&handle, sizeof(handle), NULL, 0 ) ||
+        handle = i;
+        if (SetupDiGetDevicePropertyW( set, &devinfo, &DEVPROPKEY_HID_HANDLE, &type,
+                                       (BYTE *)&handle, sizeof(handle), NULL, 0 ) &&
             type != DEVPROP_TYPE_UINT32)
             continue;
         if (!hid_joystick_device_try_open( handle, detail->DevicePath, device, preparsed,
@@ -1589,9 +1590,6 @@ static HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTAN
         return S_FALSE;
     if (version >= 0x0800 && type != DI8DEVCLASS_ALL && type != DI8DEVCLASS_GAMECTRL)
         return S_FALSE;
-
-    if (device_disabled_registry( "HID", TRUE ))
-        return DIERR_DEVICENOTREG;
 
     TRACE( "Found device %s, usage %04x:%04x, product %s, instance %s, name %s\n", debugstr_w(device_path),
            instance->wUsagePage, instance->wUsage, debugstr_guid( &instance->guidProduct ),
