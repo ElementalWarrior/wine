@@ -1109,6 +1109,7 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
 {
     DIDEVICEINSTANCEW instance = {.dwSize = sizeof(instance), .guidProduct = *guid, .guidInstance = *guid};
     DIPROPHEADER header = {sizeof(header), sizeof(header), DIPH_DEVICE, 0};
+    DIPROPRANGE range = {{sizeof(range), sizeof(DIPROPHEADER)}};
     DWORD size = sizeof(struct hid_joystick);
     HIDD_ATTRIBUTES attrs = {sizeof(attrs)};
     DIDEVCAPS dev_caps = {sizeof(dev_caps)};
@@ -1216,6 +1217,12 @@ static HRESULT hid_joystick_create_device( IDirectInputImpl *dinput, REFGUID gui
 
     TRACE( "Created %p\n", impl );
     _dump_DIDATAFORMAT( impl->base.data_format.wine_df );
+
+    range.diph.dwHow = DIPH_DEVICE;
+    range.diph.dwObj = 0;
+    range.lMin = 0;
+    range.lMax = 65535;
+    enum_hid_objects( impl, &range.diph, DIDFT_AXIS, set_property_prop_range, &range );
 
     *out = &impl->base.IDirectInputDevice8W_iface;
     return DI_OK;
