@@ -382,6 +382,16 @@ static NTSTATUS WINAPI driver_internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
                 REPORT_COUNT(1, 8),
                 REPORT_SIZE(1, 1),
                 OUTPUT(1, Cnst|Var|Abs),
+
+                USAGE(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0x8c),
+                USAGE(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0x8d),
+                USAGE(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0x8e),
+                USAGE(4, (HID_USAGE_PAGE_KEYBOARD<<16)|0x8f),
+                LOGICAL_MINIMUM(1, 1),
+                LOGICAL_MAXIMUM(1, 16),
+                REPORT_COUNT(1, 1),
+                REPORT_SIZE(1, 8),
+                OUTPUT(1, Data|Ary|Abs),
             END_COLLECTION,
         END_COLLECTION,
     };

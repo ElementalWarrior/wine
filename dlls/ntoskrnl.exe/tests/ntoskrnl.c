@@ -2440,6 +2440,26 @@ static void test_hidp(HANDLE file, HANDLE async_file, int report_id, BOOL polled
     ok(!memcmp(buffer, buffer + 16, 16), "unexpected report value\n");
 
 
+    memset(report, 0, caps.OutputReportByteLength);
+    status = HidP_InitializeReportForID(HidP_Output, report_id ? 2 : 0, preparsed_data, report, caps.OutputReportByteLength);
+    ok(status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status);
+
+    value = 1;
+    usages[0] = 0x8f;
+    status = HidP_SetUsages(HidP_Output, HID_USAGE_PAGE_KEYBOARD, 0, usages, &value, preparsed_data,
+                            report, caps.OutputReportByteLength);
+    ok(status == HIDP_STATUS_SUCCESS, "HidP_SetUsages returned %#x\n", status);
+    ok(report[caps.OutputReportByteLength - 1] == 4, "unexpected byte %d\n", report[caps.OutputReportByteLength - 1]);
+
+    value = 1;
+    usages[0] = 0x8d;
+    report[caps.OutputReportByteLength - 1] = 0;
+    status = HidP_SetUsages(HidP_Output, HID_USAGE_PAGE_KEYBOARD, 0, usages, &value, preparsed_data,
+                            report, caps.OutputReportByteLength);
+    ok(status == HIDP_STATUS_SUCCESS, "HidP_SetUsages returned %#x\n", status);
+    ok(report[caps.OutputReportByteLength - 1] == 2, "unexpected byte %d\n", report[caps.OutputReportByteLength - 1]);
+
+
     memset(report, 0xcd, sizeof(report));
     status = HidP_InitializeReportForID(HidP_Input, report_id, preparsed_data, report, caps.InputReportByteLength);
     ok(status == HIDP_STATUS_SUCCESS, "HidP_InitializeReportForID returned %#x\n", status);
