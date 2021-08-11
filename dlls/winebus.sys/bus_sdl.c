@@ -116,6 +116,7 @@ MAKE_FUNCPTR(SDL_HapticRumbleSupported);
 MAKE_FUNCPTR(SDL_HapticRunEffect);
 MAKE_FUNCPTR(SDL_HapticStopAll);
 MAKE_FUNCPTR(SDL_JoystickIsHaptic);
+MAKE_FUNCPTR(SDL_JoystickRumble);
 MAKE_FUNCPTR(SDL_memset);
 MAKE_FUNCPTR(SDL_GameControllerAddMapping);
 MAKE_FUNCPTR(SDL_RegisterEvents);
@@ -123,6 +124,10 @@ MAKE_FUNCPTR(SDL_PushEvent);
 static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
 static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
+
+/* internal bits for extended rumble support, SDL_Haptic types are 16-bits */
+#define WINE_SDL_JOYSTICK_RUMBLE  0x40000000 /* using SDL_JoystickRumble API */
+#define WINE_SDL_HAPTIC_RUMBLE    0x80000000 /* using SDL_HapticRumble API */
 
 struct platform_private
 {
@@ -147,6 +152,7 @@ struct platform_private
 
     SDL_Haptic *sdl_haptic;
     int haptic_effect_id;
+    DWORD haptics_support;
 };
 
 static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
@@ -250,26 +256,29 @@ static void set_hat_value(struct platform_private *ext, int index, int value)
 
 static BOOL descriptor_add_haptic(struct platform_private *ext)
 {
-    if (pSDL_JoystickIsHaptic(ext->sdl_joystick))
+    unsigned int mask = SDL_HAPTIC_LEFTRIGHT;
+
+    if (!pSDL_JoystickIsHaptic(ext->sdl_joystick) ||
+        !(ext->sdl_haptic = pSDL_HapticOpenFromJoystick(ext->sdl_joystick)))
+        ext->haptics_support = 0;
+    else
     {
-        ext->sdl_haptic = pSDL_HapticOpenFromJoystick(ext->sdl_joystick);
-        if (ext->sdl_haptic &&
-            ((pSDL_HapticQuery(ext->sdl_haptic) & SDL_HAPTIC_LEFTRIGHT) != 0 ||
-             pSDL_HapticRumbleSupported(ext->sdl_haptic)))
-        {
-            pSDL_HapticStopAll(ext->sdl_haptic);
-            pSDL_HapticRumbleInit(ext->sdl_haptic);
-            if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id))
-                return FALSE;
-            ext->haptic_effect_id = -1;
-        }
-        else
-        {
-            pSDL_HapticClose(ext->sdl_haptic);
-            ext->sdl_haptic = NULL;
-        }
+        ext->haptics_support = pSDL_HapticQuery(ext->sdl_haptic) & mask;
+        if (pSDL_HapticRumbleSupported(ext->sdl_haptic)) ext->haptics_support |= WINE_SDL_HAPTIC_RUMBLE;
+
+        pSDL_HapticStopAll(ext->sdl_haptic);
+        pSDL_HapticRumbleInit(ext->sdl_haptic);
     }
 
+    if (!pSDL_JoystickRumble(ext->sdl_joystick, 0, 0, 0)) ext->haptics_support |= WINE_SDL_JOYSTICK_RUMBLE;
+
+    if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
+    {
+        if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id))
+            return FALSE;
+    }
+
+    ext->haptic_effect_id = -1;
     return TRUE;
 }
 
@@ -499,39 +508,18 @@ static NTSTATUS sdl_device_get_reportdescriptor(struct unix_device *iface, BYTE 
 static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     struct platform_private *ext = impl_from_unix_device(iface);
+    SDL_HapticEffect effect;
 
-    if (ext->sdl_haptic && packet->reportId == ext->vendor_rumble_report_id)
+    if (packet->reportId == ext->vendor_rumble_report_id)
     {
         WORD left = packet->reportBuffer[2] * 128;
         WORD right = packet->reportBuffer[3] * 128;
 
-        if (ext->haptic_effect_id >= 0)
-        {
-            pSDL_HapticDestroyEffect(ext->sdl_haptic, ext->haptic_effect_id);
-            ext->haptic_effect_id = -1;
-        }
-        pSDL_HapticStopAll(ext->sdl_haptic);
-        if (left != 0 || right != 0)
-        {
-            SDL_HapticEffect effect;
-
-            pSDL_memset( &effect, 0, sizeof(SDL_HapticEffect) );
-            effect.type = SDL_HAPTIC_LEFTRIGHT;
-            effect.leftright.length = -1;
-            effect.leftright.large_magnitude = left;
-            effect.leftright.small_magnitude = right;
-
-            ext->haptic_effect_id = pSDL_HapticNewEffect(ext->sdl_haptic, &effect);
-            if (ext->haptic_effect_id >= 0)
-            {
-                pSDL_HapticRunEffect(ext->sdl_haptic, ext->haptic_effect_id, 1);
-            }
-            else
-            {
-                float i = (float)((left + right)/2.0) / 32767.0;
-                pSDL_HapticRumblePlay(ext->sdl_haptic, i, -1);
-            }
-        }
+        pSDL_memset(&effect, 0, sizeof(SDL_HapticEffect));
+        effect.type = SDL_HAPTIC_LEFTRIGHT;
+        effect.leftright.length = -1;
+        effect.leftright.large_magnitude = left;
+        effect.leftright.small_magnitude = right;
 
         io->Information = packet->reportBufferLen;
         io->Status = STATUS_SUCCESS;
@@ -540,6 +528,27 @@ static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
     {
         io->Information = 0;
         io->Status = STATUS_NOT_IMPLEMENTED;
+        return;
+    }
+
+    if (ext->sdl_haptic) pSDL_HapticStopAll(ext->sdl_haptic);
+    if (ext->haptics_support & WINE_SDL_JOYSTICK_RUMBLE) pSDL_JoystickRumble(ext->sdl_joystick, 0, 0, 0);
+    if (!effect.leftright.large_magnitude && !effect.leftright.small_magnitude) return;
+
+    if (ext->haptics_support & SDL_HAPTIC_LEFTRIGHT)
+    {
+        if (ext->haptic_effect_id >= 0) pSDL_HapticDestroyEffect(ext->sdl_haptic, ext->haptic_effect_id);
+        ext->haptic_effect_id = pSDL_HapticNewEffect(ext->sdl_haptic, &effect);
+        if (ext->haptic_effect_id >= 0) pSDL_HapticRunEffect(ext->sdl_haptic, ext->haptic_effect_id, 1);
+    }
+    else if (ext->haptics_support & WINE_SDL_HAPTIC_RUMBLE)
+    {
+        float magnitude = (effect.leftright.large_magnitude + effect.leftright.small_magnitude) / 2.0 / 32767.0;
+        pSDL_HapticRumblePlay(ext->sdl_haptic, magnitude, effect.leftright.length);
+    }
+    else if (ext->haptics_support & WINE_SDL_JOYSTICK_RUMBLE)
+    {
+        pSDL_JoystickRumble(ext->sdl_joystick, effect.leftright.large_magnitude, effect.leftright.small_magnitude, -1);
     }
 }
 
@@ -842,6 +851,7 @@ NTSTATUS WINAPI sdl_bus_init(void *args)
     LOAD_FUNCPTR(SDL_HapticRunEffect);
     LOAD_FUNCPTR(SDL_HapticStopAll);
     LOAD_FUNCPTR(SDL_JoystickIsHaptic);
+    LOAD_FUNCPTR(SDL_JoystickRumble);
     LOAD_FUNCPTR(SDL_memset);
     LOAD_FUNCPTR(SDL_GameControllerAddMapping);
     LOAD_FUNCPTR(SDL_RegisterEvents);
