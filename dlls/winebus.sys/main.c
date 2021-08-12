@@ -34,9 +34,13 @@
 #include "wine/list.h"
 
 #include "bus.h"
+#include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 WINE_DECLARE_DEBUG_CHANNEL(hid_report);
+
+static HMODULE instance;
+static struct unix_funcs *unix_funcs;
 
 #if defined(__i386__) && !defined(_WIN32)
 
@@ -613,6 +617,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         irp->IoStatus.Status = handle_IRP_MN_QUERY_DEVICE_RELATIONS(irp);
         break;
     case IRP_MN_START_DEVICE:
+        __wine_init_unix_lib(instance, DLL_PROCESS_ATTACH, NULL, &unix_funcs);
+
         mouse_device_create();
         keyboard_device_create();
 
@@ -635,6 +641,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         udev_driver_unload();
         iohid_driver_unload();
         sdl_driver_unload();
+
+        __wine_init_unix_lib(instance, DLL_PROCESS_DETACH, NULL, NULL);
 
         irp->IoStatus.Status = STATUS_SUCCESS;
         IoSkipCurrentIrpStackLocation(irp);
@@ -1002,6 +1010,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     NTSTATUS ret;
 
     TRACE( "(%p, %s)\n", driver, debugstr_w(path->Buffer) );
+
+    RtlPcToFileHeader(&DriverEntry, (void *)&instance);
 
     attr.Length = sizeof(attr);
     attr.ObjectName = path;
