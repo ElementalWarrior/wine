@@ -707,7 +707,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         keyboard_device_create();
 
         if (!check_bus_option(&SDL_enabled, 1) ||
-            sdl_driver_init() != STATUS_SUCCESS)
+            sdl_driver_init() != STATUS_SUCCESS ||
+            1)
         {
             udev_driver_init();
             iohid_driver_init();
