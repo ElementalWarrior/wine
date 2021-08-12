@@ -39,6 +39,9 @@ static const struct unix_funcs unix_funcs =
     udev_bus_init,
     udev_bus_wait,
     udev_bus_stop,
+    iohid_bus_init,
+    iohid_bus_wait,
+    iohid_bus_stop,
 };
 
 NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out)

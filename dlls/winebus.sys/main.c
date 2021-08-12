@@ -729,6 +729,39 @@ static NTSTATUS udev_driver_init(void)
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS iohid_driver_init(void)
+{
+    static const WCHAR iohid_bus_name[] = {'I','O','H','I','D',0};
+    struct iohid_bus_options iohid_params;
+    struct bus_main_params params =
+    {
+        .name = iohid_bus_name,
+        .bus_init = unix_funcs->iohid_bus_init,
+        .bus_wait = unix_funcs->iohid_bus_wait,
+        .bus_params = &iohid_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create IOHID bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create IOHID bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
@@ -759,7 +792,7 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_REMOVE_DEVICE:
-        iohid_driver_unload();
+        unix_funcs->iohid_bus_stop();
         unix_funcs->udev_bus_stop();
         unix_funcs->sdl_bus_stop();
 
