@@ -390,7 +390,7 @@ static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
     return STATUS_SUCCESS;
 }
 
-DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
+static DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
 {
     char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
@@ -687,6 +687,48 @@ static NTSTATUS sdl_driver_init(void)
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS udev_driver_init(void)
+{
+    static const WCHAR udev_bus_name[] = {'U','D','E','V',0};
+    static const WCHAR hidraw_disabledW[] = {'D','i','s','a','b','l','e','H','i','d','r','a','w',0};
+    static const UNICODE_STRING hidraw_disabled = {sizeof(hidraw_disabledW) - sizeof(WCHAR), sizeof(hidraw_disabledW), (WCHAR*)hidraw_disabledW};
+    static const WCHAR input_disabledW[] = {'D','i','s','a','b','l','e','I','n','p','u','t',0};
+    static const UNICODE_STRING input_disabled = {sizeof(input_disabledW) - sizeof(WCHAR), sizeof(input_disabledW), (WCHAR*)input_disabledW};
+    struct udev_bus_options udev_params;
+    struct bus_main_params params =
+    {
+        .name = udev_bus_name,
+        .bus_init = unix_funcs->udev_bus_init,
+        .bus_wait = unix_funcs->udev_bus_wait,
+        .bus_params = &udev_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create UDEV bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    udev_params.disable_hidraw = check_bus_option(&hidraw_disabled, 0);
+    if (udev_params.disable_hidraw) TRACE("UDEV hidraw devices disabled in registry\n");
+    udev_params.disable_input = check_bus_option(&input_disabled, 0);
+    if (udev_params.disable_input) TRACE("UDEV input devices disabled in registry\n");
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create UDEV bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
@@ -717,8 +759,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_REMOVE_DEVICE:
-        udev_driver_unload();
         iohid_driver_unload();
+        unix_funcs->udev_bus_stop();
         unix_funcs->sdl_bus_stop();
 
         WaitForMultipleObjects(bus_count, bus_thread, TRUE, INFINITE);
