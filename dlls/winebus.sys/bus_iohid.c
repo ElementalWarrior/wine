@@ -90,13 +90,16 @@
 #include "wine/debug.h"
 
 #include "bus.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
+
 #ifdef HAVE_IOHIDMANAGERCREATE
+
+static struct iohid_bus_options options;
 
 static IOHIDManagerRef hid_manager;
 static CFRunLoopRef run_loop;
-static HANDLE run_loop_handle;
 
 static const WCHAR busidW[] = {'I','O','H','I','D',0};
 
@@ -382,63 +385,60 @@ static void handle_RemovalCallback(void *context, IOReturn result, void *sender,
     }
 }
 
-/* This puts the relevant run loop for event handling into a WINE thread */
-static DWORD CALLBACK runloop_thread(void *args)
+NTSTATUS WINAPI iohid_bus_init(void *args)
 {
+    TRACE("args %p\n", args);
+
+    options = *(struct iohid_bus_options *)args;
+
+    hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, 0L);
     run_loop = CFRunLoopGetCurrent();
 
     IOHIDManagerSetDeviceMatching(hid_manager, NULL);
     IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, handle_DeviceMatchingCallback, NULL);
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, handle_RemovalCallback, NULL);
     IOHIDManagerScheduleWithRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
-
-    CFRunLoopRun();
-    TRACE("Run Loop exiting\n");
-    return 1;
-
-}
-
-NTSTATUS iohid_driver_init(void)
-{
-    hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, 0L);
-    if (!(run_loop_handle = CreateThread(NULL, 0, runloop_thread, NULL, 0, NULL)))
-    {
-        ERR("Failed to initialize IOHID Manager thread\n");
-        CFRelease(hid_manager);
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    TRACE("Initialization successful\n");
     return STATUS_SUCCESS;
 }
 
-void iohid_driver_unload( void )
+NTSTATUS WINAPI iohid_bus_wait(void)
 {
-    TRACE("Unloading Driver\n");
+    CFRunLoopRun();
 
-    if (!run_loop_handle)
-        return;
-
-    IOHIDManagerUnscheduleFromRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
-    CFRunLoopStop(run_loop);
-    WaitForSingleObject(run_loop_handle, INFINITE);
-    CloseHandle(run_loop_handle);
+    TRACE("IOHID main loop exiting\n");
     IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, NULL, NULL);
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, NULL, NULL);
     CFRelease(hid_manager);
-    TRACE("Driver Unloaded\n");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI iohid_bus_stop(void)
+{
+    if (!run_loop) return STATUS_SUCCESS;
+
+    IOHIDManagerUnscheduleFromRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
+    CFRunLoopStop(run_loop);
+    return STATUS_SUCCESS;
 }
 
 #else
 
-NTSTATUS iohid_driver_init(void)
+NTSTATUS WINAPI iohid_bus_init(void *args)
 {
+    WARN("IOHID support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;
 }
 
-void iohid_driver_unload( void )
+NTSTATUS WINAPI iohid_bus_wait(void)
 {
-    TRACE("Stub: Unload Driver\n");
+    WARN("IOHID support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS WINAPI iohid_bus_stop(void)
+{
+    WARN("IOHID support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 #endif /* HAVE_IOHIDMANAGERCREATE */

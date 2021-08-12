@@ -27,10 +27,6 @@
 
 typedef int(*enum_func)(DEVICE_OBJECT *device, void *context);
 
-/* Buses */
-NTSTATUS iohid_driver_init(void) DECLSPEC_HIDDEN;
-void iohid_driver_unload( void ) DECLSPEC_HIDDEN;
-
 /* Native device function table */
 typedef struct
 {
