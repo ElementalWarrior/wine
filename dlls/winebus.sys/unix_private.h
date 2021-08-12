@@ -31,4 +31,8 @@ extern NTSTATUS WINAPI sdl_bus_init(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI sdl_bus_wait(void) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI sdl_bus_stop(void) DECLSPEC_HIDDEN;
 
+extern NTSTATUS WINAPI udev_bus_init(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI udev_bus_wait(void) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI udev_bus_stop(void) DECLSPEC_HIDDEN;
+
 #endif /* __WINEBUS_UNIX_PRIVATE_H */

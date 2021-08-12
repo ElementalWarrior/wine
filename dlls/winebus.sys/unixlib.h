@@ -32,11 +32,21 @@ struct sdl_bus_options
     BOOL map_controllers;
 };
 
+struct udev_bus_options
+{
+    BOOL disable_hidraw;
+    BOOL disable_input;
+};
+
 struct unix_funcs
 {
     NTSTATUS (WINAPI *sdl_bus_init)(void *);
     NTSTATUS (WINAPI *sdl_bus_wait)(void);
     NTSTATUS (WINAPI *sdl_bus_stop)(void);
+
+    NTSTATUS (WINAPI *udev_bus_init)(void *);
+    NTSTATUS (WINAPI *udev_bus_wait)(void);
+    NTSTATUS (WINAPI *udev_bus_stop)(void);
 };
 
 #endif /* __WINEBUS_UNIXLIB_H */
