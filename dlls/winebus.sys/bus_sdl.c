@@ -40,6 +40,7 @@
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "ddk/hidtypes.h"
+#include "ddk/hidsdi.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "hidusage.h"
@@ -114,6 +115,7 @@ struct platform_private
     SDL_Joystick *sdl_joystick;
     SDL_GameController *sdl_controller;
     SDL_JoystickID id;
+    USAGE_AND_PAGE usage;
 
     int button_start;
     int axis_start;
@@ -256,7 +258,6 @@ static BOOL build_report_descriptor(struct platform_private *ext)
     INT i;
     INT report_size;
     INT button_count, axis_count, ball_count, hat_count;
-    static const USAGE device_usage[2] = {HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_GAMEPAD};
     static const USAGE controller_usages[] = {
         HID_USAGE_GENERIC_X,
         HID_USAGE_GENERIC_Y,
@@ -316,7 +317,7 @@ static BOOL build_report_descriptor(struct platform_private *ext)
 
     TRACE("Report will be %i bytes\n", report_size);
 
-    if (!hid_descriptor_begin(&ext->desc, device_usage[0], device_usage[1]))
+    if (!hid_descriptor_begin(&ext->desc, ext->usage.UsagePage, ext->usage.Usage))
         return FALSE;
 
     if (axis_count == 6 && button_count >= 14)
@@ -725,18 +726,48 @@ static void try_remove_device(DEVICE_OBJECT *device)
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
+static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD *version,
+                              WCHAR *serial, USAGE_AND_PAGE *usage)
+{
+    int button_count, axis_count;
+    SDL_JoystickGUID guid;
+    char guid_str[34];
+
+    if (pSDL_JoystickGetProductVersion != NULL)
+    {
+        *vid = pSDL_JoystickGetVendor(joystick);
+        *pid = pSDL_JoystickGetProduct(joystick);
+        *version = pSDL_JoystickGetProductVersion(joystick);
+    }
+    else
+    {
+        *vid = 0x01;
+        *pid = pSDL_JoystickInstanceID(joystick) + 1;
+        *version = 0;
+    }
+
+    guid = pSDL_JoystickGetGUID(joystick);
+    pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
+    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, serial, sizeof(guid_str));
+
+    if (usage->Usage != HID_USAGE_GENERIC_GAMEPAD)
+    {
+        axis_count = pSDL_JoystickNumAxes(joystick);
+        button_count = pSDL_JoystickNumButtons(joystick);
+        if (axis_count == 6 && button_count >= 14) usage->Usage = HID_USAGE_GENERIC_GAMEPAD;
+    }
+}
+
 static void try_add_device(unsigned int index)
 {
-    DWORD vid = 0, pid = 0, version = 0;
+    USAGE_AND_PAGE usage = {.UsagePage = HID_USAGE_PAGE_GENERIC};
+    WORD vid, pid, version, input;
     DEVICE_OBJECT *device = NULL;
     WCHAR serial[34] = {0};
-    char guid_str[34];
-    BOOL is_xbox_gamepad;
-    WORD input = -1;
+    BOOL is_gamepad;
 
     SDL_Joystick* joystick;
     SDL_JoystickID id;
-    SDL_JoystickGUID guid;
     SDL_GameController *controller = NULL;
 
     if ((joystick = pSDL_JoystickOpen(index)) == NULL)
@@ -749,45 +780,22 @@ static void try_add_device(unsigned int index)
         controller = pSDL_GameControllerOpen(index);
 
     id = pSDL_JoystickInstanceID(joystick);
-
-    if (pSDL_JoystickGetProductVersion != NULL) {
-        vid = pSDL_JoystickGetVendor(joystick);
-        pid = pSDL_JoystickGetProduct(joystick);
-        version = pSDL_JoystickGetProductVersion(joystick);
-    }
-    else
-    {
-        vid = 0x01;
-        pid = pSDL_JoystickInstanceID(joystick) + 1;
-        version = 0;
-    }
-
-    guid = pSDL_JoystickGetGUID(joystick);
-    pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
-    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, serial, sizeof(guid_str));
+    usage.Usage = controller ? HID_USAGE_GENERIC_GAMEPAD : HID_USAGE_GENERIC_JOYSTICK;
+    get_joystick_info(joystick, &vid, &pid, &version, serial, &usage);
 
     if (controller)
-    {
-        TRACE("Found sdl game controller %i (vid %04x, pid %04x, version %u, serial %s)\n",
-              id, vid, pid, version, debugstr_w(serial));
-        is_xbox_gamepad = TRUE;
-    }
+        TRACE("Found sdl controller %i (vid %04x, pid %04x, version %u, serial %s, usage %04x:%04x)\n",
+              id, vid, pid, version, debugstr_w(serial), usage.UsagePage, usage.Usage);
     else
-    {
-        int button_count, axis_count;
+        TRACE("Found sdl joystick %i (vid %04x, pid %04x, version %u, serial %s, usage %04x:%04x)\n",
+              id, vid, pid, version, debugstr_w(serial), usage.UsagePage, usage.Usage);
 
-        TRACE("Found sdl device %i (vid %04x, pid %04x, version %u, serial %s)\n",
-              id, vid, pid, version, debugstr_w(serial));
-
-        axis_count = pSDL_JoystickNumAxes(joystick);
-        button_count = pSDL_JoystickNumButtons(joystick);
-        is_xbox_gamepad = (axis_count == 6  && button_count >= 14);
-    }
-    if (is_xbox_gamepad)
-        input = 0;
+    is_gamepad = (usage.Usage == HID_USAGE_GENERIC_GAMEPAD);
+    if (is_gamepad) input = 0;
+    else input = -1;
 
     device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index,
-            serial, is_xbox_gamepad, &sdl_vtbl, sizeof(struct platform_private));
+            serial, is_gamepad, &sdl_vtbl, sizeof(struct platform_private));
 
     if (device)
     {
@@ -796,6 +804,7 @@ static void try_add_device(unsigned int index)
         private->sdl_joystick = joystick;
         private->sdl_controller = controller;
         private->id = id;
+        private->usage = usage;
 
         /* FIXME: We should probably move this to IRP_MN_START_DEVICE. */
         if (controller)
