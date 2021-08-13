@@ -42,6 +42,8 @@ struct iohid_bus_options
 {
 };
 
+struct unix_device;
+
 struct unix_funcs
 {
     NTSTATUS (WINAPI *sdl_bus_init)(void *);
