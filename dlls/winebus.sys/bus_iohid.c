@@ -191,9 +191,6 @@ static NTSTATUS iohid_device_get_string(struct unix_device *iface, DWORD index, 
     CFStringRef str;
     switch (index)
     {
-        case HID_STRING_ID_IPRODUCT:
-            str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDProductKey));
-            break;
         case HID_STRING_ID_ISERIALNUMBER:
             str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDSerialNumberKey));
             break;
@@ -296,6 +293,7 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
         .manufacturer = {0},
+        .product = {0},
     };
     struct platform_private *private;
     CFStringRef str = NULL;
@@ -318,6 +316,8 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 
     str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDManufacturerKey));
     if (str) lstrcpynA(desc.manufacturer, str, sizeof(desc.manufacturer));
+    str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductKey));
+    if (str) lstrcpynA(desc.product, str, sizeof(desc.product));
 
     if (IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_GamePad) ||
        IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_Joystick))

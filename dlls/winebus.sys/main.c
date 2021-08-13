@@ -125,6 +125,7 @@ struct device_extension
     struct
     {
         WCHAR manufacturer[MAX_PATH];
+        WCHAR product[MAX_PATH];
     } strings;
 
     BYTE *last_report;
@@ -329,6 +330,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     ext->unix_device        = unix_device;
 
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->strings.manufacturer, MAX_PATH);
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->strings.product, MAX_PATH);
 
     InitializeListHead(&ext->irp_queue);
     InitializeCriticalSection(&ext->cs);
@@ -905,6 +907,10 @@ static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     case HID_STRING_ID_IMANUFACTURER:
         if (strlenW(ext->strings.manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
         else strcpyW(buffer, ext->strings.manufacturer);
+        return STATUS_SUCCESS;
+    case HID_STRING_ID_IPRODUCT:
+        if (strlenW(ext->strings.product) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->strings.product);
         return STATUS_SUCCESS;
     }
 
