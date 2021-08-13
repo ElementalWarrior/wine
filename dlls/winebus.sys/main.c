@@ -74,7 +74,7 @@ static DEVICE_OBJECT *mouse_obj;
 static DEVICE_OBJECT *keyboard_obj;
 
 /* The root-enumerated device stack. */
-DEVICE_OBJECT *bus_pdo;
+static DEVICE_OBJECT *bus_pdo;
 static DEVICE_OBJECT *bus_fdo;
 
 HANDLE driver_key;
@@ -267,7 +267,7 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
     }
 }
 
-DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct unix_device *unix_device)
+static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct unix_device *unix_device)
 {
     static const WCHAR device_id_formatW[] =
     {
