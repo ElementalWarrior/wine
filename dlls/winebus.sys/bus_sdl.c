@@ -153,6 +153,8 @@ struct platform_private
     SDL_Haptic *sdl_haptic;
     int haptic_effect_id;
     DWORD haptics_support;
+
+    struct haptics haptics;
 };
 
 static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
@@ -274,7 +276,7 @@ static BOOL descriptor_add_haptic(struct platform_private *ext)
 
     if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
     {
-        if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id))
+        if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id, &ext->haptics))
             return FALSE;
     }
 
@@ -524,6 +526,17 @@ static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
         io->Information = packet->reportBufferLen;
         io->Status = STATUS_SUCCESS;
     }
+    else if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
+    {
+        handle_haptics_set_output_report(&ext->desc, &ext->haptics, packet, io);
+        if (io->Status != STATUS_SUCCESS) return;
+
+        memset(&effect, 0, sizeof(SDL_HapticEffect));
+        effect.type = SDL_HAPTIC_LEFTRIGHT;
+        effect.leftright.length = ext->haptics.features.waveform_cutoff_time;
+        effect.leftright.large_magnitude = ext->haptics.waveforms[HAPTICS_WAVEFORM_RUMBLE_INDEX].intensity;
+        effect.leftright.small_magnitude = ext->haptics.waveforms[HAPTICS_WAVEFORM_BUZZ_INDEX].intensity;
+    }
     else
     {
         io->Information = 0;
@@ -554,14 +567,28 @@ static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
 
 static void sdl_device_get_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
+    struct platform_private *ext = impl_from_unix_device(iface);
+
+    if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
+        handle_haptics_get_feature_report(&ext->desc, &ext->haptics, packet, io);
+    else
+    {
+        io->Information = 0;
+        io->Status = STATUS_NOT_IMPLEMENTED;
+    }
 }
 
 static void sdl_device_set_feature_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    io->Information = 0;
-    io->Status = STATUS_NOT_IMPLEMENTED;
+    struct platform_private *ext = impl_from_unix_device(iface);
+
+    if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
+        handle_haptics_set_feature_report(&ext->desc, &ext->haptics, packet, io);
+    else
+    {
+        io->Information = 0;
+        io->Status = STATUS_NOT_IMPLEMENTED;
+    }
 }
 
 static const struct unix_device_vtbl sdl_device_vtbl =

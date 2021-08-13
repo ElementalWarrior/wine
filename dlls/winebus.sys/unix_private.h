@@ -75,7 +75,39 @@ struct hid_descriptor
     BYTE *data;
     SIZE_T size;
     SIZE_T max_size;
+
+    BYTE haptics_feature_report;
+    BYTE haptics_waveform_report;
+
     BYTE next_report_id[3];
+};
+
+enum haptics_waveform_index
+{
+    HAPTICS_WAVEFORM_STOP_INDEX = 1,
+    HAPTICS_WAVEFORM_NULL_INDEX = 2,
+    HAPTICS_WAVEFORM_RUMBLE_INDEX = 3,
+    HAPTICS_WAVEFORM_BUZZ_INDEX = 4,
+    HAPTICS_WAVEFORM_LAST_INDEX = HAPTICS_WAVEFORM_BUZZ_INDEX,
+};
+
+struct haptics_features
+{
+    WORD  waveform_list[HAPTICS_WAVEFORM_LAST_INDEX - HAPTICS_WAVEFORM_NULL_INDEX];
+    WORD  duration_list[HAPTICS_WAVEFORM_LAST_INDEX - HAPTICS_WAVEFORM_NULL_INDEX];
+    DWORD waveform_cutoff_time;
+};
+
+struct haptics_waveform
+{
+    WORD manual_trigger;
+    WORD intensity;
+};
+
+struct haptics
+{
+    struct haptics_features features;
+    struct haptics_waveform waveforms[HAPTICS_WAVEFORM_LAST_INDEX + 1];
 };
 
 extern BOOL hid_descriptor_append(struct hid_descriptor *desc, const BYTE *buffer, SIZE_T size) DECLSPEC_HIDDEN;
@@ -93,6 +125,13 @@ extern BOOL hid_descriptor_add_hatswitch(struct hid_descriptor *desc, INT count)
 extern BOOL hid_descriptor_add_axes(struct hid_descriptor *desc, BYTE count, USAGE usage_page,
                                     const USAGE *usages, BOOL rel, INT size, LONG min, LONG max) DECLSPEC_HIDDEN;
 
-extern BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id) DECLSPEC_HIDDEN;
+extern BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id, struct haptics *haptics) DECLSPEC_HIDDEN;
+
+extern void handle_haptics_set_output_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                             HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;
+extern void handle_haptics_set_feature_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                             HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;
+extern void handle_haptics_get_feature_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                             HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;
 
 #endif /* __WINEBUS_UNIX_PRIVATE_H */

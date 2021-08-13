@@ -247,9 +247,11 @@ BOOL hid_descriptor_add_axes(struct hid_descriptor *desc, BYTE count, USAGE usag
     return TRUE;
 }
 
-BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id)
+BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id, struct haptics *haptics)
 {
     const BYTE report_id = ++desc->next_report_id[HidP_Output];
+    const BYTE haptics_feature_report = desc->haptics_feature_report = ++desc->next_report_id[HidP_Feature];
+    const BYTE haptics_waveform_report = desc->haptics_waveform_report = ++desc->next_report_id[HidP_Output];
     const BYTE template[] =
     {
         USAGE_PAGE(2, HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN),
@@ -273,10 +275,156 @@ BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id)
             REPORT_SIZE(1, 0x08),
             OUTPUT(1, Data|Var|Abs),
         END_COLLECTION,
+
+        USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+        USAGE(1, HID_USAGE_HAPTICS_SIMPLE_CONTROLLER),
+        COLLECTION(1, Logical),
+            REPORT_ID(1, haptics_feature_report),
+
+            USAGE(1, HID_USAGE_HAPTICS_WAVEFORM_LIST),
+            COLLECTION(1, NamedArray),
+                USAGE_PAGE(1, HID_USAGE_PAGE_ORDINAL),
+                USAGE(1, 3), /* HID_USAGE_HAPTICS_WAVEFORM_RUMBLE */
+                USAGE(1, 4), /* HID_USAGE_HAPTICS_WAVEFORM_BUZZ */
+                REPORT_COUNT(1, 2),
+                REPORT_SIZE(1, 16),
+                FEATURE(1, Data|Var|Abs|Null),
+            END_COLLECTION,
+
+            USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+            USAGE(1, HID_USAGE_HAPTICS_DURATION_LIST),
+            COLLECTION(1, NamedArray),
+                USAGE_PAGE(1, HID_USAGE_PAGE_ORDINAL),
+                USAGE(1, 3), /* 0 (HID_USAGE_HAPTICS_WAVEFORM_RUMBLE) */
+                USAGE(1, 4), /* 0 (HID_USAGE_HAPTICS_WAVEFORM_BUZZ) */
+                REPORT_COUNT(1, 2),
+                REPORT_SIZE(1, 16),
+                FEATURE(1, Data|Var|Abs|Null),
+            END_COLLECTION,
+
+            USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
+            USAGE(1, HID_USAGE_HAPTICS_WAVEFORM_CUTOFF_TIME),
+            UNIT(2, 0x1001), /* seconds */
+            UNIT_EXPONENT(1, -3), /* 10^-3 */
+            LOGICAL_MINIMUM(4, 0x00000000),
+            LOGICAL_MAXIMUM(4, 0x7fffffff),
+            PHYSICAL_MINIMUM(4, 0x00000000),
+            PHYSICAL_MAXIMUM(4, 0x7fffffff),
+            REPORT_SIZE(1, 32),
+            REPORT_COUNT(1, 1),
+            FEATURE(1, Data|Var|Abs),
+            /* reset global items */
+            UNIT(1, 0), /* None */
+            UNIT_EXPONENT(1, 0),
+
+            REPORT_ID(1, haptics_waveform_report),
+            USAGE(1, HID_USAGE_HAPTICS_MANUAL_TRIGGER),
+            LOGICAL_MINIMUM(1, 1),
+            LOGICAL_MAXIMUM(1, 4),
+            PHYSICAL_MINIMUM(1, 1),
+            PHYSICAL_MAXIMUM(1, 4),
+            REPORT_SIZE(1, 16),
+            REPORT_COUNT(1, 1),
+            OUTPUT(1, Data|Var|Abs),
+
+            USAGE(1, HID_USAGE_HAPTICS_INTENSITY),
+            LOGICAL_MINIMUM(4, 0x00000000),
+            LOGICAL_MAXIMUM(4, 0x0000ffff),
+            PHYSICAL_MINIMUM(4, 0x00000000),
+            PHYSICAL_MAXIMUM(4, 0x0000ffff),
+            REPORT_SIZE(1, 16),
+            REPORT_COUNT(1, 1),
+            OUTPUT(1, Data|Var|Abs),
+        END_COLLECTION,
     };
 
     *id = report_id;
-    return hid_descriptor_append(desc, template, sizeof(template));
+    if (!hid_descriptor_append(desc, template, sizeof(template))) return FALSE;
+
+    haptics->features.waveform_list[0] = HID_USAGE_HAPTICS_WAVEFORM_RUMBLE;
+    haptics->features.waveform_list[1] = HID_USAGE_HAPTICS_WAVEFORM_BUZZ;
+    haptics->features.duration_list[0] = 0;
+    haptics->features.duration_list[1] = 0;
+    haptics->features.waveform_cutoff_time = 1000;
+    return TRUE;
+}
+
+void handle_haptics_set_output_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                      HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    ULONG capacity = packet->reportBufferLen;
+
+    if (packet->reportId == desc->haptics_waveform_report)
+    {
+        struct haptics_waveform *output = (struct haptics_waveform *)(packet->reportBuffer + 1);
+        io->Information = sizeof(*output) + 1;
+
+        if (capacity < io->Information)
+            io->Status = STATUS_BUFFER_TOO_SMALL;
+        else if (output->manual_trigger == 0 || output->manual_trigger > HAPTICS_WAVEFORM_LAST_INDEX)
+            io->Status = STATUS_INVALID_PARAMETER;
+        else
+        {
+            if (output->manual_trigger == HAPTICS_WAVEFORM_STOP_INDEX) memset(haptics->waveforms, 0, sizeof(haptics->waveforms));
+            else haptics->waveforms[output->manual_trigger] = *output;
+            io->Status = STATUS_SUCCESS;
+        }
+    }
+    else
+    {
+        io->Information = 0;
+        io->Status = STATUS_NOT_IMPLEMENTED;
+    }
+}
+
+void handle_haptics_set_feature_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                       HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    ULONG capacity = packet->reportBufferLen;
+
+    if (packet->reportId == desc->haptics_feature_report)
+    {
+        struct haptics_features *features = (struct haptics_features *)(packet->reportBuffer + 1);
+        io->Information = sizeof(*features) + 1;
+
+        if (capacity < io->Information)
+            io->Status = STATUS_BUFFER_TOO_SMALL;
+        else
+        {
+            haptics->features.waveform_cutoff_time = features->waveform_cutoff_time;
+            io->Status = STATUS_SUCCESS;
+        }
+    }
+    else
+    {
+        io->Information = 0;
+        io->Status = STATUS_NOT_IMPLEMENTED;
+    }
+}
+
+void handle_haptics_get_feature_report(struct hid_descriptor *desc, struct haptics *haptics,
+                                       HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    ULONG capacity = packet->reportBufferLen;
+
+    if (packet->reportId == desc->haptics_feature_report)
+    {
+        struct haptics_features *features = (struct haptics_features *)(packet->reportBuffer + 1);
+        io->Information = sizeof(*features) + 1;
+
+        if (capacity < io->Information)
+            io->Status = STATUS_BUFFER_TOO_SMALL;
+        else
+        {
+            *features = haptics->features;
+            io->Status = STATUS_SUCCESS;
+        }
+    }
+    else
+    {
+        io->Information = 0;
+        io->Status = STATUS_NOT_IMPLEMENTED;
+    }
 }
 
 #include "pop_hid_macros.h"
