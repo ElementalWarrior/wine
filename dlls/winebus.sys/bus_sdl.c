@@ -523,9 +523,6 @@ static NTSTATUS sdl_device_get_string(struct unix_device *iface, DWORD index, WC
 
     switch (index)
     {
-        case HID_STRING_ID_ISERIALNUMBER:
-            str = "000000";
-            break;
         default:
             ERR("Unhandled string index %i\n", index);
     }
@@ -728,7 +725,6 @@ static void get_joystick_info(SDL_Joystick *joystick, struct device_desc *desc, 
 {
     int button_count, axis_count;
     SDL_JoystickGUID guid;
-    char guid_str[34];
 
     if (pSDL_JoystickGetProductVersion != NULL)
     {
@@ -744,8 +740,7 @@ static void get_joystick_info(SDL_Joystick *joystick, struct device_desc *desc, 
     }
 
     guid = pSDL_JoystickGetGUID(joystick);
-    pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
-    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, desc->serial, sizeof(guid_str));
+    pSDL_JoystickGetGUIDString(guid, desc->serialnumber, sizeof(desc->serialnumber));
 
     if (usage->Usage != HID_USAGE_GENERIC_GAMEPAD)
     {
@@ -765,10 +760,10 @@ static void try_add_device(unsigned int index)
         .version = 0,
         .input = -1,
         .uid = 0,
-        .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
         .manufacturer = {"SDL"},
         .product = {0},
+        .serialnumber = {"0000"},
     };
     USAGE_AND_PAGE usage = {.UsagePage = HID_USAGE_PAGE_GENERIC};
     struct platform_private *private;
@@ -795,10 +790,10 @@ static void try_add_device(unsigned int index)
 
     if (controller)
         TRACE("Found sdl controller %i (vendor_id %04x, product_id %04x, version %u, serial %s, usage %04x:%04x)\n",
-              id, desc.vendor_id, desc.product_id, desc.version, debugstr_w(desc.serial), usage.UsagePage, usage.Usage);
+              id, desc.vendor_id, desc.product_id, desc.version, debugstr_a(desc.serialnumber), usage.UsagePage, usage.Usage);
     else
         TRACE("Found sdl joystick %i (vendor_id %04x, product_id %04x, version %u, serial %s, usage %04x:%04x)\n",
-              id, desc.vendor_id, desc.product_id, desc.version, debugstr_w(desc.serial), usage.UsagePage, usage.Usage);
+              id, desc.vendor_id, desc.product_id, desc.version, debugstr_a(desc.serialnumber), usage.UsagePage, usage.Usage);
 
     desc.is_gamepad = (usage.Usage == HID_USAGE_GENERIC_GAMEPAD);
     if (desc.is_gamepad) desc.input = 0;

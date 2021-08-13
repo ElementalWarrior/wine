@@ -38,11 +38,11 @@ struct device_desc
     DWORD version;
     WORD input;
     DWORD uid;
-    WCHAR serial[256];
     BOOL is_gamepad;
 
     char manufacturer[MAX_PATH];
     char product[MAX_PATH];
+    char serialnumber[MAX_PATH];
 };
 
 struct sdl_bus_options

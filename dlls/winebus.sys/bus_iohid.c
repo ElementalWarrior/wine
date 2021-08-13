@@ -191,9 +191,6 @@ static NTSTATUS iohid_device_get_string(struct unix_device *iface, DWORD index, 
     CFStringRef str;
     switch (index)
     {
-        case HID_STRING_ID_ISERIALNUMBER:
-            str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDSerialNumberKey));
-            break;
         default:
             ERR("Unknown string index\n");
             return STATUS_NOT_IMPLEMENTED;
@@ -290,10 +287,10 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         .version = 0,
         .input = -1,
         .uid = 0,
-        .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
         .manufacturer = {0},
         .product = {0},
+        .serialnumber = {"0000"},
     };
     struct platform_private *private;
     CFStringRef str = NULL;
@@ -303,8 +300,6 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
     desc.vendor_id = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVendorIDKey)));
     desc.product_id = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductIDKey)));
     desc.version = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVersionNumberKey)));
-    str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDSerialNumberKey));
-    if (str) CFStringToWSTR(str, desc.serial, ARRAY_SIZE(desc.serial));
     desc.uid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDLocationIDKey)));
 
     if (IOHIDDeviceOpen(IOHIDDevice, 0) != kIOReturnSuccess)
@@ -318,6 +313,8 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
     if (str) lstrcpynA(desc.manufacturer, str, sizeof(desc.manufacturer));
     str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductKey));
     if (str) lstrcpynA(desc.product, str, sizeof(desc.product));
+    str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDSerialNumberKey));
+    if (str) lstrcpynA(desc.serialnumber, str, sizeof(desc.serialnumber));
 
     if (IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_GamePad) ||
        IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_Joystick))

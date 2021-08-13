@@ -522,28 +522,6 @@ static BOOL set_report_from_event(struct wine_input_private *ext, struct input_e
 }
 #endif
 
-static inline WCHAR *strdupAtoW(const char *src)
-{
-    WCHAR *dst;
-    DWORD len;
-    if (!src) return NULL;
-    len = MultiByteToWideChar(CP_UNIXCP, 0, src, -1, NULL, 0);
-    if ((dst = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
-        MultiByteToWideChar(CP_UNIXCP, 0, src, -1, dst, len);
-    return dst;
-}
-
-static WCHAR *get_sysattr_string(struct udev_device *dev, const char *sysattr)
-{
-    const char *attr = udev_device_get_sysattr_value(dev, sysattr);
-    if (!attr)
-    {
-        WARN("Could not get %s from device\n", sysattr);
-        return NULL;
-    }
-    return strdupAtoW(attr);
-}
-
 static void hidraw_device_destroy(struct unix_device *iface)
 {
     struct platform_private *private = impl_from_unix_device(iface);
@@ -637,9 +615,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
     {
         switch (index)
         {
-            case HID_STRING_ID_ISERIALNUMBER:
-                str = get_sysattr_string(usbdev, "serial");
-                break;
             default:
                 ERR("Unhandled string index %08x\n", index);
                 return STATUS_NOT_IMPLEMENTED;
@@ -650,8 +625,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
 #ifdef HAVE_LINUX_HIDRAW_H
         switch (index)
         {
-            case HID_STRING_ID_ISERIALNUMBER:
-                break;
             default:
                 ERR("Unhandled string index %08x\n", index);
                 return STATUS_NOT_IMPLEMENTED;
@@ -899,15 +872,11 @@ static NTSTATUS lnxev_device_get_report_descriptor(struct unix_device *iface, BY
 
 static NTSTATUS lnxev_device_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
 {
-    struct wine_input_private *ext = input_impl_from_unix_device(iface);
     char str[255];
 
     str[0] = 0;
     switch (index)
     {
-        case HID_STRING_ID_ISERIALNUMBER:
-            ioctl(ext->base.device_fd, EVIOCGUNIQ(sizeof(str)), str);
-            break;
         default:
             ERR("Unhandled string index %i\n", index);
     }
@@ -998,65 +967,24 @@ static int check_device_syspath(DEVICE_OBJECT *device, void* context)
     return strcmp(get_device_syspath(private->udev_device), context);
 }
 
-static int parse_uevent_info(const char *uevent, struct device_desc *desc)
+static void parse_uevent_info(const char *uevent, struct device_desc *desc)
 {
+    const char *ptr, *next = uevent, *tmp;
     DWORD bus_type;
-    char *tmp;
-    char *saveptr = NULL;
-    char *line;
-    char *key;
-    char *value;
 
-    int found_id = 0;
-    int found_serial = 0;
-
-    tmp = heap_alloc(strlen(uevent) + 1);
-    strcpy(tmp, uevent);
-    line = strtok_r(tmp, "\n", &saveptr);
-    while (line != NULL)
+    while ((ptr = next))
     {
-        /* line: "KEY=value" */
-        key = line;
-        value = strchr(line, '=');
-        if (!value)
-        {
-            goto next_line;
-        }
-        *value = '\0';
-        value++;
-
-        if (strcmp(key, "HID_ID") == 0)
-        {
-            /**
-             *        type vendor   product
-             * HID_ID=0003:000005AC:00008242
-             **/
-            int ret = sscanf(value, "%x:%hx:%hx", &bus_type, &desc->vendor_id, &desc->product_id);
-            if (ret == 3)
-                found_id = 1;
-        }
-        else if (strcmp(key, "HID_UNIQ") == 0)
-        {
-            /* The caller has to free the serial number */
-            if (*value)
-            {
-                if (MultiByteToWideChar(CP_UNIXCP, 0, value, -1, desc->serial, ARRAY_SIZE(desc->serial)))
-                    found_serial = 1;
-            }
-        }
-        else if (strcmp(key, "HID_PHYS") == 0)
-        {
-            const char *input_no = strstr(value, "input");
-            if (input_no)
-                desc->input = atoi(input_no+5 );
-        }
-
-next_line:
-        line = strtok_r(NULL, "\n", &saveptr);
+        if ((next = strchr(next, '\n'))) next += 1;
+        if (!strncmp(ptr, "HID_UNIQ=", 9))
+            sscanf(ptr, "HID_UNIQ=%256s\n", desc->serialnumber);
+        if (!strncmp(ptr, "HID_PHYS=", 9) && (tmp = strstr(ptr, "/input")) && tmp < next)
+            sscanf(tmp, "/input%hd\n", &desc->input);
+        if (!strncmp(ptr, "HID_ID=", 7))
+            sscanf(ptr, "HID_ID=%x:%hx:%hx\n", &bus_type, &desc->vendor_id, &desc->product_id);
     }
 
-    heap_free(tmp);
-    return (found_id && found_serial);
+    TRACE("parsed uevent bus %d vid %04x pid %04x serial %s, input %d\n", bus_type, desc->vendor_id,
+          desc->product_id, desc->serialnumber, desc->input);
 }
 
 static DWORD a_to_bcd(const char *s)
@@ -1076,11 +1004,14 @@ static void get_device_info(struct udev_device *dev, struct device_desc *desc)
 {
     const char *str;
 
-    if (!desc->product[0] && (str = udev_device_get_sysattr_value(dev, "product")))
-        lstrcpynA(desc->product, str, ARRAY_SIZE(desc->product));
-
     if (!desc->manufacturer[0] && (str = udev_device_get_sysattr_value(dev, "manufacturer")))
         lstrcpynA(desc->manufacturer, str, sizeof(desc->manufacturer));
+
+    if (!desc->product[0] && (str = udev_device_get_sysattr_value(dev, "product")))
+        lstrcpynA(desc->product, str, sizeof(desc->product));
+
+    if (!desc->serialnumber[0] && (str = udev_device_get_sysattr_value(dev, "serial")))
+        lstrcpynA(desc->serialnumber, str, sizeof(desc->serialnumber));
 }
 
 static void try_add_device(struct udev_device *dev)
@@ -1093,10 +1024,10 @@ static void try_add_device(struct udev_device *dev)
         .version = 0,
         .input = -1,
         .uid = 0,
-        .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
         .manufacturer = {0},
         .product = {0},
+        .serialnumber = {"0000"},
     };
 
     struct udev_device *parent = NULL, *walk_device;
@@ -1156,13 +1087,12 @@ static void try_add_device(struct udev_device *dev)
     else
     {
         struct input_id device_id = {0};
-        char device_uid[255];
 
         if (ioctl(fd, EVIOCGID, &device_id) < 0)
             WARN("ioctl(EVIOCGID) failed: %d %s\n", errno, strerror(errno));
-        device_uid[0] = 0;
-        if (ioctl(fd, EVIOCGUNIQ(254), device_uid) >= 0 && device_uid[0])
-            MultiByteToWideChar(CP_UNIXCP, 0, device_uid, -1, desc.serial, ARRAY_SIZE(desc.serial));
+
+        if (!desc.serialnumber[0] && ioctl(fd, EVIOCGUNIQ(sizeof(desc.serialnumber)), desc.serialnumber) < 0)
+            desc.serialnumber[0] = 0;
 
         desc.vendor_id = device_id.vendor;
         desc.product_id = device_id.product;
@@ -1189,7 +1119,8 @@ static void try_add_device(struct udev_device *dev)
 
 
     TRACE("Found udev device %s (vid %04x, pid %04x, version %u, serial %s)\n",
-          debugstr_a(devnode), desc.vendor_id, desc.product_id, desc.version, debugstr_w(desc.serial));
+          debugstr_a(devnode), desc.vendor_id, desc.product_id, desc.version,
+          debugstr_a(desc.serialnumber));
 
     if (strcmp(subsystem, "hidraw") == 0)
     {
