@@ -166,12 +166,6 @@ static void unix_device_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKE
     return unix_funcs->device_set_feature_report(ext->unix_device, packet, io);
 }
 
-struct unix_device *get_unix_device(DEVICE_OBJECT *device)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return ext->unix_device;
-}
-
 static DWORD get_device_index(struct device_desc *desc)
 {
     struct pnp_device *ptr;
