@@ -98,9 +98,19 @@ WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
 static struct iohid_bus_options options;
 
+static CRITICAL_SECTION iohid_cs;
+static CRITICAL_SECTION_DEBUG iohid_cs_debug =
+{
+    0, 0, &iohid_cs,
+    { &iohid_cs_debug.ProcessLocksList, &iohid_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": iohid_cs") }
+};
+static CRITICAL_SECTION iohid_cs = { &iohid_cs_debug, -1, 0, 0, 0, 0 };
+
 static IOHIDManagerRef hid_manager;
 static CFRunLoopRef run_loop;
 static struct list event_queue = LIST_INIT(event_queue);
+static struct list device_list = LIST_INIT(device_list);
 
 static const WCHAR busidW[] = {'I','O','H','I','D',0};
 
@@ -173,6 +183,10 @@ static void iohid_device_stop(struct unix_device *iface)
     struct platform_private *private = impl_from_unix_device(iface);
 
     IOHIDDeviceRegisterInputReportCallback(private->device, NULL, 0, NULL, NULL);
+
+    EnterCriticalSection(&iohid_cs);
+    list_remove(&private->unix_device.entry);
+    LeaveCriticalSection(&iohid_cs);
 }
 
 static NTSTATUS iohid_device_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length)
@@ -344,6 +358,7 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         desc.input = 0;
 
     if (!(private = unix_device_create(&iohid_device_vtbl, sizeof(*private)))) return;
+    list_add_tail(&device_list, &private->unix_device.entry);
     private->device = IOHIDDevice;
     private->buffer = NULL;
 
@@ -380,6 +395,7 @@ NTSTATUS WINAPI iohid_bus_init(void *args)
 NTSTATUS WINAPI iohid_bus_wait(void *args)
 {
     struct bus_event **result = args;
+    CFRunLoopRunResult result;
 
     /* destroy previously returned event */
     if (*result) bus_event_destroy(*result);
@@ -388,7 +404,10 @@ NTSTATUS WINAPI iohid_bus_wait(void *args)
     do
     {
         if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
-    } while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, TRUE) != kCFRunLoopRunStopped);
+        EnterCriticalSection(&iohid_cs);
+        result = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, TRUE);
+        LeaveCriticalSection(&iohid_cs);
+    } while (result != kCFRunLoopRunStopped);
 
     TRACE("IOHID main loop exiting\n");
     bus_event_queue_destroy(&event_queue);
