@@ -130,12 +130,6 @@ static void unix_device_remove(DEVICE_OBJECT *device)
     return unix_funcs->device_remove(ext->unix_device);
 }
 
-static int unix_device_compare(DEVICE_OBJECT *device, void *context)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return unix_funcs->device_compare(ext->unix_device, context);
-}
-
 static NTSTATUS unix_device_start(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;

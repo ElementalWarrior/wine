@@ -109,7 +109,6 @@ struct unix_funcs
     NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **, struct device_desc *);
 
     void (WINAPI *device_remove)(struct unix_device *iface);
-    int (WINAPI *device_compare)(struct unix_device *iface, void *context);
     NTSTATUS (WINAPI *device_start)(struct unix_device *iface);
     NTSTATUS (WINAPI *device_get_report_descriptor)(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length);
     void (WINAPI *device_set_output_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
