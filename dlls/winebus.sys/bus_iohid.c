@@ -194,9 +194,6 @@ static NTSTATUS iohid_device_get_string(struct unix_device *iface, DWORD index, 
         case HID_STRING_ID_IPRODUCT:
             str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDProductKey));
             break;
-        case HID_STRING_ID_IMANUFACTURER:
-            str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDManufacturerKey));
-            break;
         case HID_STRING_ID_ISERIALNUMBER:
             str = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDSerialNumberKey));
             break;
@@ -298,6 +295,7 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         .uid = 0,
         .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
+        .manufacturer = {0},
     };
     struct platform_private *private;
     CFStringRef str = NULL;
@@ -317,6 +315,9 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         return;
     }
     IOHIDDeviceScheduleWithRunLoop(IOHIDDevice, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+
+    str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDManufacturerKey));
+    if (str) lstrcpynA(desc.manufacturer, str, sizeof(desc.manufacturer));
 
     if (IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_GamePad) ||
        IOHIDDeviceConformsTo(IOHIDDevice, kHIDPage_GenericDesktop, kHIDUsage_GD_Joystick))

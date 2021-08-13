@@ -640,9 +640,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
             case HID_STRING_ID_IPRODUCT:
                 str = get_sysattr_string(usbdev, "product");
                 break;
-            case HID_STRING_ID_IMANUFACTURER:
-                str = get_sysattr_string(usbdev, "manufacturer");
-                break;
             case HID_STRING_ID_ISERIALNUMBER:
                 str = get_sysattr_string(usbdev, "serial");
                 break;
@@ -665,8 +662,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
                     str = strdupAtoW(buf);
                 break;
             }
-            case HID_STRING_ID_IMANUFACTURER:
-                break;
             case HID_STRING_ID_ISERIALNUMBER:
                 break;
             default:
@@ -925,9 +920,6 @@ static NTSTATUS lnxev_device_get_string(struct unix_device *iface, DWORD index, 
         case HID_STRING_ID_IPRODUCT:
             ioctl(ext->base.device_fd, EVIOCGNAME(sizeof(str)), str);
             break;
-        case HID_STRING_ID_IMANUFACTURER:
-            strcpy(str,"evdev");
-            break;
         case HID_STRING_ID_ISERIALNUMBER:
             ioctl(ext->base.device_fd, EVIOCGUNIQ(sizeof(str)), str);
             break;
@@ -1095,6 +1087,14 @@ static DWORD a_to_bcd(const char *s)
     return r;
 }
 
+static void get_device_info(struct udev_device *dev, struct device_desc *desc)
+{
+    const char *str;
+
+    if (!desc->manufacturer[0] && (str = udev_device_get_sysattr_value(dev, "manufacturer")))
+        lstrcpynA(desc->manufacturer, str, sizeof(desc->manufacturer));
+}
+
 static void try_add_device(struct udev_device *dev)
 {
     struct device_desc desc =
@@ -1107,9 +1107,10 @@ static void try_add_device(struct udev_device *dev)
         .uid = 0,
         .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
+        .manufacturer = {0},
     };
 
-    struct udev_device *hiddev = NULL, *walk_device;
+    struct udev_device *parent = NULL, *walk_device;
     struct platform_private *private;
     DEVICE_OBJECT *device = NULL;
     const char *subsystem;
@@ -1139,11 +1140,17 @@ static void try_add_device(struct udev_device *dev)
 #endif
 
     subsystem = udev_device_get_subsystem(dev);
-    hiddev = udev_device_get_parent_with_subsystem_devtype(dev, "hid", NULL);
-    if (hiddev)
+    get_device_info(dev, &desc);
+
+    if ((parent = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device")))
+        get_device_info(parent, &desc);
+
+    if ((parent = udev_device_get_parent_with_subsystem_devtype(dev, "hid", NULL)))
     {
         const char *bcdDevice = NULL;
-        parse_uevent_info(udev_device_get_sysattr_value(hiddev, "uevent"), &desc);
+        get_device_info(parent, &desc);
+
+        parse_uevent_info(udev_device_get_sysattr_value(parent, "uevent"), &desc);
 
         walk_device = dev;
         while (walk_device && !bcdDevice)
@@ -1198,6 +1205,8 @@ static void try_add_device(struct udev_device *dev)
     if (strcmp(subsystem, "hidraw") == 0)
     {
         desc.bus_id = hidraw_busidW;
+        if (!desc.manufacturer[0]) strcpy(desc.manufacturer, "hidraw");
+
         if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct platform_private))))
             return;
         private->unix_device.vtbl = &hidraw_device_vtbl;
@@ -1210,6 +1219,8 @@ static void try_add_device(struct udev_device *dev)
     else if (strcmp(subsystem, "input") == 0)
     {
         desc.bus_id = lnxev_busidW;
+        if (!desc.manufacturer[0]) strcpy(desc.manufacturer, "evdev");
+
         if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct wine_input_private))))
             return;
         private->unix_device.vtbl = &lnxev_device_vtbl;

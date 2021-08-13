@@ -122,6 +122,11 @@ struct device_extension
     struct device_desc desc;
     DWORD index;
 
+    struct
+    {
+        WCHAR manufacturer[MAX_PATH];
+    } strings;
+
     BYTE *last_report;
     DWORD last_report_size;
     BOOL last_report_read;
@@ -322,6 +327,8 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     ext->last_report_read   = TRUE;
     ext->buffer_size        = 0;
     ext->unix_device        = unix_device;
+
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->strings.manufacturer, MAX_PATH);
 
     InitializeListHead(&ext->irp_queue);
     InitializeCriticalSection(&ext->cs);
@@ -889,6 +896,21 @@ static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     return STATUS_UNSUCCESSFUL;
 }
 
+static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+
+    switch (index)
+    {
+    case HID_STRING_ID_IMANUFACTURER:
+        if (strlenW(ext->strings.manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->strings.manufacturer);
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
@@ -981,6 +1003,8 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
             irp->IoStatus.Status = hid_get_native_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+            if (irp->IoStatus.Status != STATUS_SUCCESS)
+                irp->IoStatus.Status = hid_get_device_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status != STATUS_SUCCESS)
                 irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
