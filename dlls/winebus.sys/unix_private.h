@@ -79,6 +79,26 @@ struct hid_descriptor
     BYTE haptics_feature_report;
     BYTE haptics_waveform_report;
 
+    BYTE physical_device_state_report;
+    BYTE physical_device_gain_report;
+
+    BYTE physical_create_effect_report;
+    BYTE physical_query_effect_report;
+    BYTE physical_free_effect_report;
+
+    BYTE physical_set_effect_report;
+    BYTE physical_effect_operation_report;
+    BYTE physical_effect_state_report;
+
+    BYTE physical_set_envelope_report;
+    BYTE physical_set_periodic_report;
+    BYTE physical_set_condition_report;
+    BYTE physical_set_constant_report;
+    BYTE physical_set_ramp_report;
+    BYTE physical_custom_force_data_report;
+    BYTE physical_download_force_sample_report;
+    BYTE physical_set_custom_force_report;
+
     BYTE next_report_id[3];
 };
 
@@ -133,5 +153,7 @@ extern void handle_haptics_set_feature_report(struct hid_descriptor *desc, struc
                                              HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;
 extern void handle_haptics_get_feature_report(struct hid_descriptor *desc, struct haptics *haptics,
                                              HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;
+
+extern BOOL hid_descriptor_add_physical_effects(struct hid_descriptor *desc, USHORT count, USAGE *usages) DECLSPEC_HIDDEN;
 
 #endif /* __WINEBUS_UNIX_PRIVATE_H */

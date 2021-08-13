@@ -253,7 +253,9 @@ typedef USHORT USAGE, *PUSAGE;
 #define HID_USAGE_HAPTICS_WAVEFORM_VENDOR_BEGIN     ((USAGE) 0x2000)
 #define HID_USAGE_HAPTICS_WAVEFORM_VENDOR_END       ((USAGE) 0x2FFF)
 
-/* Wine-specific defines */
+/* Wine specific usages */
+#define HID_USAGE_PAGE_VENDOR_WINE               ((USAGE) 0xff83)
+
 /* From https://www.usb.org/sites/default/files/documents/pid1_01.pdf */
 #define WINE_HID_USAGE_PID_UNDEFINED                ((USAGE) 0x00)
 #define WINE_HID_USAGE_PID_PID                      ((USAGE) 0x01)

@@ -257,7 +257,11 @@ static void set_hat_value(struct platform_private *ext, int index, int value)
 
 static BOOL descriptor_add_haptic(struct platform_private *ext)
 {
-    unsigned int mask = SDL_HAPTIC_LEFTRIGHT;
+    unsigned int mask = SDL_HAPTIC_LEFTRIGHT|SDL_HAPTIC_CONSTANT|SDL_HAPTIC_RAMP|SDL_HAPTIC_SINE|SDL_HAPTIC_TRIANGLE|
+                        SDL_HAPTIC_SAWTOOTHUP|SDL_HAPTIC_SAWTOOTHDOWN|SDL_HAPTIC_SPRING|SDL_HAPTIC_DAMPER|SDL_HAPTIC_INERTIA|
+                        SDL_HAPTIC_FRICTION|SDL_HAPTIC_CUSTOM;
+    USHORT count = 0;
+    USAGE usages[16];
 
     if (!pSDL_JoystickIsHaptic(ext->sdl_joystick) ||
         !(ext->sdl_haptic = pSDL_HapticOpenFromJoystick(ext->sdl_joystick)))
@@ -278,6 +282,22 @@ static BOOL descriptor_add_haptic(struct platform_private *ext)
         if (!hid_descriptor_add_haptics(&ext->desc, &ext->haptics))
             return FALSE;
     }
+
+    if (ext->haptics_support & SDL_HAPTIC_CONSTANT) usages[count++] = WINE_HID_USAGE_PID_ET_CONSTANT_FORCE;
+    if (ext->haptics_support & SDL_HAPTIC_RAMP) usages[count++] = WINE_HID_USAGE_PID_ET_RAMP;
+    if (ext->haptics_support & SDL_HAPTIC_SINE) usages[count++] = WINE_HID_USAGE_PID_ET_SINE;
+    /* if (ext->haptics_support & SDL_HAPTIC_SQUARE) usages[count++] = WINE_HID_USAGE_PID_ET_SQUARE; doesn't exist */
+    if (ext->haptics_support & SDL_HAPTIC_TRIANGLE) usages[count++] = WINE_HID_USAGE_PID_ET_TRIANGLE;
+    if (ext->haptics_support & SDL_HAPTIC_SAWTOOTHUP) usages[count++] = WINE_HID_USAGE_PID_ET_SAWTOOTH_UP;
+    if (ext->haptics_support & SDL_HAPTIC_SAWTOOTHDOWN) usages[count++] = WINE_HID_USAGE_PID_ET_SAWTOOTH_DOWN;
+    if (ext->haptics_support & SDL_HAPTIC_SPRING) usages[count++] = WINE_HID_USAGE_PID_ET_SPRING;
+    if (ext->haptics_support & SDL_HAPTIC_DAMPER) usages[count++] = WINE_HID_USAGE_PID_ET_DAMPER;
+    if (ext->haptics_support & SDL_HAPTIC_INERTIA) usages[count++] = WINE_HID_USAGE_PID_ET_INERTIA;
+    if (ext->haptics_support & SDL_HAPTIC_FRICTION) usages[count++] = WINE_HID_USAGE_PID_ET_FRICTION;
+    if (ext->haptics_support & SDL_HAPTIC_CUSTOM) usages[count++] = WINE_HID_USAGE_PID_ET_CUSTOM_FORCE_DATA;
+
+    if (count && !hid_descriptor_add_physical_effects(&ext->desc, count, usages))
+        return FALSE;
 
     ext->haptic_effect_id = -1;
     return TRUE;
