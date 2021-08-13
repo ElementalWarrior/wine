@@ -103,6 +103,7 @@ static struct udev *udev_context = NULL;
 static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
 static struct list event_queue = LIST_INIT(event_queue);
+static struct list device_list = LIST_INIT(device_list);
 
 static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
 static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
@@ -111,6 +112,7 @@ struct platform_private
 {
     struct unix_device unix_device;
     void (*read_report)(struct unix_device *iface);
+    const char *path;
 
     struct udev_device *udev_device;
     int device_fd;
@@ -119,11 +121,6 @@ struct platform_private
 static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
 {
     return CONTAINING_RECORD(iface, struct platform_private, unix_device);
-}
-
-static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
-{
-    return impl_from_unix_device(get_unix_device(device));
 }
 
 #define MAX_DEVICES 128
@@ -178,6 +175,16 @@ static struct platform_private *find_device_from_fd(int fd)
 
     for (i = 2; i < poll_count; ++i) if (poll_fds[i].fd == fd) break;
     if (i < poll_count) return  poll_devs[i];
+
+    return NULL;
+}
+
+static struct platform_private *find_device_from_path(const char *path)
+{
+    struct platform_private *device;
+
+    LIST_FOR_EACH_ENTRY(device, &device_list, struct platform_private, unix_device.entry)
+        if (!strcmp(device->path, path)) return device;
 
     return NULL;
 }
@@ -610,8 +617,11 @@ static NTSTATUS hidraw_device_start(struct unix_device *iface)
 
 static void hidraw_device_stop(struct unix_device *iface)
 {
+    struct platform_private *private = impl_from_unix_device(iface);
+
     EnterCriticalSection(&udev_cs);
     stop_polling_device(iface);
+    list_remove(&private->unix_device.entry);
     LeaveCriticalSection(&udev_cs);
 }
 
@@ -809,8 +819,11 @@ static NTSTATUS lnxev_device_start(struct unix_device *iface)
 
 static void lnxev_device_stop(struct unix_device *iface)
 {
+    struct wine_input_private *ext = input_impl_from_unix_device(iface);
+
     EnterCriticalSection(&udev_cs);
     stop_polling_device(iface);
+    list_remove(&ext->base.unix_device.entry);
     LeaveCriticalSection(&udev_cs);
 }
 
@@ -887,12 +900,6 @@ static const char *get_device_syspath(struct udev_device *dev)
     return "";
 }
 
-static int check_device_syspath(DEVICE_OBJECT *device, void* context)
-{
-    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
-    return strcmp(get_device_syspath(private->udev_device), context);
-}
-
 static void parse_uevent_info(const char *uevent, struct device_desc *desc)
 {
     const char *ptr, *next = uevent, *tmp;
@@ -958,9 +965,9 @@ static void try_add_device(struct udev_device *dev)
 
     struct udev_device *parent = NULL, *walk_device;
     struct platform_private *private;
-    DEVICE_OBJECT *device = NULL;
     const char *subsystem;
     const char *devnode;
+    const char *path;
     int fd;
 
     if (!(devnode = udev_device_get_devnode(dev)))
@@ -974,10 +981,9 @@ static void try_add_device(struct udev_device *dev)
 
     TRACE("udev %s syspath %s\n", debugstr_a(devnode), udev_device_get_syspath(dev));
 
+    path = get_device_syspath(dev);
 #ifdef HAS_PROPER_INPUT_HEADER
-    device = bus_enumerate_hid_devices(lnxev_busidW, check_device_syspath, (void *)get_device_syspath(dev));
-    if (!device) device = bus_enumerate_hid_devices(hidraw_busidW, check_device_syspath, (void *)get_device_syspath(dev));
-    if (device)
+    if ((private = find_device_from_path(path)))
     {
         TRACE("duplicate device found, not adding the new one\n");
         close(fd);
@@ -1058,7 +1064,9 @@ static void try_add_device(struct udev_device *dev)
 #endif
 
         if (!(private = unix_device_create(&hidraw_device_vtbl, sizeof(*private)))) return;
+        list_add_tail(&device_list, &private->unix_device.entry);
         private->read_report = hidraw_device_read_report;
+        private->path = path;
         private->udev_device = udev_device_ref(dev);
         private->device_fd = fd;
 
@@ -1073,7 +1081,9 @@ static void try_add_device(struct udev_device *dev)
             desc.product[0] = 0;
 
         if (!(private = unix_device_create(&lnxev_device_vtbl, sizeof(*private)))) return;
+        list_add_tail(&device_list, &private->unix_device.entry);
         private->read_report = lnxev_device_read_report;
+        private->path = path;
         private->udev_device = udev_device_ref(dev);
         private->device_fd = fd;
 
