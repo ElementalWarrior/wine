@@ -57,6 +57,10 @@ static NTSTATUS mouse_start(struct unix_device *iface, DEVICE_OBJECT *device)
     return STATUS_SUCCESS;
 }
 
+static void mouse_stop(struct unix_device *iface)
+{
+}
+
 static NTSTATUS mouse_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -94,6 +98,7 @@ static const struct unix_device_vtbl mouse_vtbl =
     mouse_remove,
     mouse_compare,
     mouse_start,
+    mouse_stop,
     mouse_get_report_descriptor,
     mouse_set_output_report,
     mouse_get_feature_report,
@@ -144,6 +149,10 @@ static NTSTATUS keyboard_start(struct unix_device *iface, DEVICE_OBJECT *device)
     return STATUS_SUCCESS;
 }
 
+static void keyboard_stop(struct unix_device *device)
+{
+}
+
 static NTSTATUS keyboard_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -181,6 +190,7 @@ static const struct unix_device_vtbl keyboard_vtbl =
     keyboard_remove,
     keyboard_compare,
     keyboard_start,
+    keyboard_stop,
     keyboard_get_report_descriptor,
     keyboard_set_output_report,
     keyboard_get_feature_report,
@@ -212,7 +222,8 @@ static NTSTATUS WINAPI keyboard_device_create(struct unix_device **device, struc
 
 static void WINAPI unix_device_remove(struct unix_device *iface)
 {
-    return iface->vtbl->destroy(iface);
+    iface->vtbl->stop(iface);
+    iface->vtbl->destroy(iface);
 }
 
 static int WINAPI unix_device_compare(struct unix_device *iface, void *context)
