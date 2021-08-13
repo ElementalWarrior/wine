@@ -780,7 +780,6 @@ static void try_add_device(unsigned int index)
     };
     USAGE_AND_PAGE usage = {.UsagePage = HID_USAGE_PAGE_GENERIC};
     struct platform_private *private;
-    DEVICE_OBJECT *device = NULL;
 
     SDL_Joystick* joystick;
     SDL_JoystickID id;
@@ -812,17 +811,12 @@ static void try_add_device(unsigned int index)
     if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*private))))
         return;
     private->unix_device.vtbl = &sdl_device_vtbl;
+    private->sdl_joystick = joystick;
+    private->sdl_controller = controller;
+    private->id = id;
+    private->usage = usage;
 
-    device = bus_create_hid_device(&desc, &private->unix_device);
-    if (!device) HeapFree(GetProcessHeap(), 0, private);
-    else
-    {
-        private->sdl_joystick = joystick;
-        private->sdl_controller = controller;
-        private->id = id;
-        private->usage = usage;
-        IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-    }
+    bus_event_queue_device_created(&event_queue, &private->unix_device, &desc);
 }
 
 static void process_device_event(SDL_Event *event)
