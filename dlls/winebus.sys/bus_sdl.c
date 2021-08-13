@@ -488,6 +488,13 @@ static int compare_platform_device(DEVICE_OBJECT *device, void *context)
     return impl_from_DEVICE_OBJECT(device)->id - PtrToUlong(context);
 }
 
+static NTSTATUS start_device(DEVICE_OBJECT *device)
+{
+    struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
+    if (ext->sdl_controller) return build_mapped_report_descriptor(ext);
+    return build_report_descriptor(ext);
+}
+
 static NTSTATUS get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
 {
     struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
@@ -597,6 +604,7 @@ static const platform_vtbl sdl_vtbl =
 {
     free_device,
     compare_platform_device,
+    start_device,
     get_reportdescriptor,
     get_string,
     begin_report_processing,
@@ -799,26 +807,11 @@ static void try_add_device(unsigned int index)
 
     if (device)
     {
-        NTSTATUS status;
         struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->sdl_joystick = joystick;
         private->sdl_controller = controller;
         private->id = id;
         private->usage = usage;
-
-        /* FIXME: We should probably move this to IRP_MN_START_DEVICE. */
-        if (controller)
-            status = build_mapped_report_descriptor(private);
-        else
-            status = build_report_descriptor(private);
-        if (status)
-        {
-            ERR("Building report descriptor failed, removing device\n");
-            bus_unlink_hid_device(device);
-            bus_remove_hid_device(device);
-            HeapFree(GetProcessHeap(), 0, serial);
-            return;
-        }
         IoInvalidateDeviceRelations(bus_pdo, BusRelations);
     }
     else
