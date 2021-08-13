@@ -125,7 +125,7 @@ extern BOOL hid_descriptor_add_hatswitch(struct hid_descriptor *desc, INT count)
 extern BOOL hid_descriptor_add_axes(struct hid_descriptor *desc, BYTE count, USAGE usage_page,
                                     const USAGE *usages, BOOL rel, INT size, LONG min, LONG max) DECLSPEC_HIDDEN;
 
-extern BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id, struct haptics *haptics) DECLSPEC_HIDDEN;
+extern BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, struct haptics *haptics) DECLSPEC_HIDDEN;
 
 extern void handle_haptics_set_output_report(struct hid_descriptor *desc, struct haptics *haptics,
                                              HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io) DECLSPEC_HIDDEN;

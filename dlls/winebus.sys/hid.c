@@ -247,35 +247,12 @@ BOOL hid_descriptor_add_axes(struct hid_descriptor *desc, BYTE count, USAGE usag
     return TRUE;
 }
 
-BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id, struct haptics *haptics)
+BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, struct haptics *haptics)
 {
-    const BYTE report_id = ++desc->next_report_id[HidP_Output];
     const BYTE haptics_feature_report = desc->haptics_feature_report = ++desc->next_report_id[HidP_Feature];
     const BYTE haptics_waveform_report = desc->haptics_waveform_report = ++desc->next_report_id[HidP_Output];
     const BYTE template[] =
     {
-        USAGE_PAGE(2, HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN),
-        COLLECTION(1, Report),
-            REPORT_ID(1, report_id),
-            /* padding */
-            REPORT_COUNT(1, 0x02),
-            REPORT_SIZE(1, 0x08),
-            OUTPUT(1, Data|Var|Abs),
-            /* actuators */
-            USAGE(1, 0x01),
-            LOGICAL_MINIMUM(1, 0x00),
-            LOGICAL_MAXIMUM(1, 0xff),
-            PHYSICAL_MINIMUM(1, 0x00),
-            PHYSICAL_MAXIMUM(1, 0xff),
-            REPORT_SIZE(1, 0x08),
-            REPORT_COUNT(1, 0x02),
-            OUTPUT(1, Data|Var|Abs),
-            /* padding */
-            REPORT_COUNT(1, 0x02),
-            REPORT_SIZE(1, 0x08),
-            OUTPUT(1, Data|Var|Abs),
-        END_COLLECTION,
-
         USAGE_PAGE(2, HID_USAGE_PAGE_HAPTICS),
         USAGE(1, HID_USAGE_HAPTICS_SIMPLE_CONTROLLER),
         COLLECTION(1, Logical),
@@ -338,7 +315,6 @@ BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id, struct ha
         END_COLLECTION,
     };
 
-    *id = report_id;
     if (!hid_descriptor_append(desc, template, sizeof(template))) return FALSE;
 
     haptics->features.waveform_list[0] = HID_USAGE_HAPTICS_WAVEFORM_RUMBLE;

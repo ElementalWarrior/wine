@@ -145,7 +145,6 @@ struct platform_private
     struct hid_descriptor desc;
 
     BYTE input_report_id;
-    BYTE vendor_rumble_report_id;
 
     int buffer_length;
     BYTE *report_buffer;
@@ -276,7 +275,7 @@ static BOOL descriptor_add_haptic(struct platform_private *ext)
 
     if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
     {
-        if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id, &ext->haptics))
+        if (!hid_descriptor_add_haptics(&ext->desc, &ext->haptics))
             return FALSE;
     }
 
@@ -512,21 +511,7 @@ static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
     struct platform_private *ext = impl_from_unix_device(iface);
     SDL_HapticEffect effect;
 
-    if (packet->reportId == ext->vendor_rumble_report_id)
-    {
-        WORD left = packet->reportBuffer[2] * 128;
-        WORD right = packet->reportBuffer[3] * 128;
-
-        pSDL_memset(&effect, 0, sizeof(SDL_HapticEffect));
-        effect.type = SDL_HAPTIC_LEFTRIGHT;
-        effect.leftright.length = -1;
-        effect.leftright.large_magnitude = left;
-        effect.leftright.small_magnitude = right;
-
-        io->Information = packet->reportBufferLen;
-        io->Status = STATUS_SUCCESS;
-    }
-    else if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
+    if (ext->haptics_support & (SDL_HAPTIC_LEFTRIGHT|WINE_SDL_HAPTIC_RUMBLE|WINE_SDL_JOYSTICK_RUMBLE))
     {
         handle_haptics_set_output_report(&ext->desc, &ext->haptics, packet, io);
         if (io->Status != STATUS_SUCCESS) return;
