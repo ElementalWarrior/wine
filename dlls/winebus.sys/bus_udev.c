@@ -90,6 +90,15 @@ WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
 static struct udev_bus_options options;
 
+static CRITICAL_SECTION udev_cs;
+static CRITICAL_SECTION_DEBUG udev_cs_debug =
+{
+    0, 0, &udev_cs,
+    { &udev_cs_debug.ProcessLocksList, &udev_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": udev_cs") }
+};
+static CRITICAL_SECTION udev_cs = { &udev_cs_debug, -1, 0, 0, 0, 0 };
+
 static struct udev *udev_context = NULL;
 static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
@@ -613,6 +622,7 @@ static DWORD CALLBACK device_report_thread(void *args)
 {
     DEVICE_OBJECT *device = (DEVICE_OBJECT*)args;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
+    struct unix_device *iface = &private->unix_device;
     struct pollfd plfds[2];
 
     plfds[0].fd = private->device_fd;
@@ -636,7 +646,11 @@ static DWORD CALLBACK device_report_thread(void *args)
         else if (size == 0)
             TRACE_(hid_report)("Failed to read report\n");
         else
-            process_hid_report(device, report_buffer, size);
+        {
+            EnterCriticalSection(&udev_cs);
+            bus_event_queue_input_report(&event_queue, iface, report_buffer, size);
+            LeaveCriticalSection(&udev_cs);
+        }
     }
     return 0;
 }
@@ -836,6 +850,7 @@ static DWORD CALLBACK lnxev_device_report_thread(void *args)
 {
     DEVICE_OBJECT *device = (DEVICE_OBJECT*)args;
     struct wine_input_private *private = input_impl_from_DEVICE_OBJECT(device);
+    struct unix_device *iface = &private->base.unix_device;
     struct pollfd plfds[2];
 
     plfds[0].fd = private->base.device_fd;
@@ -859,7 +874,11 @@ static DWORD CALLBACK lnxev_device_report_thread(void *args)
         else if (size == 0)
             TRACE_(hid_report)("Failed to read report\n");
         else if (set_report_from_event(private, &ie))
-            process_hid_report(device, private->current_report_buffer, private->buffer_length);
+        {
+            EnterCriticalSection(&udev_cs);
+            bus_event_queue_input_report(&event_queue, iface, private->current_report_buffer, private->buffer_length);
+            LeaveCriticalSection(&udev_cs);
+        }
     }
     return 0;
 }
@@ -1284,14 +1303,22 @@ NTSTATUS WINAPI udev_bus_wait(void *args)
 
     while (1)
     {
-        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
+        EnterCriticalSection(&udev_cs);
+        if (bus_event_queue_pop(&event_queue, result))
+        {
+            LeaveCriticalSection(&udev_cs);
+            return STATUS_PENDING;
+        }
+        LeaveCriticalSection(&udev_cs);
         if (poll(pfd, 2, -1) <= 0) continue;
         if (pfd[1].revents) break;
         process_monitor_event(udev_monitor);
     }
 
     TRACE("UDEV main loop exiting\n");
+    EnterCriticalSection(&udev_cs);
     bus_event_queue_destroy(&event_queue);
+    LeaveCriticalSection(&udev_cs);
     udev_monitor_unref(udev_monitor);
 
     udev_unref(udev_context);
