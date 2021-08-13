@@ -94,6 +94,7 @@ static struct udev *udev_context = NULL;
 static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
 static int udev_monitor_fd;
+static struct list event_queue = LIST_INIT(event_queue);
 
 static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
 static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
@@ -1221,17 +1222,8 @@ static void try_add_device(struct udev_device *dev)
 
 static void try_remove_device(struct udev_device *dev)
 {
-    DEVICE_OBJECT *device = NULL;
-
-    device = bus_find_hid_device(hidraw_busidW, dev);
-#ifdef HAS_PROPER_INPUT_HEADER
-    if (device == NULL)
-        device = bus_find_hid_device(lnxev_busidW, dev);
-#endif
-    if (!device) return;
-
-    bus_unlink_hid_device(device);
-    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
+    bus_event_queue_device_removed(&event_queue, hidraw_busidW, dev);
+    bus_event_queue_device_removed(&event_queue, lnxev_busidW, dev);
 }
 
 static void build_initial_deviceset(void)
@@ -1393,8 +1385,9 @@ NTSTATUS WINAPI udev_bus_init(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI udev_bus_wait(void)
+NTSTATUS WINAPI udev_bus_wait(void *args)
 {
+    struct bus_event **result = args;
     struct pollfd pfd[2];
 
     pfd[0].fd = udev_monitor_fd;
@@ -1404,14 +1397,20 @@ NTSTATUS WINAPI udev_bus_wait(void)
     pfd[1].events = POLLIN;
     pfd[1].revents = 0;
 
+    /* destroy previously returned event */
+    if (*result) bus_event_destroy(*result);
+    *result = NULL;
+
     while (1)
     {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
         if (poll(pfd, 2, -1) <= 0) continue;
         if (pfd[1].revents) break;
         process_monitor_event(udev_monitor);
     }
 
     TRACE("UDEV main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
     udev_monitor_unref(udev_monitor);
 
     udev_unref(udev_context);
@@ -1430,7 +1429,7 @@ NTSTATUS WINAPI udev_bus_init(void *args)
     return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS WINAPI udev_bus_wait(void)
+NTSTATUS WINAPI udev_bus_wait(void *args)
 {
     WARN("UDEV support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;
