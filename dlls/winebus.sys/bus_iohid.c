@@ -233,12 +233,13 @@ static void set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO
 static void get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     IOReturn ret;
+    CFIndex report_length = packet->reportBufferLen;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
 
-    ret = IOHIDDeviceGetReport(private->device, kIOHIDReportTypeFeature, packet->reportId, packet->reportBuffer, packet->reportBufferLen);
+    ret = IOHIDDeviceGetReport(private->device, kIOHIDReportTypeFeature, packet->reportId, packet->reportBuffer, &report_length);
     if (ret == kIOReturnSuccess)
     {
-        io->Information = packet->reportBufferLen;
+        io->Information = report_length;
         io->Status = STATUS_SUCCESS;
     }
     else
