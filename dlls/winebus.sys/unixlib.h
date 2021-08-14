@@ -80,6 +80,9 @@ struct unix_funcs
     NTSTATUS (WINAPI *iohid_bus_init)(void *);
     NTSTATUS (WINAPI *iohid_bus_wait)(void *);
     NTSTATUS (WINAPI *iohid_bus_stop)(void);
+
+    NTSTATUS (WINAPI *mouse_device_create)(struct unix_device **);
+    NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **);
 };
 
 #endif /* __WINEBUS_UNIXLIB_H */
