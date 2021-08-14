@@ -27,8 +27,16 @@
 #include <ddk/wdm.h>
 #include <hidusage.h>
 
+struct sdl_bus_options
+{
+    BOOL map_controllers;
+};
+
 struct unix_funcs
 {
+    NTSTATUS (WINAPI *sdl_bus_init)(void *);
+    NTSTATUS (WINAPI *sdl_bus_wait)(void);
+    NTSTATUS (WINAPI *sdl_bus_stop)(void);
 };
 
 #endif /* __WINEBUS_UNIXLIB_H */
