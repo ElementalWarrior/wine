@@ -16,33 +16,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
+#ifndef __WINEBUS_UNIX_PRIVATE_H
+#define __WINEBUS_UNIX_PRIVATE_H
 
 #include <stdarg.h>
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "winternl.h"
 
-#include "wine/debug.h"
+#include <windef.h>
+#include <winbase.h>
+#include <winternl.h>
 
-#include "unix_private.h"
+#include "unixlib.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
+extern NTSTATUS WINAPI sdl_bus_init(void *args) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI sdl_bus_wait(void) DECLSPEC_HIDDEN;
+extern NTSTATUS WINAPI sdl_bus_stop(void) DECLSPEC_HIDDEN;
 
-static const struct unix_funcs unix_funcs =
-{
-    sdl_bus_init,
-    sdl_bus_wait,
-    sdl_bus_stop,
-};
-
-NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out)
-{
-    TRACE("module %p, reason %u, ptr_in %p, ptr_out %p\n", module, reason, ptr_in, ptr_out);
-
-    if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
-    *(const struct unix_funcs **)ptr_out = &unix_funcs;
-    return STATUS_SUCCESS;
-}
+#endif /* __WINEBUS_UNIX_PRIVATE_H */

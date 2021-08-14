@@ -390,6 +390,20 @@ static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
     return STATUS_SUCCESS;
 }
 
+DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
+{
+    char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    DWORD size;
+
+    if (NtQueryValueKey(driver_key, option, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
+    {
+        if (info->Type == REG_DWORD) return *(DWORD *)info->Data;
+    }
+
+    return default_value;
+}
+
 static NTSTATUS handle_IRP_MN_QUERY_DEVICE_RELATIONS(IRP *irp)
 {
     NTSTATUS status = irp->IoStatus.Status;
@@ -604,6 +618,75 @@ static void keyboard_device_create(void)
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
+static DWORD bus_count;
+static HANDLE bus_thread[16];
+
+struct bus_main_params
+{
+    const WCHAR *name;
+    HANDLE init;
+
+    NTSTATUS (WINAPI *bus_init)(void *args);
+    NTSTATUS (WINAPI *bus_wait)(void);
+    void *bus_params;
+};
+
+static DWORD CALLBACK bus_main_thread(void *args)
+{
+    struct bus_main_params bus = *(struct bus_main_params *)args;
+    NTSTATUS status;
+
+    TRACE("%s main loop starting\n", debugstr_w(bus.name));
+    status = bus.bus_init(bus.bus_params);
+    SetEvent(bus.init);
+    TRACE("%s main loop started\n", debugstr_w(bus.name));
+
+    if (status) WARN("%s bus init returned status %#x\n", debugstr_w(bus.name), status);
+    else while ((status = bus.bus_wait()) == STATUS_PENDING) {}
+
+    if (status) WARN("%s bus wait returned status %#x\n", debugstr_w(bus.name), status);
+    else TRACE("%s main loop exited\n", debugstr_w(bus.name));
+    return status;
+}
+
+static NTSTATUS sdl_driver_init(void)
+{
+    static const WCHAR sdl_bus_name[] = {'S','D','L',0};
+    static const WCHAR controller_modeW[] = {'M','a','p',' ','C','o','n','t','r','o','l','l','e','r','s',0};
+    static const UNICODE_STRING controller_mode = {sizeof(controller_modeW) - sizeof(WCHAR), sizeof(controller_modeW), (WCHAR*)controller_modeW};
+    struct sdl_bus_options sdl_params;
+    struct bus_main_params params =
+    {
+        .name = sdl_bus_name,
+        .bus_init = unix_funcs->sdl_bus_init,
+        .bus_wait = unix_funcs->sdl_bus_wait,
+        .bus_params = &sdl_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create SDL bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    sdl_params.map_controllers = check_bus_option(&controller_mode, 1);
+    if (!sdl_params.map_controllers) TRACE("SDL controller to XInput HID gamepad mapping disabled\n");
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create SDL bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
@@ -622,16 +705,12 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         mouse_device_create();
         keyboard_device_create();
 
-        if (check_bus_option(&SDL_enabled, 1))
+        if (!check_bus_option(&SDL_enabled, 1) || sdl_driver_init())
         {
-            if (sdl_driver_init() == STATUS_SUCCESS)
-            {
-                irp->IoStatus.Status = STATUS_SUCCESS;
-                break;
-            }
+            udev_driver_init();
+            iohid_driver_init();
         }
-        udev_driver_init();
-        iohid_driver_init();
+
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_SURPRISE_REMOVAL:
@@ -640,7 +719,12 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     case IRP_MN_REMOVE_DEVICE:
         udev_driver_unload();
         iohid_driver_unload();
-        sdl_driver_unload();
+        unix_funcs->sdl_bus_stop();
+
+        WaitForMultipleObjects(bus_count, bus_thread, TRUE, INFINITE);
+        while (bus_count--) CloseHandle(bus_thread[bus_count]);
+
+        __wine_init_unix_lib(instance, DLL_PROCESS_DETACH, NULL, NULL);
 
         __wine_init_unix_lib(instance, DLL_PROCESS_DETACH, NULL, NULL);
 
@@ -962,21 +1046,6 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
     LeaveCriticalSection(&ext->cs);
-}
-
-DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
-{
-    char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
-    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION*)buffer;
-    DWORD size;
-
-    if (NtQueryValueKey(driver_key, option, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
-    {
-        if (info->Type == REG_DWORD)
-            return *(DWORD*)info->Data;
-    }
-
-    return default_value;
 }
 
 static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *pdo)
