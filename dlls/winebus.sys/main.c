@@ -167,7 +167,7 @@ static int unix_device_compare(DEVICE_OBJECT *device, void *context)
 static NTSTATUS unix_device_start(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return unix_funcs->device_start(ext->unix_device, device);
+    return unix_funcs->device_start(ext->unix_device);
 }
 
 static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length,
