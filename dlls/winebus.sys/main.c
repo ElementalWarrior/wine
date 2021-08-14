@@ -119,12 +119,8 @@ struct device_extension
     BOOL removed;
 
     struct pnp_device *pnp_device;
-
-    WORD vid, pid, input;
-    DWORD uid, version, index;
-    BOOL is_gamepad;
-    WCHAR *serial;
-    const WCHAR *busid;  /* Expected to be a static constant */
+    struct device_desc desc;
+    DWORD index;
 
     const platform_vtbl *vtbl;
 
@@ -148,18 +144,8 @@ static CRITICAL_SECTION device_list_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static struct list pnp_devset = LIST_INIT(pnp_devset);
 
-static const WCHAR zero_serialW[]= {'0','0','0','0',0};
 static const WCHAR miW[] = {'M','I',0};
 static const WCHAR igW[] = {'I','G',0};
-
-static inline WCHAR *strdupW(const WCHAR *src)
-{
-    WCHAR *dst;
-    if (!src) return NULL;
-    dst = HeapAlloc(GetProcessHeap(), 0, (strlenW(src) + 1)*sizeof(WCHAR));
-    if (dst) strcpyW(dst, src);
-    return dst;
-}
 
 struct unix_device *get_unix_device(DEVICE_OBJECT *device)
 {
@@ -167,7 +153,7 @@ struct unix_device *get_unix_device(DEVICE_OBJECT *device)
     return ext->unix_device;
 }
 
-static DWORD get_device_index(WORD vid, WORD pid, WORD input)
+static DWORD get_device_index(struct device_desc *desc)
 {
     struct pnp_device *ptr;
     DWORD index = 0;
@@ -175,7 +161,7 @@ static DWORD get_device_index(WORD vid, WORD pid, WORD input)
     LIST_FOR_EACH_ENTRY(ptr, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)ptr->device->DeviceExtension;
-        if (ext->vid == vid && ext->pid == pid && ext->input == input)
+        if (ext->desc.vendor_id == desc->vendor_id && ext->desc.product_id == desc->product_id && ext->desc.input == desc->input)
             index = max(ext->index + 1, index);
     }
 
@@ -186,12 +172,11 @@ static WCHAR *get_instance_id(DEVICE_OBJECT *device)
 {
     static const WCHAR formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    const WCHAR *serial = ext->serial ? ext->serial : zero_serialW;
-    DWORD len = strlenW(serial) + 33;
+    DWORD len = strlenW(ext->desc.serial) + 33;
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-        sprintfW(dst, formatW, ext->version, serial, ext->uid, ext->index);
+        sprintfW(dst, formatW, ext->desc.version, ext->desc.serial, ext->desc.uid, ext->index);
 
     return dst;
 }
@@ -203,19 +188,19 @@ static WCHAR *get_device_id(DEVICE_OBJECT *device)
     static const WCHAR format_inputW[] = {'%','s','\\','v','i','d','_','%','0','4','x',
             '&','p','i','d','_','%','0','4','x','&','%','s','_','%','0','2','i',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = strlenW(ext->busid) + 34;
+    DWORD len = strlenW(ext->desc.bus_id) + 34;
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
     {
-        if (ext->input == (WORD)-1)
+        if (ext->desc.input == (WORD)-1)
         {
-            sprintfW(dst, formatW, ext->busid, ext->vid, ext->pid);
+            sprintfW(dst, formatW, ext->desc.bus_id, ext->desc.vendor_id, ext->desc.product_id);
         }
         else
         {
-            sprintfW(dst, format_inputW, ext->busid, ext->vid, ext->pid,
-                    ext->is_gamepad ? igW : miW, ext->input);
+            sprintfW(dst, format_inputW, ext->desc.bus_id, ext->desc.vendor_id, ext->desc.product_id,
+                    ext->desc.is_gamepad ? igW : miW, ext->desc.input);
         }
     }
 
@@ -227,9 +212,9 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     WCHAR *dst;
 
-    if ((dst = ExAllocatePool(PagedPool, (strlenW(ext->busid) + 2) * sizeof(WCHAR))))
+    if ((dst = ExAllocatePool(PagedPool, (strlenW(ext->desc.bus_id) + 2) * sizeof(WCHAR))))
     {
-        strcpyW(dst, ext->busid);
+        strcpyW(dst, ext->desc.bus_id);
         dst[strlenW(dst) + 1] = 0;
     }
 
@@ -250,9 +235,7 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
     }
 }
 
-DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
-                                     WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
-                                     const platform_vtbl *vtbl, struct unix_device *unix_device)
+DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, const platform_vtbl *vtbl, struct unix_device *unix_device)
 {
     static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e','\\','%','s','#','%','p',0};
     struct device_extension *ext;
@@ -262,14 +245,15 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     WCHAR dev_name[256];
     NTSTATUS status;
 
-    TRACE("(%s, %04x, %04x, %04x, %u, %u, %s, %u, %p, %p)\n",
-            debugstr_w(busidW), vid, pid, input, version, uid, debugstr_w(serialW),
-            is_gamepad, vtbl, unix_device);
+    TRACE("bus_id %s, vid %04x, pid %04x, input %04x, version %u, uid %u, serial %s, "
+          "is_gamepad %u, vtbl %p, unix_device %p\n", debugstr_w(desc->bus_id), desc->vendor_id,
+          desc->product_id, desc->input, desc->version, desc->uid, debugstr_w(desc->serial),
+          desc->is_gamepad, vtbl, unix_device);
 
     if (!(pnp_dev = HeapAlloc(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
-    sprintfW(dev_name, device_name_fmtW, busidW, pnp_dev);
+    sprintfW(dev_name, device_name_fmtW, desc->bus_id, pnp_dev);
     RtlInitUnicodeString(&nameW, dev_name);
     status = IoCreateDevice(driver_obj, sizeof(struct device_extension), &nameW, 0, 0, FALSE, &device);
     if (status)
@@ -284,15 +268,8 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     /* fill out device_extension struct */
     ext = (struct device_extension *)device->DeviceExtension;
     ext->pnp_device         = pnp_dev;
-    ext->vid                = vid;
-    ext->pid                = pid;
-    ext->input              = input;
-    ext->uid                = uid;
-    ext->version            = version;
-    ext->index              = get_device_index(vid, pid, input);
-    ext->is_gamepad         = is_gamepad;
-    ext->serial             = strdupW(serialW);
-    ext->busid              = busidW;
+    ext->desc               = *desc;
+    ext->index              = get_device_index(desc);
     ext->vtbl               = vtbl;
     ext->last_report        = NULL;
     ext->last_report_size   = 0;
@@ -323,7 +300,7 @@ DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
     LIST_FOR_EACH_ENTRY(dev, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (strcmpW(ext->busid, bus_id)) continue;
+        if (strcmpW(ext->desc.bus_id, bus_id)) continue;
         if (ext->vtbl->compare_platform_device(dev->device, platform_dev) == 0)
         {
             ret = dev->device;
@@ -348,7 +325,7 @@ DEVICE_OBJECT* bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function
     LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (strcmpW(ext->busid, bus_id)) continue;
+        if (strcmpW(ext->desc.bus_id, bus_id)) continue;
         LeaveCriticalSection(&device_list_cs);
         cont = function(dev->device, context);
         EnterCriticalSection(&device_list_cs);
@@ -474,21 +451,21 @@ static NTSTATUS handle_IRP_MN_QUERY_ID(DEVICE_OBJECT *device, IRP *irp)
 
 static void mouse_device_create(void)
 {
-    static const WCHAR busidW[] = {'W','I','N','E','M','O','U','S','E',0};
     struct unix_device *device;
+    struct device_desc desc;
 
-    if (unix_funcs->mouse_device_create(&device)) return;
-    mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, device);
+    if (unix_funcs->mouse_device_create(&device, &desc)) return;
+    mouse_obj = bus_create_hid_device(&desc, &mouse_vtbl, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
 static void keyboard_device_create(void)
 {
-    static const WCHAR busidW[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
     struct unix_device *device;
+    struct device_desc desc;
 
-    if (unix_funcs->keyboard_device_create(&device)) return;
-    keyboard_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, device);
+    if (unix_funcs->keyboard_device_create(&device, &desc)) return;
+    keyboard_obj = bus_create_hid_device(&desc, &keyboard_vtbl, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -758,7 +735,6 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             ext->cs.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&ext->cs);
 
-            HeapFree(GetProcessHeap(), 0, ext->serial);
             HeapFree(GetProcessHeap(), 0, ext->last_report);
 
             irp->IoStatus.Status = STATUS_SUCCESS;
@@ -814,7 +790,7 @@ static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     const struct product_desc *vendor_products;
     unsigned int i, vendor_products_size = 0;
 
-    if (ext->vid == VID_MICROSOFT)
+    if (ext->desc.vendor_id == VID_MICROSOFT)
     {
         vendor_products = XBOX_CONTROLLERS;
         vendor_products_size = ARRAY_SIZE(XBOX_CONTROLLERS);
@@ -822,7 +798,7 @@ static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
 
     for (i = 0; i < vendor_products_size; i++)
     {
-        if (ext->pid == vendor_products[i].pid)
+        if (ext->desc.product_id == vendor_products[i].pid)
             break;
     }
 
@@ -897,9 +873,9 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             memset(attr, 0, sizeof(*attr));
             attr->Size = sizeof(*attr);
-            attr->VendorID = ext->vid;
-            attr->ProductID = ext->pid;
-            attr->VersionNumber = ext->version;
+            attr->VendorID = ext->desc.vendor_id;
+            attr->ProductID = ext->desc.product_id;
+            attr->VersionNumber = ext->desc.version;
 
             irp->IoStatus.Status = STATUS_SUCCESS;
             irp->IoStatus.Information = sizeof(*attr);

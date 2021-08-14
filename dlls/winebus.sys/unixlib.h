@@ -29,6 +29,18 @@
 
 #include "wine/list.h"
 
+struct device_desc
+{
+    const WCHAR *bus_id;
+    WORD vendor_id;
+    WORD product_id;
+    DWORD version;
+    WORD input;
+    DWORD uid;
+    WCHAR serial[256];
+    BOOL is_gamepad;
+};
+
 struct sdl_bus_options
 {
     BOOL map_controllers;
@@ -81,8 +93,8 @@ struct unix_funcs
     NTSTATUS (WINAPI *iohid_bus_wait)(void *);
     NTSTATUS (WINAPI *iohid_bus_stop)(void);
 
-    NTSTATUS (WINAPI *mouse_device_create)(struct unix_device **);
-    NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **);
+    NTSTATUS (WINAPI *mouse_device_create)(struct unix_device **, struct device_desc *);
+    NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **, struct device_desc *);
 };
 
 #endif /* __WINEBUS_UNIXLIB_H */

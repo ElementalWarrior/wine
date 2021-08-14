@@ -107,11 +107,24 @@ const platform_vtbl mouse_vtbl =
     .set_feature_report = mouse_set_feature_report,
 };
 
+static const WCHAR mouse_bus_id[] = {'W','I','N','E','M','O','U','S','E',0};
+static const struct device_desc mouse_device_desc =
+{
+    .bus_id = mouse_bus_id,
+    .vendor_id = 0,
+    .product_id = 0,
+    .version = 0,
+    .input = -1,
+    .uid = 0,
+    .serial = {'0','0','0','0',0},
+    .is_gamepad = FALSE,
+};
 static struct unix_device mouse_device;
 
-static NTSTATUS WINAPI mouse_device_create(struct unix_device **device)
+static NTSTATUS WINAPI mouse_device_create(struct unix_device **device, struct device_desc *desc)
 {
     *device = &mouse_device;
+    *desc = mouse_device_desc;
     return STATUS_SUCCESS;
 }
 
@@ -185,11 +198,24 @@ const platform_vtbl keyboard_vtbl =
     .set_feature_report = keyboard_set_feature_report,
 };
 
+static const WCHAR keyboard_bus_id[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
+static const struct device_desc keyboard_device_desc =
+{
+    .bus_id = keyboard_bus_id,
+    .vendor_id = 0,
+    .product_id = 0,
+    .version = 0,
+    .input = -1,
+    .uid = 0,
+    .serial = {'0','0','0','0',0},
+    .is_gamepad = FALSE,
+};
 static struct unix_device keyboard_device;
 
-static NTSTATUS WINAPI keyboard_device_create(struct unix_device **device)
+static NTSTATUS WINAPI keyboard_device_create(struct unix_device **device, struct device_desc *desc)
 {
     *device = &keyboard_device;
+    *desc = keyboard_device_desc;
     return STATUS_SUCCESS;
 }
 

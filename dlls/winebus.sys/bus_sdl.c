@@ -734,8 +734,7 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
     return FALSE;
 }
 
-static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD *version,
-                              WCHAR *serial, USAGE_AND_PAGE *usage)
+static void get_joystick_info(SDL_Joystick *joystick, struct device_desc *desc, USAGE_AND_PAGE *usage)
 {
     int button_count, axis_count;
     SDL_JoystickGUID guid;
@@ -743,20 +742,20 @@ static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD
 
     if (pSDL_JoystickGetProductVersion != NULL)
     {
-        *vid = pSDL_JoystickGetVendor(joystick);
-        *pid = pSDL_JoystickGetProduct(joystick);
-        *version = pSDL_JoystickGetProductVersion(joystick);
+        desc->vendor_id = pSDL_JoystickGetVendor(joystick);
+        desc->product_id = pSDL_JoystickGetProduct(joystick);
+        desc->version = pSDL_JoystickGetProductVersion(joystick);
     }
     else
     {
-        *vid = 0x01;
-        *pid = pSDL_JoystickInstanceID(joystick) + 1;
-        *version = 0;
+        desc->vendor_id = 0x01;
+        desc->product_id = pSDL_JoystickInstanceID(joystick) + 1;
+        desc->version = 0;
     }
 
     guid = pSDL_JoystickGetGUID(joystick);
     pSDL_JoystickGetGUIDString(guid, guid_str, sizeof(guid_str));
-    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, serial, sizeof(guid_str));
+    MultiByteToWideChar(CP_ACP, 0, guid_str, -1, desc->serial, sizeof(guid_str));
 
     if (usage->Usage != HID_USAGE_GENERIC_GAMEPAD)
     {
@@ -768,12 +767,20 @@ static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD
 
 static void try_add_device(unsigned int index)
 {
+    struct device_desc desc =
+    {
+        .bus_id = sdl_busidW,
+        .vendor_id = 0,
+        .product_id = 0,
+        .version = 0,
+        .input = -1,
+        .uid = 0,
+        .serial = {'0','0','0','0',0},
+        .is_gamepad = FALSE,
+    };
     USAGE_AND_PAGE usage = {.UsagePage = HID_USAGE_PAGE_GENERIC};
     struct platform_private *private;
-    WORD vid, pid, version, input;
     DEVICE_OBJECT *device = NULL;
-    WCHAR serial[34] = {0};
-    BOOL is_gamepad;
 
     SDL_Joystick* joystick;
     SDL_JoystickID id;
@@ -790,24 +797,22 @@ static void try_add_device(unsigned int index)
 
     id = pSDL_JoystickInstanceID(joystick);
     usage.Usage = controller ? HID_USAGE_GENERIC_GAMEPAD : HID_USAGE_GENERIC_JOYSTICK;
-    get_joystick_info(joystick, &vid, &pid, &version, serial, &usage);
+    get_joystick_info(joystick, &desc, &usage);
 
     if (controller)
-        TRACE("Found sdl controller %i (vid %04x, pid %04x, version %u, serial %s, usage %04x:%04x)\n",
-              id, vid, pid, version, debugstr_w(serial), usage.UsagePage, usage.Usage);
+        TRACE("Found sdl controller %i (vendor_id %04x, product_id %04x, version %u, serial %s, usage %04x:%04x)\n",
+              id, desc.vendor_id, desc.product_id, desc.version, debugstr_w(desc.serial), usage.UsagePage, usage.Usage);
     else
-        TRACE("Found sdl joystick %i (vid %04x, pid %04x, version %u, serial %s, usage %04x:%04x)\n",
-              id, vid, pid, version, debugstr_w(serial), usage.UsagePage, usage.Usage);
+        TRACE("Found sdl joystick %i (vendor_id %04x, product_id %04x, version %u, serial %s, usage %04x:%04x)\n",
+              id, desc.vendor_id, desc.product_id, desc.version, debugstr_w(desc.serial), usage.UsagePage, usage.Usage);
 
-    is_gamepad = (usage.Usage == HID_USAGE_GENERIC_GAMEPAD);
-    if (is_gamepad) input = 0;
-    else input = -1;
+    desc.is_gamepad = (usage.Usage == HID_USAGE_GENERIC_GAMEPAD);
+    if (desc.is_gamepad) desc.input = 0;
 
     if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*private))))
         return;
 
-    device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index,
-            serial, is_gamepad, &sdl_vtbl, &private->unix_device);
+    device = bus_create_hid_device(&desc, &sdl_vtbl, &private->unix_device);
     if (!device) HeapFree(GetProcessHeap(), 0, private);
     else
     {
