@@ -38,8 +38,11 @@ struct device_desc
     DWORD version;
     WORD input;
     DWORD uid;
-    WCHAR serial[256];
     BOOL is_gamepad;
+
+    char manufacturer[MAX_PATH];
+    char product[MAX_PATH];
+    char serialnumber[MAX_PATH];
 };
 
 struct sdl_bus_options
@@ -64,6 +67,7 @@ enum bus_event_type
     BUS_EVENT_TYPE_NONE,
     BUS_EVENT_TYPE_DEVICE_REMOVED,
     BUS_EVENT_TYPE_DEVICE_CREATED,
+    BUS_EVENT_TYPE_INPUT_REPORT,
 };
 
 struct bus_event
@@ -84,6 +88,13 @@ struct bus_event
             struct unix_device *device;
             struct device_desc desc;
         } device_created;
+
+        struct
+        {
+            struct unix_device *device;
+            ULONG length;
+            BYTE buffer[1];
+        } input_report;
     };
 };
 
@@ -108,7 +119,6 @@ struct unix_funcs
     int (WINAPI *device_compare)(struct unix_device *iface, void *context);
     NTSTATUS (WINAPI *device_start)(struct unix_device *iface, DEVICE_OBJECT *device);
     NTSTATUS (WINAPI *device_get_report_descriptor)(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length);
-    NTSTATUS (WINAPI *device_get_string)(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length);
     void (WINAPI *device_set_output_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
     void (WINAPI *device_get_feature_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
     void (WINAPI *device_set_feature_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);

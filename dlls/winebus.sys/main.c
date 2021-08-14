@@ -122,6 +122,13 @@ struct device_extension
     struct device_desc desc;
     DWORD index;
 
+    struct
+    {
+        WCHAR manufacturer[MAX_PATH];
+        WCHAR product[MAX_PATH];
+        WCHAR serialnumber[MAX_PATH];
+    } strings;
+
     BYTE *last_report;
     DWORD last_report_size;
     BOOL last_report_read;
@@ -170,12 +177,6 @@ static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *b
     return unix_funcs->device_get_report_descriptor(ext->unix_device, buffer, length, out_length);
 }
 
-static NTSTATUS unix_device_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return unix_funcs->device_get_string(ext->unix_device, index, buffer, length);
-}
-
 static void unix_device_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
@@ -219,11 +220,11 @@ static WCHAR *get_instance_id(DEVICE_OBJECT *device)
 {
     static const WCHAR formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = strlenW(ext->desc.serial) + 33;
+    DWORD len = strlenW(ext->strings.serialnumber) + 33;
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-        sprintfW(dst, formatW, ext->desc.version, ext->desc.serial, ext->desc.uid, ext->index);
+        sprintfW(dst, formatW, ext->desc.version, ext->strings.serialnumber, ext->desc.uid, ext->index);
 
     return dst;
 }
@@ -294,7 +295,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
 
     TRACE("bus_id %s, vid %04x, pid %04x, input %04x, version %u, uid %u, serial %s, "
           "is_gamepad %u, unix_device %p\n", debugstr_w(desc->bus_id), desc->vendor_id,
-          desc->product_id, desc->input, desc->version, desc->uid, debugstr_w(desc->serial),
+          desc->product_id, desc->input, desc->version, desc->uid, debugstr_a(desc->serialnumber),
           desc->is_gamepad, unix_device);
 
     if (!(pnp_dev = HeapAlloc(GetProcessHeap(), 0, sizeof(*pnp_dev))))
@@ -323,6 +324,10 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     ext->buffer_size        = 0;
     ext->unix_device        = unix_device;
 
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->strings.manufacturer, MAX_PATH);
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->strings.product, MAX_PATH);
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.serialnumber, -1, ext->strings.serialnumber, MAX_PATH);
+
     InitializeListHead(&ext->irp_queue);
     InitializeCriticalSection(&ext->cs);
     ext->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
@@ -335,7 +340,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     return device;
 }
 
-DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
+static DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
 {
     struct pnp_device *dev;
     DEVICE_OBJECT *ret = NULL;
@@ -356,6 +361,27 @@ DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
     LeaveCriticalSection(&device_list_cs);
 
     TRACE("returning %p\n", ret);
+    return ret;
+}
+
+static DEVICE_OBJECT *bus_find_unix_device(struct unix_device *unix_device)
+{
+    struct device_extension *ext;
+    struct pnp_device *dev;
+    DEVICE_OBJECT *ret = NULL;
+
+    EnterCriticalSection(&device_list_cs);
+    LIST_FOR_EACH_ENTRY(dev, &pnp_devset, struct pnp_device, entry)
+    {
+        ext = (struct device_extension *)dev->device->DeviceExtension;
+        if (ext->unix_device == unix_device)
+        {
+            ret = dev->device;
+            break;
+        }
+    }
+    LeaveCriticalSection(&device_list_cs);
+
     return ret;
 }
 
@@ -393,6 +419,68 @@ static void bus_unlink_hid_device(DEVICE_OBJECT *device)
     EnterCriticalSection(&device_list_cs);
     list_remove(&pnp_device->entry);
     LeaveCriticalSection(&device_list_cs);
+}
+
+static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE* buffer, ULONG_PTR *out_length)
+{
+    if (buffer_length < ext->last_report_size)
+    {
+        *out_length = 0;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    else
+    {
+        if (ext->last_report)
+            memcpy(buffer, ext->last_report, ext->last_report_size);
+        *out_length = ext->last_report_size;
+        return STATUS_SUCCESS;
+    }
+}
+
+static void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension*)device->DeviceExtension;
+    IRP *irp;
+    LIST_ENTRY *entry;
+
+    if (!length || !report)
+        return;
+
+    EnterCriticalSection(&ext->cs);
+    if (length > ext->buffer_size)
+    {
+        HeapFree(GetProcessHeap(), 0, ext->last_report);
+        ext->last_report = HeapAlloc(GetProcessHeap(), 0, length);
+        if (!ext->last_report)
+        {
+            ERR_(hid_report)("Failed to alloc last report\n");
+            ext->buffer_size = 0;
+            ext->last_report_size = 0;
+            ext->last_report_read = TRUE;
+            LeaveCriticalSection(&ext->cs);
+            return;
+        }
+        else
+            ext->buffer_size = length;
+    }
+
+    memcpy(ext->last_report, report, length);
+    ext->last_report_size = length;
+    ext->last_report_read = FALSE;
+
+    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+    {
+        IO_STACK_LOCATION *irpsp;
+        TRACE_(hid_report)("Processing Request\n");
+        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
+        irpsp = IoGetCurrentIrpStackLocation(irp);
+        irp->IoStatus.Status = deliver_last_report(ext,
+            irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+            irp->UserBuffer, &irp->IoStatus.Information);
+        ext->last_report_read = TRUE;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+    LeaveCriticalSection(&ext->cs);
 }
 
 static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
@@ -566,6 +654,11 @@ static DWORD CALLBACK bus_main_thread(void *args)
                 unix_funcs->device_remove(event->device_created.device);
             }
             break;
+        case BUS_EVENT_TYPE_INPUT_REPORT:
+            device = bus_find_unix_device(event->input_report.device);
+            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->input_report.device);
+            else process_hid_report(device, event->input_report.buffer, event->input_report.length);
+            break;
         }
         LeaveCriticalSection(&device_list_cs);
     }
@@ -707,7 +800,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         keyboard_device_create();
 
         if (!check_bus_option(&SDL_enabled, 1) ||
-            sdl_driver_init() != STATUS_SUCCESS)
+            sdl_driver_init() != STATUS_SUCCESS ||
+            1)
         {
             udev_driver_init();
             iohid_driver_init();
@@ -823,22 +917,6 @@ static NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     return pdo_pnp_dispatch(device, irp);
 }
 
-static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE* buffer, ULONG_PTR *out_length)
-{
-    if (buffer_length < ext->last_report_size)
-    {
-        *out_length = 0;
-        return STATUS_BUFFER_TOO_SMALL;
-    }
-    else
-    {
-        if (ext->last_report)
-            memcpy(buffer, ext->last_report, ext->last_report_size);
-        *out_length = ext->last_report_size;
-        return STATUS_SUCCESS;
-    }
-}
-
 static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
@@ -886,6 +964,29 @@ static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     }
 
     return STATUS_UNSUCCESSFUL;
+}
+
+static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+
+    switch (index)
+    {
+    case HID_STRING_ID_IMANUFACTURER:
+        if (strlenW(ext->strings.manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->strings.manufacturer);
+        return STATUS_SUCCESS;
+    case HID_STRING_ID_IPRODUCT:
+        if (strlenW(ext->strings.product) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->strings.product);
+        return STATUS_SUCCESS;
+    case HID_STRING_ID_ISERIALNUMBER:
+        if (strlenW(ext->strings.serialnumber) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->strings.serialnumber);
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
@@ -981,7 +1082,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             irp->IoStatus.Status = hid_get_native_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status != STATUS_SUCCESS)
-                irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+                irp->IoStatus.Status = hid_get_device_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
@@ -1047,52 +1148,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
     if (status != STATUS_PENDING) IoCompleteRequest(irp, IO_NO_INCREMENT);
     return status;
-}
-
-void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
-{
-    struct device_extension *ext = (struct device_extension*)device->DeviceExtension;
-    IRP *irp;
-    LIST_ENTRY *entry;
-
-    if (!length || !report)
-        return;
-
-    EnterCriticalSection(&ext->cs);
-    if (length > ext->buffer_size)
-    {
-        HeapFree(GetProcessHeap(), 0, ext->last_report);
-        ext->last_report = HeapAlloc(GetProcessHeap(), 0, length);
-        if (!ext->last_report)
-        {
-            ERR_(hid_report)("Failed to alloc last report\n");
-            ext->buffer_size = 0;
-            ext->last_report_size = 0;
-            ext->last_report_read = TRUE;
-            LeaveCriticalSection(&ext->cs);
-            return;
-        }
-        else
-            ext->buffer_size = length;
-    }
-
-    memcpy(ext->last_report, report, length);
-    ext->last_report_size = length;
-    ext->last_report_read = FALSE;
-
-    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
-    {
-        IO_STACK_LOCATION *irpsp;
-        TRACE_(hid_report)("Processing Request\n");
-        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
-        irpsp = IoGetCurrentIrpStackLocation(irp);
-        irp->IoStatus.Status = deliver_last_report(ext,
-            irpsp->Parameters.DeviceIoControl.OutputBufferLength,
-            irp->UserBuffer, &irp->IoStatus.Information);
-        ext->last_report_read = TRUE;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-    }
-    LeaveCriticalSection(&ext->cs);
 }
 
 BOOL is_xbox_gamepad(WORD vid, WORD pid)

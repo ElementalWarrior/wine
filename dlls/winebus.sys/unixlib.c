@@ -57,6 +57,10 @@ static NTSTATUS mouse_start(struct unix_device *iface, DEVICE_OBJECT *device)
     return STATUS_SUCCESS;
 }
 
+static void mouse_stop(struct unix_device *iface)
+{
+}
+
 static NTSTATUS mouse_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -65,17 +69,6 @@ static NTSTATUS mouse_get_report_descriptor(struct unix_device *iface, BYTE *buf
     if (length < mouse_desc.size) return STATUS_BUFFER_TOO_SMALL;
 
     memcpy(buffer, mouse_desc.data, mouse_desc.size);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS mouse_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
-{
-    static const WCHAR nameW[] = {'W','i','n','e',' ','H','I','D',' ','m','o','u','s','e',0};
-    if (index != HID_STRING_ID_IPRODUCT)
-        return STATUS_NOT_IMPLEMENTED;
-    if (length < ARRAY_SIZE(nameW))
-        return STATUS_BUFFER_TOO_SMALL;
-    lstrcpyW(buffer, nameW);
     return STATUS_SUCCESS;
 }
 
@@ -105,8 +98,8 @@ static const struct unix_device_vtbl mouse_vtbl =
     mouse_remove,
     mouse_compare,
     mouse_start,
+    mouse_stop,
     mouse_get_report_descriptor,
-    mouse_get_string,
     mouse_set_output_report,
     mouse_get_feature_report,
     mouse_set_feature_report,
@@ -121,8 +114,10 @@ static const struct device_desc mouse_device_desc =
     .version = 0,
     .input = -1,
     .uid = 0,
-    .serial = {'0','0','0','0',0},
     .is_gamepad = FALSE,
+    .manufacturer = {"The Wine Project"},
+    .product = {"Wine HID mouse"},
+    .serialnumber = {"0000"},
 };
 static struct unix_device mouse_device = {.vtbl = &mouse_vtbl};
 
@@ -154,6 +149,10 @@ static NTSTATUS keyboard_start(struct unix_device *iface, DEVICE_OBJECT *device)
     return STATUS_SUCCESS;
 }
 
+static void keyboard_stop(struct unix_device *device)
+{
+}
+
 static NTSTATUS keyboard_get_report_descriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -162,17 +161,6 @@ static NTSTATUS keyboard_get_report_descriptor(struct unix_device *iface, BYTE *
     if (length < keyboard_desc.size) return STATUS_BUFFER_TOO_SMALL;
 
     memcpy(buffer, keyboard_desc.data, keyboard_desc.size);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS keyboard_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length)
-{
-    static const WCHAR nameW[] = {'W','i','n','e',' ','H','I','D',' ','k','e','y','b','o','a','r','d',0};
-    if (index != HID_STRING_ID_IPRODUCT)
-        return STATUS_NOT_IMPLEMENTED;
-    if (length < ARRAY_SIZE(nameW))
-        return STATUS_BUFFER_TOO_SMALL;
-    lstrcpyW(buffer, nameW);
     return STATUS_SUCCESS;
 }
 
@@ -202,8 +190,8 @@ static const struct unix_device_vtbl keyboard_vtbl =
     keyboard_remove,
     keyboard_compare,
     keyboard_start,
+    keyboard_stop,
     keyboard_get_report_descriptor,
-    keyboard_get_string,
     keyboard_set_output_report,
     keyboard_get_feature_report,
     keyboard_set_feature_report,
@@ -218,8 +206,10 @@ static const struct device_desc keyboard_device_desc =
     .version = 0,
     .input = -1,
     .uid = 0,
-    .serial = {'0','0','0','0',0},
     .is_gamepad = FALSE,
+    .manufacturer = {"The Wine Project"},
+    .product = {"Wine HID keyboard"},
+    .serialnumber = {"0000"},
 };
 static struct unix_device keyboard_device = {.vtbl = &keyboard_vtbl};
 
@@ -230,9 +220,37 @@ static NTSTATUS WINAPI keyboard_device_create(struct unix_device **device, struc
     return STATUS_SUCCESS;
 }
 
+void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size)
+{
+    struct unix_device *iface;
+
+    if (!(iface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size))) return NULL;
+    iface->vtbl = vtbl;
+    iface->ref = 1;
+
+    return iface;
+}
+
+void unix_device_destroy(struct unix_device *iface)
+{
+    HeapFree(GetProcessHeap(), 0, iface);
+}
+
+static void unix_device_decref(struct unix_device *iface)
+{
+    if (!InterlockedDecrement(&iface->ref))
+        iface->vtbl->destroy(iface);
+}
+
+static ULONG unix_device_incref(struct unix_device *iface)
+{
+    return InterlockedIncrement(&iface->ref);
+}
+
 static void WINAPI unix_device_remove(struct unix_device *iface)
 {
-    return iface->vtbl->destroy(iface);
+    iface->vtbl->stop(iface);
+    unix_device_decref(iface);
 }
 
 static int WINAPI unix_device_compare(struct unix_device *iface, void *context)
@@ -249,12 +267,6 @@ static NTSTATUS WINAPI unix_device_get_report_descriptor(struct unix_device *ifa
                                                          DWORD length, DWORD *out_length)
 {
     return iface->vtbl->get_report_descriptor(iface, buffer, length, out_length);
-}
-
-static NTSTATUS WINAPI unix_device_get_string(struct unix_device *iface, DWORD index, WCHAR *buffer,
-                                              DWORD length)
-{
-    return iface->vtbl->get_string(iface, index, buffer, length);
 }
 
 static void WINAPI unix_device_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
@@ -289,7 +301,6 @@ static const struct unix_funcs unix_funcs =
     unix_device_compare,
     unix_device_start,
     unix_device_get_report_descriptor,
-    unix_device_get_string,
     unix_device_set_output_report,
     unix_device_get_feature_report,
     unix_device_set_feature_report,
@@ -306,6 +317,8 @@ NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *pt
 
 void bus_event_destroy(struct bus_event *event)
 {
+    if (event->type == BUS_EVENT_TYPE_INPUT_REPORT)
+        unix_device_decref(event->input_report.device);
     HeapFree(GetProcessHeap(), 0, event);
 }
 
@@ -341,6 +354,22 @@ BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *devi
     event->type = BUS_EVENT_TYPE_DEVICE_CREATED;
     event->device_created.device = device;
     event->device_created.desc = *desc;
+    list_add_tail(queue, &event->entry);
+
+    return TRUE;
+}
+
+BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device, BYTE *report, DWORD length)
+{
+    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, offsetof(struct bus_event, input_report.buffer[length]));
+    if (!event) return FALSE;
+
+    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+
+    event->type = BUS_EVENT_TYPE_INPUT_REPORT;
+    event->input_report.device = device;
+    event->input_report.length = length;
+    memcpy(event->input_report.buffer, report, length);
     list_add_tail(queue, &event->entry);
 
     return TRUE;

@@ -34,8 +34,8 @@ struct unix_device_vtbl
     void (*destroy)(struct unix_device *iface);
     int (*compare)(struct unix_device *iface, void *platform_dev);
     NTSTATUS (*start)(struct unix_device *iface, DEVICE_OBJECT *device);
+    void (*stop)(struct unix_device *iface);
     NTSTATUS (*get_report_descriptor)(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length);
-    NTSTATUS (*get_string)(struct unix_device *iface, DWORD index, WCHAR *buffer, DWORD length);
     void (*set_output_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
     void (*get_feature_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
     void (*set_feature_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
@@ -44,7 +44,12 @@ struct unix_device_vtbl
 struct unix_device
 {
     const struct unix_device_vtbl *vtbl;
+    struct list entry;
+    LONG ref;
 };
+
+extern void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size) DECLSPEC_HIDDEN;
+extern void unix_device_destroy(struct unix_device *iface) DECLSPEC_HIDDEN;
 
 extern NTSTATUS WINAPI sdl_bus_init(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI sdl_bus_wait(void *args) DECLSPEC_HIDDEN;
@@ -62,6 +67,7 @@ extern void bus_event_destroy(struct bus_event *event) DECLSPEC_HIDDEN;
 extern void bus_event_queue_destroy(struct list *queue) DECLSPEC_HIDDEN;
 extern BOOL bus_event_queue_device_removed(struct list *queue, const WCHAR *bus_id, void *context) DECLSPEC_HIDDEN;
 extern BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *device, struct device_desc *desc) DECLSPEC_HIDDEN;
+extern BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device, BYTE *report, DWORD length) DECLSPEC_HIDDEN;
 extern BOOL bus_event_queue_pop(struct list *queue, struct bus_event **event) DECLSPEC_HIDDEN;
 
 struct hid_descriptor
