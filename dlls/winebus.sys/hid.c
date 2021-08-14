@@ -27,7 +27,7 @@
 #include "hidusage.h"
 #include "ddk/wdm.h"
 
-#include "bus.h"
+#include "unix_private.h"
 
 BOOL hid_descriptor_append(struct hid_descriptor *desc, const BYTE *buffer, SIZE_T size)
 {
