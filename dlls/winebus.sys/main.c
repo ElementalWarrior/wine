@@ -364,6 +364,27 @@ DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
     return ret;
 }
 
+static DEVICE_OBJECT *bus_find_unix_device(struct unix_device *unix_device)
+{
+    struct device_extension *ext;
+    struct pnp_device *dev;
+    DEVICE_OBJECT *ret = NULL;
+
+    EnterCriticalSection(&device_list_cs);
+    LIST_FOR_EACH_ENTRY(dev, &pnp_devset, struct pnp_device, entry)
+    {
+        ext = (struct device_extension *)dev->device->DeviceExtension;
+        if (ext->unix_device == unix_device)
+        {
+            ret = dev->device;
+            break;
+        }
+    }
+    LeaveCriticalSection(&device_list_cs);
+
+    return ret;
+}
+
 DEVICE_OBJECT* bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function, void* context)
 {
     struct pnp_device *dev, *dev_next;
@@ -398,6 +419,68 @@ static void bus_unlink_hid_device(DEVICE_OBJECT *device)
     EnterCriticalSection(&device_list_cs);
     list_remove(&pnp_device->entry);
     LeaveCriticalSection(&device_list_cs);
+}
+
+static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE* buffer, ULONG_PTR *out_length)
+{
+    if (buffer_length < ext->last_report_size)
+    {
+        *out_length = 0;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    else
+    {
+        if (ext->last_report)
+            memcpy(buffer, ext->last_report, ext->last_report_size);
+        *out_length = ext->last_report_size;
+        return STATUS_SUCCESS;
+    }
+}
+
+void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension*)device->DeviceExtension;
+    IRP *irp;
+    LIST_ENTRY *entry;
+
+    if (!length || !report)
+        return;
+
+    EnterCriticalSection(&ext->cs);
+    if (length > ext->buffer_size)
+    {
+        HeapFree(GetProcessHeap(), 0, ext->last_report);
+        ext->last_report = HeapAlloc(GetProcessHeap(), 0, length);
+        if (!ext->last_report)
+        {
+            ERR_(hid_report)("Failed to alloc last report\n");
+            ext->buffer_size = 0;
+            ext->last_report_size = 0;
+            ext->last_report_read = TRUE;
+            LeaveCriticalSection(&ext->cs);
+            return;
+        }
+        else
+            ext->buffer_size = length;
+    }
+
+    memcpy(ext->last_report, report, length);
+    ext->last_report_size = length;
+    ext->last_report_read = FALSE;
+
+    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+    {
+        IO_STACK_LOCATION *irpsp;
+        TRACE_(hid_report)("Processing Request\n");
+        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
+        irpsp = IoGetCurrentIrpStackLocation(irp);
+        irp->IoStatus.Status = deliver_last_report(ext,
+            irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+            irp->UserBuffer, &irp->IoStatus.Information);
+        ext->last_report_read = TRUE;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+    LeaveCriticalSection(&ext->cs);
 }
 
 static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
@@ -570,6 +653,11 @@ static DWORD CALLBACK bus_main_thread(void *args)
                 WARN("failed to create device for %s bus device %p\n", debugstr_w(bus.name), event->device_created.device);
                 unix_funcs->device_remove(event->device_created.device);
             }
+            break;
+        case BUS_EVENT_TYPE_INPUT_REPORT:
+            device = bus_find_unix_device(event->input_report.device);
+            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->input_report.device);
+            else process_hid_report(device, event->input_report.buffer, event->input_report.length);
             break;
         }
         LeaveCriticalSection(&device_list_cs);
@@ -829,22 +917,6 @@ static NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     return pdo_pnp_dispatch(device, irp);
 }
 
-static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE* buffer, ULONG_PTR *out_length)
-{
-    if (buffer_length < ext->last_report_size)
-    {
-        *out_length = 0;
-        return STATUS_BUFFER_TOO_SMALL;
-    }
-    else
-    {
-        if (ext->last_report)
-            memcpy(buffer, ext->last_report, ext->last_report_size);
-        *out_length = ext->last_report_size;
-        return STATUS_SUCCESS;
-    }
-}
-
 static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
@@ -1076,52 +1148,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
     if (status != STATUS_PENDING) IoCompleteRequest(irp, IO_NO_INCREMENT);
     return status;
-}
-
-void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
-{
-    struct device_extension *ext = (struct device_extension*)device->DeviceExtension;
-    IRP *irp;
-    LIST_ENTRY *entry;
-
-    if (!length || !report)
-        return;
-
-    EnterCriticalSection(&ext->cs);
-    if (length > ext->buffer_size)
-    {
-        HeapFree(GetProcessHeap(), 0, ext->last_report);
-        ext->last_report = HeapAlloc(GetProcessHeap(), 0, length);
-        if (!ext->last_report)
-        {
-            ERR_(hid_report)("Failed to alloc last report\n");
-            ext->buffer_size = 0;
-            ext->last_report_size = 0;
-            ext->last_report_read = TRUE;
-            LeaveCriticalSection(&ext->cs);
-            return;
-        }
-        else
-            ext->buffer_size = length;
-    }
-
-    memcpy(ext->last_report, report, length);
-    ext->last_report_size = length;
-    ext->last_report_read = FALSE;
-
-    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
-    {
-        IO_STACK_LOCATION *irpsp;
-        TRACE_(hid_report)("Processing Request\n");
-        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
-        irpsp = IoGetCurrentIrpStackLocation(irp);
-        irp->IoStatus.Status = deliver_last_report(ext,
-            irpsp->Parameters.DeviceIoControl.OutputBufferLength,
-            irp->UserBuffer, &irp->IoStatus.Information);
-        ext->last_report_read = TRUE;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-    }
-    LeaveCriticalSection(&ext->cs);
 }
 
 BOOL is_xbox_gamepad(WORD vid, WORD pid)

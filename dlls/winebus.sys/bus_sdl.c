@@ -63,11 +63,21 @@ WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
 static struct sdl_bus_options options;
 
+static CRITICAL_SECTION sdl_cs;
+static CRITICAL_SECTION_DEBUG sdl_cs_debug =
+{
+    0, 0, &sdl_cs,
+    { &sdl_cs_debug.ProcessLocksList, &sdl_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": sdl_cs") }
+};
+static CRITICAL_SECTION sdl_cs = { &sdl_cs_debug, -1, 0, 0, 0, 0 };
+
 static const WCHAR sdl_busidW[] = {'S','D','L','J','O','Y',0};
 
 static void *sdl_handle = NULL;
 static UINT quit_event = -1;
 static struct list event_queue = LIST_INIT(event_queue);
+static struct list device_list = LIST_INIT(device_list);
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
 MAKE_FUNCPTR(SDL_GetError);
@@ -140,9 +150,14 @@ static inline struct platform_private *impl_from_unix_device(struct unix_device 
     return CONTAINING_RECORD(iface, struct platform_private, unix_device);
 }
 
-static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
+static struct platform_private *find_device_from_id(SDL_JoystickID id)
 {
-    return impl_from_unix_device(get_unix_device(device));
+    struct platform_private *device;
+
+    LIST_FOR_EACH_ENTRY(device, &device_list, struct platform_private, unix_device.entry)
+        if (device->id == id) return device;
+
+    return NULL;
 }
 
 #define CONTROLLER_NUM_BUTTONS 11
@@ -507,6 +522,10 @@ static void sdl_device_stop(struct unix_device *iface)
         pSDL_GameControllerClose(private->sdl_controller);
     if (private->sdl_haptic)
         pSDL_HapticClose(private->sdl_haptic);
+
+    EnterCriticalSection(&sdl_cs);
+    list_remove(&private->unix_device.entry);
+    LeaveCriticalSection(&sdl_cs);
 }
 
 static NTSTATUS sdl_device_get_reportdescriptor(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length)
@@ -591,11 +610,11 @@ static const struct unix_device_vtbl sdl_device_vtbl =
     sdl_device_set_feature_report,
 };
 
-static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
+static BOOL set_report_from_event(struct platform_private *device, SDL_Event *event)
 {
-    struct platform_private *private;
-    private = impl_from_DEVICE_OBJECT(device);
-    if (private->sdl_controller)
+    struct unix_device *iface = &device->unix_device;
+
+    if (device->sdl_controller)
     {
         /* We want mapped events */
         return TRUE;
@@ -608,9 +627,9 @@ static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
         {
             SDL_JoyButtonEvent *ie = &event->jbutton;
 
-            set_button_value(private, ie->button, ie->state);
+            set_button_value(device, ie->button, ie->state);
 
-            process_hid_report(device, private->report_buffer, private->buffer_length);
+            bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             break;
         }
         case SDL_JOYAXISMOTION:
@@ -619,8 +638,8 @@ static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
 
             if (ie->axis < 6)
             {
-                set_axis_value(private, ie->axis, ie->value, FALSE);
-                process_hid_report(device, private->report_buffer, private->buffer_length);
+                set_axis_value(device, ie->axis, ie->value, FALSE);
+                bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             }
             break;
         }
@@ -628,16 +647,16 @@ static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
         {
             SDL_JoyBallEvent *ie = &event->jball;
 
-            set_ball_value(private, ie->ball, ie->xrel, ie->yrel);
-            process_hid_report(device, private->report_buffer, private->buffer_length);
+            set_ball_value(device, ie->ball, ie->xrel, ie->yrel);
+            bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             break;
         }
         case SDL_JOYHATMOTION:
         {
             SDL_JoyHatEvent *ie = &event->jhat;
 
-            set_hat_value(private, ie->hat, ie->value);
-            process_hid_report(device, private->report_buffer, private->buffer_length);
+            set_hat_value(device, ie->hat, ie->value);
+            bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             break;
         }
         default:
@@ -646,10 +665,9 @@ static BOOL set_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
     return FALSE;
 }
 
-static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event)
+static BOOL set_mapped_report_from_event(struct platform_private *device, SDL_Event *event)
 {
-    struct platform_private *private;
-    private = impl_from_DEVICE_OBJECT(device);
+    struct unix_device *iface = &device->unix_device;
 
     switch(event->type)
     {
@@ -677,8 +695,8 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
                 case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
                 case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
                 case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-                    set_hat_value(private, 0, compose_dpad_value(private->sdl_controller));
-                    process_hid_report(device, private->report_buffer, private->buffer_length);
+                    set_hat_value(device, 0, compose_dpad_value(device->sdl_controller));
+                    bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
                     break;
 
                 default:
@@ -687,8 +705,8 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
 
             if (usage >= 0)
             {
-                set_button_value(private, usage, ie->state);
-                process_hid_report(device, private->report_buffer, private->buffer_length);
+                set_button_value(device, usage, ie->state);
+                bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             }
             break;
         }
@@ -696,8 +714,8 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
         {
             SDL_ControllerAxisEvent *ie = &event->caxis;
 
-            set_axis_value(private, ie->axis, ie->value, TRUE);
-            process_hid_report(device, private->report_buffer, private->buffer_length);
+            set_axis_value(device, ie->axis, ie->value, TRUE);
+            bus_event_queue_input_report(&event_queue, iface, device->report_buffer, device->buffer_length);
             break;
         }
         default:
@@ -784,6 +802,7 @@ static void try_add_device(unsigned int index)
     if (desc.is_gamepad) desc.input = 0;
 
     if (!(private = unix_device_create(&sdl_device_vtbl, sizeof(*private)))) return;
+    list_add_tail(&device_list, &private->unix_device.entry);
     private->sdl_joystick = joystick;
     private->sdl_controller = controller;
     private->id = id;
@@ -794,10 +813,12 @@ static void try_add_device(unsigned int index)
 
 static void process_device_event(SDL_Event *event)
 {
-    DEVICE_OBJECT *device;
+    struct platform_private *device;
     SDL_JoystickID id;
 
     TRACE_(hid_report)("Received action %x\n", event->type);
+
+    EnterCriticalSection(&sdl_cs);
 
     if (event->type == SDL_JOYDEVICEADDED)
         try_add_device(((SDL_JoyDeviceEvent *)event)->which);
@@ -809,17 +830,19 @@ static void process_device_event(SDL_Event *event)
     else if (event->type >= SDL_JOYAXISMOTION && event->type <= SDL_JOYBUTTONUP)
     {
         id = ((SDL_JoyButtonEvent *)event)->which;
-        device = bus_find_hid_device(sdl_busidW, ULongToPtr(id));
+        device = find_device_from_id(id);
         if (device) set_report_from_event(device, event);
         else WARN("failed to find device with id %d\n",id);
     }
     else if (event->type >= SDL_CONTROLLERAXISMOTION && event->type <= SDL_CONTROLLERBUTTONUP)
     {
         id = ((SDL_ControllerButtonEvent *)event)->which;
-        device = bus_find_hid_device(sdl_busidW, ULongToPtr(id));
+        device = find_device_from_id(id);
         if (device) set_mapped_report_from_event(device, event);
         else WARN("failed to find device with id %d\n",id);
     }
+
+    LeaveCriticalSection(&sdl_cs);
 }
 
 static void sdl_load_mappings(void)
