@@ -135,6 +135,7 @@ static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *b
     BASE_DEVICE_EXTENSION *ext;
     DEVICE_OBJECT *fdo;
     NTSTATUS status;
+    WCHAR *tmp;
     minidriver *minidriver;
 
     if ((status = get_device_id(bus_pdo, BusQueryDeviceID, device_id)))
@@ -163,7 +164,9 @@ static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *b
     ext->u.fdo.hid_ext.MiniDeviceExtension = ext + 1;
     ext->u.fdo.hid_ext.PhysicalDeviceObject = bus_pdo;
     ext->u.fdo.hid_ext.NextDeviceObject = bus_pdo;
-    swprintf(ext->device_id, ARRAY_SIZE(ext->device_id), L"HID\\%s", wcsrchr(device_id, '\\') + 1);
+    if ((tmp = wcsrchr(device_id, '\\'))) *tmp = 0;
+    wcscpy(ext->bus_id, device_id);
+    swprintf(ext->device_id, ARRAY_SIZE(ext->device_id), L"HID\\%s", tmp ? tmp + 1 : L"vid_000&pid_0000");
     wcscpy(ext->instance_id, instance_id);
 
     status = minidriver->AddDevice(minidriver->minidriver.DriverObject, fdo);
@@ -218,6 +221,7 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     KeInitializeSpinLock( &pdo_ext->u.pdo.report_queues_lock );
     InitializeListHead(&pdo_ext->u.pdo.irp_queue);
     KeInitializeSpinLock(&pdo_ext->u.pdo.irp_queue_lock);
+    wcscpy(pdo_ext->bus_id, fdo_ext->bus_id);
     wcscpy(pdo_ext->device_id, fdo_ext->device_id);
     wcscpy(pdo_ext->instance_id, fdo_ext->instance_id);
 

@@ -82,6 +82,7 @@ typedef struct _BASE_DEVICE_EXTENSION
 
     /* These are unique to the parent FDO, but stored in the children as well
      * for convenience. */
+    WCHAR bus_id[MAX_DEVICE_ID_LEN];
     WCHAR device_id[MAX_DEVICE_ID_LEN];
     WCHAR instance_id[MAX_DEVICE_ID_LEN];
 
