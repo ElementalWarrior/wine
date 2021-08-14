@@ -90,13 +90,16 @@
 #include "wine/debug.h"
 
 #include "bus.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
+
 #ifdef HAVE_IOHIDMANAGERCREATE
+
+static struct iohid_bus_options options;
 
 static IOHIDManagerRef hid_manager;
 static CFRunLoopRef run_loop;
-static HANDLE run_loop_handle;
 
 static const WCHAR busidW[] = {'I','O','H','I','D',0};
 
@@ -146,6 +149,20 @@ static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
         return 1;
     else
         return 0;
+}
+
+static NTSTATUS start_device(DEVICE_OBJECT *device)
+{
+    DWORD length;
+    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
+    CFNumberRef num;
+
+    num = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDMaxInputReportSizeKey));
+    length = CFNumberToDWORD(num);
+    private->buffer = HeapAlloc(GetProcessHeap(), 0, length);
+
+    IOHIDDeviceRegisterInputReportCallback(private->device, private->buffer, length, handle_IOHIDDeviceIOHIDReportCallback, device);
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
@@ -199,74 +216,57 @@ static NTSTATUS get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DW
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS begin_report_processing(DEVICE_OBJECT *device)
-{
-    DWORD length;
-    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
-    CFNumberRef num;
-
-    if (private->buffer)
-        return STATUS_SUCCESS;
-
-    num = IOHIDDeviceGetProperty(private->device, CFSTR(kIOHIDMaxInputReportSizeKey));
-    length = CFNumberToDWORD(num);
-    private->buffer = HeapAlloc(GetProcessHeap(), 0, length);
-
-    IOHIDDeviceRegisterInputReportCallback(private->device, private->buffer, length, handle_IOHIDDeviceIOHIDReportCallback, device);
-    return STATUS_SUCCESS;
-}
-
-static NTSTATUS set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     IOReturn result;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
-    result = IOHIDDeviceSetReport(private->device, kIOHIDReportTypeOutput, id, report, length);
+    result = IOHIDDeviceSetReport(private->device, kIOHIDReportTypeOutput, packet->reportId, packet->reportBuffer, packet->reportBufferLen);
     if (result == kIOReturnSuccess)
     {
-        *written = length;
-        return STATUS_SUCCESS;
+        io->Information = packet->reportBufferLen;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        *written = 0;
-        return STATUS_UNSUCCESSFUL;
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 }
 
-static NTSTATUS get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *read)
+static void get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     IOReturn ret;
-    CFIndex report_length = length;
+    CFIndex report_length = packet->reportBufferLen;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
 
-    ret = IOHIDDeviceGetReport(private->device, kIOHIDReportTypeFeature, id, report, &report_length);
+    ret = IOHIDDeviceGetReport(private->device, kIOHIDReportTypeFeature, packet->reportId, packet->reportBuffer, &report_length);
     if (ret == kIOReturnSuccess)
     {
-        *read = report_length;
-        return STATUS_SUCCESS;
+        io->Information = report_length;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        *read = 0;
-        return STATUS_UNSUCCESSFUL;
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 }
 
-static NTSTATUS set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     IOReturn result;
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
 
-    result = IOHIDDeviceSetReport(private->device, kIOHIDReportTypeFeature, id, report, length);
+    result = IOHIDDeviceSetReport(private->device, kIOHIDReportTypeFeature, packet->reportId, packet->reportBuffer, packet->reportBufferLen);
     if (result == kIOReturnSuccess)
     {
-        *written = length;
-        return STATUS_SUCCESS;
+        io->Information = packet->reportBufferLen;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        *written = 0;
-        return STATUS_UNSUCCESSFUL;
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 }
 
@@ -274,9 +274,9 @@ static const platform_vtbl iohid_vtbl =
 {
     free_device,
     compare_platform_device,
+    start_device,
     get_reportdescriptor,
     get_string,
-    begin_report_processing,
     set_output_report,
     get_feature_report,
     set_feature_report,
@@ -377,7 +377,7 @@ static void handle_RemovalCallback(void *context, IOReturn result, void *sender,
              safe way to deallocate that buffer. */
     IOHIDDeviceUnscheduleFromRunLoop(IOHIDDevice, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     IOHIDDeviceClose(IOHIDDevice, 0);
-    device = bus_find_hid_device(&iohid_vtbl, IOHIDDevice);
+    device = bus_find_hid_device(busidW, IOHIDDevice);
     if (device)
     {
         bus_unlink_hid_device(device);
@@ -385,63 +385,60 @@ static void handle_RemovalCallback(void *context, IOReturn result, void *sender,
     }
 }
 
-/* This puts the relevant run loop for event handling into a WINE thread */
-static DWORD CALLBACK runloop_thread(void *args)
+NTSTATUS WINAPI iohid_bus_init(void *args)
 {
+    TRACE("args %p\n", args);
+
+    options = *(struct iohid_bus_options *)args;
+
+    hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, 0L);
     run_loop = CFRunLoopGetCurrent();
 
     IOHIDManagerSetDeviceMatching(hid_manager, NULL);
     IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, handle_DeviceMatchingCallback, NULL);
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, handle_RemovalCallback, NULL);
     IOHIDManagerScheduleWithRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
-
-    CFRunLoopRun();
-    TRACE("Run Loop exiting\n");
-    return 1;
-
-}
-
-NTSTATUS iohid_driver_init(void)
-{
-    hid_manager = IOHIDManagerCreate(kCFAllocatorDefault, 0L);
-    if (!(run_loop_handle = CreateThread(NULL, 0, runloop_thread, NULL, 0, NULL)))
-    {
-        ERR("Failed to initialize IOHID Manager thread\n");
-        CFRelease(hid_manager);
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    TRACE("Initialization successful\n");
     return STATUS_SUCCESS;
 }
 
-void iohid_driver_unload( void )
+NTSTATUS WINAPI iohid_bus_wait(void)
 {
-    TRACE("Unloading Driver\n");
+    CFRunLoopRun();
 
-    if (!run_loop_handle)
-        return;
-
-    IOHIDManagerUnscheduleFromRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
-    CFRunLoopStop(run_loop);
-    WaitForSingleObject(run_loop_handle, INFINITE);
-    CloseHandle(run_loop_handle);
+    TRACE("IOHID main loop exiting\n");
     IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, NULL, NULL);
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, NULL, NULL);
     CFRelease(hid_manager);
-    TRACE("Driver Unloaded\n");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI iohid_bus_stop(void)
+{
+    if (!run_loop) return STATUS_SUCCESS;
+
+    IOHIDManagerUnscheduleFromRunLoop(hid_manager, run_loop, kCFRunLoopDefaultMode);
+    CFRunLoopStop(run_loop);
+    return STATUS_SUCCESS;
 }
 
 #else
 
-NTSTATUS iohid_driver_init(void)
+NTSTATUS WINAPI iohid_bus_init(void *args)
 {
+    WARN("IOHID support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;
 }
 
-void iohid_driver_unload( void )
+NTSTATUS WINAPI iohid_bus_wait(void)
 {
-    TRACE("Stub: Unload Driver\n");
+    WARN("IOHID support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS WINAPI iohid_bus_stop(void)
+{
+    WARN("IOHID support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 #endif /* HAVE_IOHIDMANAGERCREATE */

@@ -80,6 +80,7 @@
 #endif
 
 #include "bus.h"
+#include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
@@ -87,11 +88,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 
 WINE_DECLARE_DEBUG_CHANNEL(hid_report);
 
+static struct udev_bus_options options;
+
 static struct udev *udev_context = NULL;
-static DWORD disable_hidraw = 0;
-static DWORD disable_input = 0;
-static HANDLE deviceloop_handle;
+static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
+static int udev_monitor_fd;
 
 static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
 static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
@@ -343,7 +345,7 @@ static INT count_abs_axis(int device_fd)
     return abs_count;
 }
 
-static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_device *dev)
+static NTSTATUS build_report_descriptor(struct wine_input_private *ext, struct udev_device *dev)
 {
     struct input_absinfo abs_info[HID_ABS_MAX];
     BYTE absbits[(ABS_MAX+7)/8];
@@ -357,18 +359,18 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
     if (ioctl(ext->base.device_fd, EVIOCGBIT(EV_REL, sizeof(relbits)), relbits) == -1)
     {
         WARN("ioctl(EVIOCGBIT, EV_REL) failed: %d %s\n", errno, strerror(errno));
-        return FALSE;
+        memset(relbits, 0, sizeof(relbits));
     }
     if (ioctl(ext->base.device_fd, EVIOCGBIT(EV_ABS, sizeof(absbits)), absbits) == -1)
     {
         WARN("ioctl(EVIOCGBIT, EV_ABS) failed: %d %s\n", errno, strerror(errno));
-        return FALSE;
+        memset(absbits, 0, sizeof(absbits));
     }
 
     report_size = 0;
 
     if (!hid_descriptor_begin(&ext->desc, device_usage[0], device_usage[1]))
-        return FALSE;
+        return STATUS_NO_MEMORY;
 
     abs_count = 0;
     for (i = 0; i < HID_ABS_MAX; i++)
@@ -381,7 +383,7 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
 
         if (!hid_descriptor_add_axes(&ext->desc, 1, usage.UsagePage, &usage.Usage, FALSE, 32,
                                      LE_DWORD(abs_info[i].minimum), LE_DWORD(abs_info[i].maximum)))
-            return FALSE;
+            return STATUS_NO_MEMORY;
 
         ext->abs_map[i] = report_size;
         report_size += 4;
@@ -397,7 +399,7 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
 
         if (!hid_descriptor_add_axes(&ext->desc, 1, usage.UsagePage, &usage.Usage, TRUE, 8,
                                      0x81, 0x7f))
-            return FALSE;
+            return STATUS_NO_MEMORY;
 
         ext->rel_map[i] = report_size;
         report_size++;
@@ -410,13 +412,13 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
     if (button_count)
     {
         if (!hid_descriptor_add_buttons(&ext->desc, HID_USAGE_PAGE_BUTTON, 1, button_count))
-            return FALSE;
+            return STATUS_NO_MEMORY;
 
         if (button_count % 8)
         {
             BYTE padding = 8 - (button_count % 8);
             if (!hid_descriptor_add_padding(&ext->desc, padding))
-                return FALSE;
+                return STATUS_NO_MEMORY;
         }
 
         report_size += (button_count + 7) / 8;
@@ -436,11 +438,11 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
     if (hat_count)
     {
         if (!hid_descriptor_add_hatswitch(&ext->desc, hat_count))
-            return FALSE;
+            return STATUS_NO_MEMORY;
     }
 
     if (!hid_descriptor_end(&ext->desc))
-        return FALSE;
+        return STATUS_NO_MEMORY;
 
     TRACE("Report will be %i bytes\n", report_size);
 
@@ -456,13 +458,13 @@ static BOOL build_report_descriptor(struct wine_input_private *ext, struct udev_
         if (test_bit(absbits, i))
             set_abs_axis_value(ext, i, abs_info[i].value);
 
-    return TRUE;
+    return STATUS_SUCCESS;
 
 failed:
     HeapFree(GetProcessHeap(), 0, ext->current_report_buffer);
     HeapFree(GetProcessHeap(), 0, ext->last_report_buffer);
     hid_descriptor_free(&ext->desc);
-    return FALSE;
+    return STATUS_NO_MEMORY;
 }
 
 static BOOL set_report_from_event(struct wine_input_private *ext, struct input_event *ie)
@@ -556,6 +558,30 @@ static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
     struct udev_device *dev1 = impl_from_DEVICE_OBJECT(device)->udev_device;
     struct udev_device *dev2 = platform_dev;
     return strcmp(udev_device_get_syspath(dev1), udev_device_get_syspath(dev2));
+}
+
+static DWORD CALLBACK device_report_thread(void *args);
+
+static NTSTATUS hidraw_start_device(DEVICE_OBJECT *device)
+{
+    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
+
+    if (pipe(private->control_pipe) != 0)
+    {
+        ERR("Control pipe creation failed\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    private->report_thread = CreateThread(NULL, 0, device_report_thread, device, 0, NULL);
+    if (!private->report_thread)
+    {
+        ERR("Unable to create device report thread\n");
+        close(private->control_pipe[0]);
+        close(private->control_pipe[1]);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS hidraw_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
@@ -692,125 +718,103 @@ static DWORD CALLBACK device_report_thread(void *args)
     return 0;
 }
 
-static NTSTATUS begin_report_processing(DEVICE_OBJECT *device)
-{
-    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
-
-    if (private->report_thread)
-        return STATUS_SUCCESS;
-
-    if (pipe(private->control_pipe) != 0)
-    {
-        ERR("Control pipe creation failed\n");
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    private->report_thread = CreateThread(NULL, 0, device_report_thread, device, 0, NULL);
-    if (!private->report_thread)
-    {
-        ERR("Unable to create device report thread\n");
-        close(private->control_pipe[0]);
-        close(private->control_pipe[1]);
-        return STATUS_UNSUCCESSFUL;
-    }
-    else
-        return STATUS_SUCCESS;
-}
-
-static NTSTATUS hidraw_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void hidraw_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     struct platform_private* ext = impl_from_DEVICE_OBJECT(device);
+    ULONG length = packet->reportBufferLen;
     BYTE buffer[8192];
     int count = 0;
 
-    if ((buffer[0] = id))
-        count = write(ext->device_fd, report, length);
+    if ((buffer[0] = packet->reportId))
+        count = write(ext->device_fd, packet->reportBuffer, length);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", id, length);
+        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
     else
     {
-        memcpy(buffer + 1, report, length);
+        memcpy(buffer + 1, packet->reportBuffer, length);
         count = write(ext->device_fd, buffer, length + 1);
     }
 
     if (count > 0)
     {
-        *written = count;
-        return STATUS_SUCCESS;
+        io->Information = count;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        ERR_(hid_report)("id %d write failed error: %d %s\n", id, errno, strerror(errno));
-        *written = 0;
-        return STATUS_UNSUCCESSFUL;
+        ERR_(hid_report)("id %d write failed error: %d %s\n", packet->reportId, errno, strerror(errno));
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 }
 
-static NTSTATUS hidraw_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *read)
+static void hidraw_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
 #if defined(HAVE_LINUX_HIDRAW_H) && defined(HIDIOCGFEATURE)
     struct platform_private* ext = impl_from_DEVICE_OBJECT(device);
+    ULONG length = packet->reportBufferLen;
     BYTE buffer[8192];
     int count = 0;
 
-    if ((buffer[0] = id) && length <= 0x1fff)
-        count = ioctl(ext->device_fd, HIDIOCGFEATURE(length), report);
+    if ((buffer[0] = packet->reportId) && length <= 0x1fff)
+        count = ioctl(ext->device_fd, HIDIOCGFEATURE(length), packet->reportBuffer);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot read\n", id, length);
+        ERR_(hid_report)("id %d length %u >= 8192, cannot read\n", packet->reportId, length);
     else
     {
         count = ioctl(ext->device_fd, HIDIOCGFEATURE(length + 1), buffer);
-        memcpy(report, buffer + 1, length);
+        memcpy(packet->reportBuffer, buffer + 1, length);
     }
 
     if (count > 0)
     {
-        *read = count;
-        return STATUS_SUCCESS;
+        io->Information = count;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        ERR_(hid_report)("id %d read failed, error: %d %s\n", id, errno, strerror(errno));
-        *read = 0;
-        return STATUS_UNSUCCESSFUL;
+        ERR_(hid_report)("id %d read failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 #else
-    *read = 0;
-    return STATUS_NOT_IMPLEMENTED;
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 #endif
 }
 
-static NTSTATUS hidraw_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void hidraw_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
 #if defined(HAVE_LINUX_HIDRAW_H) && defined(HIDIOCSFEATURE)
     struct platform_private* ext = impl_from_DEVICE_OBJECT(device);
+    ULONG length = packet->reportBufferLen;
     BYTE buffer[8192];
     int count = 0;
 
-    if ((buffer[0] = id) && length <= 0x1fff)
-        count = ioctl(ext->device_fd, HIDIOCSFEATURE(length), report);
+    if ((buffer[0] = packet->reportId) && length <= 0x1fff)
+        count = ioctl(ext->device_fd, HIDIOCSFEATURE(length), packet->reportBuffer);
     else if (length > sizeof(buffer) - 1)
-        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", id, length);
+        ERR_(hid_report)("id %d length %u >= 8192, cannot write\n", packet->reportId, length);
     else
     {
-        memcpy(buffer + 1, report, length);
+        memcpy(buffer + 1, packet->reportBuffer, length);
         count = ioctl(ext->device_fd, HIDIOCSFEATURE(length + 1), buffer);
     }
 
     if (count > 0)
     {
-        *written = count;
-        return STATUS_SUCCESS;
+        io->Information = count;
+        io->Status = STATUS_SUCCESS;
     }
     else
     {
-        ERR_(hid_report)("id %d write failed, error: %d %s\n", id, errno, strerror(errno));
-        *written = 0;
-        return STATUS_UNSUCCESSFUL;
+        ERR_(hid_report)("id %d write failed, error: %d %s\n", packet->reportId, errno, strerror(errno));
+        io->Information = 0;
+        io->Status = STATUS_UNSUCCESSFUL;
     }
 #else
-    *written = 0;
-    return STATUS_NOT_IMPLEMENTED;
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 #endif
 }
 
@@ -818,9 +822,9 @@ static const platform_vtbl hidraw_vtbl =
 {
     hidraw_free_device,
     compare_platform_device,
+    hidraw_start_device,
     hidraw_get_reportdescriptor,
     hidraw_get_string,
-    begin_report_processing,
     hidraw_set_output_report,
     hidraw_get_feature_report,
     hidraw_set_feature_report,
@@ -852,6 +856,34 @@ static void lnxev_free_device(DEVICE_OBJECT *device)
 
     close(ext->base.device_fd);
     udev_device_unref(ext->base.udev_device);
+}
+
+static DWORD CALLBACK lnxev_device_report_thread(void *args);
+
+static NTSTATUS lnxev_start_device(DEVICE_OBJECT *device)
+{
+    struct wine_input_private *ext = input_impl_from_DEVICE_OBJECT(device);
+    NTSTATUS status;
+
+    if ((status = build_report_descriptor(ext, ext->base.udev_device)))
+        return status;
+
+    if (pipe(ext->base.control_pipe) != 0)
+    {
+        ERR("Control pipe creation failed\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    ext->base.report_thread = CreateThread(NULL, 0, lnxev_device_report_thread, device, 0, NULL);
+    if (!ext->base.report_thread)
+    {
+        ERR("Unable to create device report thread\n");
+        close(ext->base.control_pipe[0]);
+        close(ext->base.control_pipe[1]);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS lnxev_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
@@ -922,54 +954,30 @@ static DWORD CALLBACK lnxev_device_report_thread(void *args)
     return 0;
 }
 
-static NTSTATUS lnxev_begin_report_processing(DEVICE_OBJECT *device)
+static void lnxev_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    struct wine_input_private *private = input_impl_from_DEVICE_OBJECT(device);
-
-    if (private->base.report_thread)
-        return STATUS_SUCCESS;
-
-    if (pipe(private->base.control_pipe) != 0)
-    {
-        ERR("Control pipe creation failed\n");
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    private->base.report_thread = CreateThread(NULL, 0, lnxev_device_report_thread, device, 0, NULL);
-    if (!private->base.report_thread)
-    {
-        ERR("Unable to create device report thread\n");
-        close(private->base.control_pipe[0]);
-        close(private->base.control_pipe[1]);
-        return STATUS_UNSUCCESSFUL;
-    }
-    return STATUS_SUCCESS;
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS lnxev_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
+static void lnxev_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    *written = 0;
-    return STATUS_NOT_IMPLEMENTED;
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS lnxev_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *read)
+static void lnxev_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    *read = 0;
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS lnxev_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *written)
-{
-    *written = 0;
-    return STATUS_NOT_IMPLEMENTED;
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
 static const platform_vtbl lnxev_vtbl = {
     lnxev_free_device,
     compare_platform_device,
+    lnxev_start_device,
     lnxev_get_reportdescriptor,
     lnxev_get_string,
-    lnxev_begin_report_processing,
     lnxev_set_output_report,
     lnxev_get_feature_report,
     lnxev_set_feature_report,
@@ -1095,8 +1103,8 @@ static void try_add_device(struct udev_device *dev)
     TRACE("udev %s syspath %s\n", debugstr_a(devnode), udev_device_get_syspath(dev));
 
 #ifdef HAS_PROPER_INPUT_HEADER
-    device = bus_enumerate_hid_devices(&lnxev_vtbl, check_device_syspath, (void *)get_device_syspath(dev));
-    if (!device) device = bus_enumerate_hid_devices(&hidraw_vtbl, check_device_syspath, (void *)get_device_syspath(dev));
+    device = bus_enumerate_hid_devices(lnxev_busidW, check_device_syspath, (void *)get_device_syspath(dev));
+    if (!device) device = bus_enumerate_hid_devices(hidraw_busidW, check_device_syspath, (void *)get_device_syspath(dev));
     if (device)
     {
         TRACE("duplicate device found, not adding the new one\n");
@@ -1183,20 +1191,6 @@ static void try_add_device(struct udev_device *dev)
         struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->udev_device = udev_device_ref(dev);
         private->device_fd = fd;
-#ifdef HAS_PROPER_INPUT_HEADER
-        if (strcmp(subsystem, "input") == 0)
-            /* FIXME: We should probably move this to IRP_MN_START_DEVICE. */
-            if (!build_report_descriptor((struct wine_input_private*)private, dev))
-            {
-                ERR("Building report descriptor failed, removing device\n");
-                close(fd);
-                udev_device_unref(dev);
-                bus_unlink_hid_device(device);
-                bus_remove_hid_device(device);
-                HeapFree(GetProcessHeap(), 0, serial);
-                return;
-            }
-#endif
         IoInvalidateDeviceRelations(bus_pdo, BusRelations);
     }
     else
@@ -1212,10 +1206,10 @@ static void try_remove_device(struct udev_device *dev)
 {
     DEVICE_OBJECT *device = NULL;
 
-    device = bus_find_hid_device(&hidraw_vtbl, dev);
+    device = bus_find_hid_device(hidraw_busidW, dev);
 #ifdef HAS_PROPER_INPUT_HEADER
     if (device == NULL)
-        device = bus_find_hid_device(&lnxev_vtbl, dev);
+        device = bus_find_hid_device(lnxev_busidW, dev);
 #endif
     if (!device) return;
 
@@ -1235,11 +1229,11 @@ static void build_initial_deviceset(void)
         return;
     }
 
-    if (!disable_hidraw)
+    if (!options.disable_hidraw)
         if (udev_enumerate_add_match_subsystem(enumerate, "hidraw") < 0)
             WARN("Failed to add subsystem 'hidraw' to enumeration\n");
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!disable_input)
+    if (!options.disable_input)
     {
         if (udev_enumerate_add_match_subsystem(enumerate, "input") < 0)
             WARN("Failed to add subsystem 'input' to enumeration\n");
@@ -1266,7 +1260,7 @@ static void build_initial_deviceset(void)
     udev_enumerate_unref(enumerate);
 }
 
-static struct udev_monitor *create_monitor(struct pollfd *pfd)
+static struct udev_monitor *create_monitor(int *fd)
 {
     struct udev_monitor *monitor;
     int systems = 0;
@@ -1278,7 +1272,7 @@ static struct udev_monitor *create_monitor(struct pollfd *pfd)
         return NULL;
     }
 
-    if (!disable_hidraw)
+    if (!options.disable_hidraw)
     {
         if (udev_monitor_filter_add_match_subsystem_devtype(monitor, "hidraw", NULL) < 0)
             WARN("Failed to add 'hidraw' subsystem to monitor\n");
@@ -1286,7 +1280,7 @@ static struct udev_monitor *create_monitor(struct pollfd *pfd)
             systems++;
     }
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!disable_input)
+    if (!options.disable_input)
     {
         if (udev_monitor_filter_add_match_subsystem_devtype(monitor, "input", NULL) < 0)
             WARN("Failed to add 'input' subsystem to monitor\n");
@@ -1303,11 +1297,8 @@ static struct udev_monitor *create_monitor(struct pollfd *pfd)
     if (udev_monitor_enable_receiving(monitor) < 0)
         goto error;
 
-    if ((pfd->fd = udev_monitor_get_fd(monitor)) >= 0)
-    {
-        pfd->events = POLLIN;
+    if ((*fd = udev_monitor_get_fd(monitor)) >= 0)
         return monitor;
-    }
 
 error:
     WARN("Failed to start monitoring\n");
@@ -1343,118 +1334,95 @@ static void process_monitor_event(struct udev_monitor *monitor)
     udev_device_unref(dev);
 }
 
-static DWORD CALLBACK deviceloop_thread(void *args)
+NTSTATUS WINAPI udev_bus_stop(void)
 {
-    struct udev_monitor *monitor;
-    HANDLE init_done = args;
-    struct pollfd pfd[2];
-
-    pfd[1].fd = deviceloop_control[0];
-    pfd[1].events = POLLIN;
-    pfd[1].revents = 0;
-
-    monitor = create_monitor(&pfd[0]);
-    build_initial_deviceset();
-    SetEvent(init_done);
-
-    while (monitor)
-    {
-        if (poll(pfd, 2, -1) <= 0) continue;
-        if (pfd[1].revents) break;
-        process_monitor_event(monitor);
-    }
-
-    TRACE("Monitor thread exiting\n");
-    if (monitor)
-        udev_monitor_unref(monitor);
-    return 0;
-}
-
-void udev_driver_unload( void )
-{
-    TRACE("Unload Driver\n");
-
-    if (!deviceloop_handle)
-        return;
+    if (!udev_context) return STATUS_SUCCESS;
 
     write(deviceloop_control[1], "q", 1);
-    WaitForSingleObject(deviceloop_handle, INFINITE);
-    close(deviceloop_control[0]);
-    close(deviceloop_control[1]);
-    CloseHandle(deviceloop_handle);
+    return STATUS_SUCCESS;
 }
 
-NTSTATUS udev_driver_init(void)
+NTSTATUS WINAPI udev_bus_init(void *args)
 {
-    HANDLE events[2];
-    DWORD result;
-    static const WCHAR hidraw_disabledW[] = {'D','i','s','a','b','l','e','H','i','d','r','a','w',0};
-    static const UNICODE_STRING hidraw_disabled = {sizeof(hidraw_disabledW) - sizeof(WCHAR), sizeof(hidraw_disabledW), (WCHAR*)hidraw_disabledW};
-    static const WCHAR input_disabledW[] = {'D','i','s','a','b','l','e','I','n','p','u','t',0};
-    static const UNICODE_STRING input_disabled = {sizeof(input_disabledW) - sizeof(WCHAR), sizeof(input_disabledW), (WCHAR*)input_disabledW};
+    TRACE("args %p\n", args);
+
+    options = *(struct udev_bus_options *)args;
 
     if (pipe(deviceloop_control) != 0)
     {
-        ERR("Control pipe creation failed\n");
+        ERR("control pipe creation failed\n");
         return STATUS_UNSUCCESSFUL;
     }
 
     if (!(udev_context = udev_new()))
     {
-        ERR("Can't create udev object\n");
-        goto error;
+        ERR("udev object creation failed\n");
+        close(deviceloop_control[0]);
+        close(deviceloop_control[1]);
+        return STATUS_UNSUCCESSFUL;
     }
 
-    disable_hidraw = check_bus_option(&hidraw_disabled, 0);
-    if (disable_hidraw)
-        TRACE("UDEV hidraw devices disabled in registry\n");
-
-#ifdef HAS_PROPER_INPUT_HEADER
-    disable_input = check_bus_option(&input_disabled, 0);
-    if (disable_input)
-        TRACE("UDEV input devices disabled in registry\n");
-#endif
-
-    if (!(events[0] = CreateEventW(NULL, TRUE, FALSE, NULL)))
-        goto error;
-    if (!(events[1] = CreateThread(NULL, 0, deviceloop_thread, events[0], 0, NULL)))
+    if (!(udev_monitor = create_monitor(&udev_monitor_fd)))
     {
-        CloseHandle(events[0]);
-        goto error;
-    }
-
-    result = WaitForMultipleObjects(2, events, FALSE, INFINITE);
-    CloseHandle(events[0]);
-    if (result == WAIT_OBJECT_0)
-    {
-        deviceloop_handle = events[1];
-        TRACE("Initialization successful\n");
-        return STATUS_SUCCESS;
-    }
-    CloseHandle(events[1]);
-
-error:
-    ERR("Failed to initialize udev device thread\n");
-    close(deviceloop_control[0]);
-    close(deviceloop_control[1]);
-    if (udev_context)
-    {
+        ERR("udev monitor creation failed\n");
+        close(deviceloop_control[0]);
+        close(deviceloop_control[1]);
         udev_unref(udev_context);
         udev_context = NULL;
+        return STATUS_UNSUCCESSFUL;
     }
-    return STATUS_UNSUCCESSFUL;
+
+    build_initial_deviceset();
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI udev_bus_wait(void)
+{
+    struct pollfd pfd[2];
+
+    pfd[0].fd = udev_monitor_fd;
+    pfd[0].events = POLLIN;
+    pfd[0].revents = 0;
+    pfd[1].fd = deviceloop_control[0];
+    pfd[1].events = POLLIN;
+    pfd[1].revents = 0;
+
+    while (1)
+    {
+        if (poll(pfd, 2, -1) <= 0) continue;
+        if (pfd[1].revents) break;
+        process_monitor_event(udev_monitor);
+    }
+
+    TRACE("UDEV main loop exiting\n");
+    udev_monitor_unref(udev_monitor);
+
+    udev_unref(udev_context);
+    udev_context = NULL;
+
+    close(deviceloop_control[0]);
+    close(deviceloop_control[1]);
+    return STATUS_SUCCESS;
 }
 
 #else
 
-NTSTATUS udev_driver_init(void)
+NTSTATUS WINAPI udev_bus_init(void *args)
 {
+    WARN("UDEV support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;
 }
 
-void udev_driver_unload( void )
+NTSTATUS WINAPI udev_bus_wait(void)
 {
-    TRACE("Stub: Unload Driver\n");
+    WARN("UDEV support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS WINAPI udev_bus_stop(void)
+{
+    WARN("UDEV support not compiled in!\n");
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 #endif /* HAVE_UDEV */

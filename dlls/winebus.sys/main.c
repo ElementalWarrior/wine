@@ -34,9 +34,13 @@
 #include "wine/list.h"
 
 #include "bus.h"
+#include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(plugplay);
 WINE_DECLARE_DEBUG_CHANNEL(hid_report);
+
+static HMODULE instance;
+static struct unix_funcs *unix_funcs;
 
 #if defined(__i386__) && !defined(_WIN32)
 
@@ -113,6 +117,7 @@ struct device_extension
 {
     CRITICAL_SECTION cs;
 
+    BOOL started;
     BOOL removed;
 
     struct pnp_device *pnp_device;
@@ -312,18 +317,18 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     return device;
 }
 
-DEVICE_OBJECT *bus_find_hid_device(const platform_vtbl *vtbl, void *platform_dev)
+DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
 {
     struct pnp_device *dev;
     DEVICE_OBJECT *ret = NULL;
 
-    TRACE("(%p, %p)\n", vtbl, platform_dev);
+    TRACE("bus_id %s, platform_dev %p\n", debugstr_w(bus_id), platform_dev);
 
     EnterCriticalSection(&device_list_cs);
     LIST_FOR_EACH_ENTRY(dev, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (ext->vtbl != vtbl) continue;
+        if (strcmpW(ext->busid, bus_id)) continue;
         if (ext->vtbl->compare_platform_device(dev->device, platform_dev) == 0)
         {
             ret = dev->device;
@@ -336,19 +341,19 @@ DEVICE_OBJECT *bus_find_hid_device(const platform_vtbl *vtbl, void *platform_dev
     return ret;
 }
 
-DEVICE_OBJECT* bus_enumerate_hid_devices(const platform_vtbl *vtbl, enum_func function, void* context)
+DEVICE_OBJECT* bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function, void* context)
 {
     struct pnp_device *dev, *dev_next;
     DEVICE_OBJECT *ret = NULL;
     int cont;
 
-    TRACE("(%p)\n", vtbl);
+    TRACE("bus_id %p\n", debugstr_w(bus_id));
 
     EnterCriticalSection(&device_list_cs);
     LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (ext->vtbl != vtbl) continue;
+        if (strcmpW(ext->busid, bus_id)) continue;
         LeaveCriticalSection(&device_list_cs);
         cont = function(dev->device, context);
         EnterCriticalSection(&device_list_cs);
@@ -370,24 +375,6 @@ void bus_unlink_hid_device(DEVICE_OBJECT *device)
     EnterCriticalSection(&device_list_cs);
     list_remove(&pnp_device->entry);
     LeaveCriticalSection(&device_list_cs);
-}
-
-void bus_remove_hid_device(DEVICE_OBJECT *device)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    struct pnp_device *pnp_device = ext->pnp_device;
-
-    TRACE("(%p)\n", device);
-
-    ext->cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&ext->cs);
-
-    HeapFree(GetProcessHeap(), 0, ext->serial);
-    HeapFree(GetProcessHeap(), 0, ext->last_report);
-    IoDeleteDevice(device);
-
-    /* pnp_device must be released after the device is gone */
-    HeapFree(GetProcessHeap(), 0, pnp_device);
 }
 
 static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
@@ -414,6 +401,20 @@ static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
     LeaveCriticalSection(&device_list_cs);
     (*devices)->Count = i;
     return STATUS_SUCCESS;
+}
+
+static DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
+{
+    char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    DWORD size;
+
+    if (NtQueryValueKey(driver_key, option, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
+    {
+        if (info->Type == REG_DWORD) return *(DWORD *)info->Data;
+    }
+
+    return default_value;
 }
 
 static NTSTATUS handle_IRP_MN_QUERY_DEVICE_RELATIONS(IRP *irp)
@@ -480,6 +481,18 @@ static void mouse_free_device(DEVICE_OBJECT *device)
 {
 }
 
+static NTSTATUS mouse_start_device(DEVICE_OBJECT *device)
+{
+    if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_add_buttons(&mouse_desc, HID_USAGE_PAGE_BUTTON, 1, 3))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_end(&mouse_desc))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS mouse_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -502,35 +515,33 @@ static NTSTATUS mouse_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buff
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS mouse_begin_report_processing(DEVICE_OBJECT *device)
+static void mouse_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    return STATUS_SUCCESS;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS mouse_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+static void mouse_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS mouse_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+static void mouse_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS mouse_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
-{
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
 static const platform_vtbl mouse_vtbl =
 {
     .free_device = mouse_free_device,
+    .start_device = mouse_start_device,
     .get_reportdescriptor = mouse_get_reportdescriptor,
     .get_string = mouse_get_string,
-    .begin_report_processing = mouse_begin_report_processing,
     .set_output_report = mouse_set_output_report,
     .get_feature_report = mouse_get_feature_report,
     .set_feature_report = mouse_set_feature_report,
@@ -539,20 +550,24 @@ static const platform_vtbl mouse_vtbl =
 static void mouse_device_create(void)
 {
     static const WCHAR busidW[] = {'W','I','N','E','M','O','U','S','E',0};
-
-    if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
-        return;
-    if (!hid_descriptor_add_buttons(&mouse_desc, HID_USAGE_PAGE_BUTTON, 1, 3))
-        return;
-    if (!hid_descriptor_end(&mouse_desc))
-        return;
-
     mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
 static void keyboard_free_device(DEVICE_OBJECT *device)
 {
+}
+
+static NTSTATUS keyboard_start_device(DEVICE_OBJECT *device)
+{
+    if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_add_buttons(&keyboard_desc, HID_USAGE_PAGE_KEYBOARD, 0, 101))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_end(&keyboard_desc))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS keyboard_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
@@ -577,35 +592,33 @@ static NTSTATUS keyboard_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *b
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS keyboard_begin_report_processing(DEVICE_OBJECT *device)
+static void keyboard_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    return STATUS_SUCCESS;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS keyboard_set_output_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+static void keyboard_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
-static NTSTATUS keyboard_get_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
+static void keyboard_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
-}
-
-static NTSTATUS keyboard_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *report, DWORD length, ULONG_PTR *ret_length)
-{
-    FIXME("id %u, stub!\n", id);
-    return STATUS_NOT_IMPLEMENTED;
+    FIXME("id %u, stub!\n", packet->reportId);
+    io->Information = 0;
+    io->Status = STATUS_NOT_IMPLEMENTED;
 }
 
 static const platform_vtbl keyboard_vtbl =
 {
     .free_device = keyboard_free_device,
+    .start_device = keyboard_start_device,
     .get_reportdescriptor = keyboard_get_reportdescriptor,
     .get_string = keyboard_get_string,
-    .begin_report_processing = keyboard_begin_report_processing,
     .set_output_report = keyboard_set_output_report,
     .get_feature_report = keyboard_get_feature_report,
     .set_feature_report = keyboard_set_feature_report,
@@ -614,16 +627,152 @@ static const platform_vtbl keyboard_vtbl =
 static void keyboard_device_create(void)
 {
     static const WCHAR busidW[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
-
-    if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
-        return;
-    if (!hid_descriptor_add_buttons(&keyboard_desc, HID_USAGE_PAGE_KEYBOARD, 0, 101))
-        return;
-    if (!hid_descriptor_end(&keyboard_desc))
-        return;
-
     keyboard_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
+}
+
+static DWORD bus_count;
+static HANDLE bus_thread[16];
+
+struct bus_main_params
+{
+    const WCHAR *name;
+    HANDLE init;
+
+    NTSTATUS (WINAPI *bus_init)(void *args);
+    NTSTATUS (WINAPI *bus_wait)(void);
+    void *bus_params;
+};
+
+static DWORD CALLBACK bus_main_thread(void *args)
+{
+    struct bus_main_params bus = *(struct bus_main_params *)args;
+    NTSTATUS status;
+
+    TRACE("%s main loop starting\n", debugstr_w(bus.name));
+    status = bus.bus_init(bus.bus_params);
+    SetEvent(bus.init);
+    TRACE("%s main loop started\n", debugstr_w(bus.name));
+
+    if (status) WARN("%s bus init returned status %#x\n", debugstr_w(bus.name), status);
+    else while ((status = bus.bus_wait()) == STATUS_PENDING) {}
+
+    if (status) WARN("%s bus wait returned status %#x\n", debugstr_w(bus.name), status);
+    else TRACE("%s main loop exited\n", debugstr_w(bus.name));
+    return status;
+}
+
+static NTSTATUS sdl_driver_init(void)
+{
+    static const WCHAR sdl_bus_name[] = {'S','D','L',0};
+    static const WCHAR controller_modeW[] = {'M','a','p',' ','C','o','n','t','r','o','l','l','e','r','s',0};
+    static const UNICODE_STRING controller_mode = {sizeof(controller_modeW) - sizeof(WCHAR), sizeof(controller_modeW), (WCHAR*)controller_modeW};
+    struct sdl_bus_options sdl_params;
+    struct bus_main_params params =
+    {
+        .name = sdl_bus_name,
+        .bus_init = unix_funcs->sdl_bus_init,
+        .bus_wait = unix_funcs->sdl_bus_wait,
+        .bus_params = &sdl_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create SDL bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    sdl_params.map_controllers = check_bus_option(&controller_mode, 1);
+    if (!sdl_params.map_controllers) TRACE("SDL controller to XInput HID gamepad mapping disabled\n");
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create SDL bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS udev_driver_init(void)
+{
+    static const WCHAR udev_bus_name[] = {'U','D','E','V',0};
+    static const WCHAR hidraw_disabledW[] = {'D','i','s','a','b','l','e','H','i','d','r','a','w',0};
+    static const UNICODE_STRING hidraw_disabled = {sizeof(hidraw_disabledW) - sizeof(WCHAR), sizeof(hidraw_disabledW), (WCHAR*)hidraw_disabledW};
+    static const WCHAR input_disabledW[] = {'D','i','s','a','b','l','e','I','n','p','u','t',0};
+    static const UNICODE_STRING input_disabled = {sizeof(input_disabledW) - sizeof(WCHAR), sizeof(input_disabledW), (WCHAR*)input_disabledW};
+    struct udev_bus_options udev_params;
+    struct bus_main_params params =
+    {
+        .name = udev_bus_name,
+        .bus_init = unix_funcs->udev_bus_init,
+        .bus_wait = unix_funcs->udev_bus_wait,
+        .bus_params = &udev_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create UDEV bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    udev_params.disable_hidraw = check_bus_option(&hidraw_disabled, 0);
+    if (udev_params.disable_hidraw) TRACE("UDEV hidraw devices disabled in registry\n");
+    udev_params.disable_input = check_bus_option(&input_disabled, 0);
+    if (udev_params.disable_input) TRACE("UDEV input devices disabled in registry\n");
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create UDEV bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS iohid_driver_init(void)
+{
+    static const WCHAR iohid_bus_name[] = {'I','O','H','I','D',0};
+    struct iohid_bus_options iohid_params;
+    struct bus_main_params params =
+    {
+        .name = iohid_bus_name,
+        .bus_init = unix_funcs->iohid_bus_init,
+        .bus_wait = unix_funcs->iohid_bus_wait,
+        .bus_params = &iohid_params,
+    };
+    DWORD i = bus_count++;
+
+    if (!(params.init = CreateEventW(NULL, FALSE, FALSE, NULL)))
+    {
+        ERR("failed to create IOHID bus event.\n");
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
+    {
+        ERR("failed to create IOHID bus thread.\n");
+        CloseHandle(params.init);
+        bus_count--;
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    WaitForSingleObject(params.init, INFINITE);
+    CloseHandle(params.init);
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
@@ -639,28 +788,34 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         irp->IoStatus.Status = handle_IRP_MN_QUERY_DEVICE_RELATIONS(irp);
         break;
     case IRP_MN_START_DEVICE:
+        __wine_init_unix_lib(instance, DLL_PROCESS_ATTACH, NULL, &unix_funcs);
+
         mouse_device_create();
         keyboard_device_create();
 
-        if (check_bus_option(&SDL_enabled, 1))
+        if (!check_bus_option(&SDL_enabled, 1) ||
+            sdl_driver_init() != STATUS_SUCCESS)
         {
-            if (sdl_driver_init() == STATUS_SUCCESS)
-            {
-                irp->IoStatus.Status = STATUS_SUCCESS;
-                break;
-            }
+            udev_driver_init();
+            iohid_driver_init();
         }
-        udev_driver_init();
-        iohid_driver_init();
+
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_SURPRISE_REMOVAL:
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_REMOVE_DEVICE:
-        udev_driver_unload();
-        iohid_driver_unload();
-        sdl_driver_unload();
+        unix_funcs->iohid_bus_stop();
+        unix_funcs->udev_bus_stop();
+        unix_funcs->sdl_bus_stop();
+
+        WaitForMultipleObjects(bus_count, bus_thread, TRUE, INFINITE);
+        while (bus_count--) CloseHandle(bus_thread[bus_count]);
+
+        __wine_init_unix_lib(instance, DLL_PROCESS_DETACH, NULL, NULL);
+
+        __wine_init_unix_lib(instance, DLL_PROCESS_DETACH, NULL, NULL);
 
         irp->IoStatus.Status = STATUS_SUCCESS;
         IoSkipCurrentIrpStackLocation(irp);
@@ -695,7 +850,11 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             break;
 
         case IRP_MN_START_DEVICE:
-            status = STATUS_SUCCESS;
+            EnterCriticalSection(&ext->cs);
+            if (ext->started) status = STATUS_SUCCESS;
+            else if (!(status = ext->vtbl->start_device(device))) ext->started = TRUE;
+            else ERR("failed to start device %p, status %#x\n", device, status);
+            LeaveCriticalSection(&ext->cs);
             break;
 
         case IRP_MN_SURPRISE_REMOVAL:
@@ -712,6 +871,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             remove_pending_irps(device);
 
+            bus_unlink_hid_device(device);
             ext->vtbl->free_device(device);
 
             ext->cs.DebugInfo->Spare[0] = 0;
@@ -918,9 +1078,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_GET_INPUT_REPORT\n");
-            irp->IoStatus.Status = ext->vtbl->begin_report_processing(device);
-            if (irp->IoStatus.Status != STATUS_SUCCESS) break;
-
             irp->IoStatus.Status = deliver_last_report(ext,
                 packet->reportBufferLen, packet->reportBuffer,
                 &irp->IoStatus.Information);
@@ -932,8 +1089,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         case IOCTL_HID_READ_REPORT:
         {
             TRACE_(hid_report)("IOCTL_HID_READ_REPORT\n");
-            irp->IoStatus.Status = ext->vtbl->begin_report_processing(device);
-            if (irp->IoStatus.Status != STATUS_SUCCESS) break;
             if (!ext->last_report_read)
             {
                 irp->IoStatus.Status = deliver_last_report(ext,
@@ -952,28 +1107,21 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_WRITE_REPORT / IOCTL_HID_SET_OUTPUT_REPORT\n");
-            irp->IoStatus.Status = ext->vtbl->set_output_report(
-                device, packet->reportId, packet->reportBuffer,
-                packet->reportBufferLen, &irp->IoStatus.Information);
+            ext->vtbl->set_output_report(device, packet, &irp->IoStatus);
             break;
         }
         case IOCTL_HID_GET_FEATURE:
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_GET_FEATURE\n");
-            irp->IoStatus.Status = ext->vtbl->get_feature_report(
-                device, packet->reportId, packet->reportBuffer,
-                packet->reportBufferLen, &irp->IoStatus.Information);
-            packet->reportBufferLen = irp->IoStatus.Information;
+            ext->vtbl->get_feature_report(device, packet, &irp->IoStatus);
             break;
         }
         case IOCTL_HID_SET_FEATURE:
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_SET_FEATURE\n");
-            irp->IoStatus.Status = ext->vtbl->set_feature_report(
-                device, packet->reportId, packet->reportBuffer,
-                packet->reportBufferLen, &irp->IoStatus.Information);
+            ext->vtbl->set_feature_report(device, packet, &irp->IoStatus);
             break;
         }
         default:
@@ -1035,21 +1183,6 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
     LeaveCriticalSection(&ext->cs);
 }
 
-DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
-{
-    char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
-    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION*)buffer;
-    DWORD size;
-
-    if (NtQueryValueKey(driver_key, option, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
-    {
-        if (info->Type == REG_DWORD)
-            return *(DWORD*)info->Data;
-    }
-
-    return default_value;
-}
-
 BOOL is_xbox_gamepad(WORD vid, WORD pid)
 {
     int i;
@@ -1094,6 +1227,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     NTSTATUS ret;
 
     TRACE( "(%p, %s)\n", driver, debugstr_w(path->Buffer) );
+
+    RtlPcToFileHeader(&DriverEntry, (void *)&instance);
 
     attr.Length = sizeof(attr);
     attr.ObjectName = path;
