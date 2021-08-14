@@ -46,6 +46,9 @@ struct unix_device
     const struct unix_device_vtbl *vtbl;
 };
 
+extern void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size) DECLSPEC_HIDDEN;
+extern void unix_device_destroy(struct unix_device *iface) DECLSPEC_HIDDEN;
+
 extern NTSTATUS WINAPI sdl_bus_init(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI sdl_bus_wait(void *args) DECLSPEC_HIDDEN;
 extern NTSTATUS WINAPI sdl_bus_stop(void) DECLSPEC_HIDDEN;

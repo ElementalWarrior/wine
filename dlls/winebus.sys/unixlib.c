@@ -220,6 +220,21 @@ static NTSTATUS WINAPI keyboard_device_create(struct unix_device **device, struc
     return STATUS_SUCCESS;
 }
 
+void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size)
+{
+    struct unix_device *iface;
+
+    if (!(iface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size))) return NULL;
+    iface->vtbl = vtbl;
+
+    return iface;
+}
+
+void unix_device_destroy(struct unix_device *iface)
+{
+    HeapFree(GetProcessHeap(), 0, iface);
+}
+
 static void WINAPI unix_device_remove(struct unix_device *iface)
 {
     iface->vtbl->stop(iface);
