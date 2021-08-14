@@ -24,7 +24,6 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winternl.h>
-#include <ddk/wdm.h>
 #include <ddk/hidclass.h>
 #include <hidusage.h>
 
@@ -118,7 +117,7 @@ struct unix_funcs
 
     void (WINAPI *device_remove)(struct unix_device *iface);
     int (WINAPI *device_compare)(struct unix_device *iface, void *context);
-    NTSTATUS (WINAPI *device_start)(struct unix_device *iface, DEVICE_OBJECT *device);
+    NTSTATUS (WINAPI *device_start)(struct unix_device *iface);
     NTSTATUS (WINAPI *device_get_report_descriptor)(struct unix_device *iface, BYTE *buffer, DWORD length, DWORD *out_length);
     void (WINAPI *device_set_output_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);
     void (WINAPI *device_get_feature_report)(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io);

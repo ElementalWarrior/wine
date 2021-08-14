@@ -619,7 +619,7 @@ static int udev_device_compare(struct unix_device *iface, void *platform_dev)
     return strcmp(udev_device_get_syspath(dev1), udev_device_get_syspath(dev2));
 }
 
-static NTSTATUS hidraw_device_start(struct unix_device *iface, DEVICE_OBJECT *device)
+static NTSTATUS hidraw_device_start(struct unix_device *iface)
 {
     EnterCriticalSection(&udev_cs);
     start_polling_device(iface);
@@ -818,7 +818,7 @@ static void lnxev_device_destroy(struct unix_device *iface)
     unix_device_destroy(iface);
 }
 
-static NTSTATUS lnxev_device_start(struct unix_device *iface, DEVICE_OBJECT *device)
+static NTSTATUS lnxev_device_start(struct unix_device *iface)
 {
     struct wine_input_private *ext = input_impl_from_unix_device(iface);
     NTSTATUS status;

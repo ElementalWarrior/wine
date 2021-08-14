@@ -45,7 +45,7 @@ static int mouse_compare(struct unix_device *iface, void *context)
     return 0;
 }
 
-static NTSTATUS mouse_start(struct unix_device *iface, DEVICE_OBJECT *device)
+static NTSTATUS mouse_start(struct unix_device *iface)
 {
     if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
         return STATUS_NO_MEMORY;
@@ -137,7 +137,7 @@ static int keyboard_compare(struct unix_device *iface, void *context)
     return 0;
 }
 
-static NTSTATUS keyboard_start(struct unix_device *iface, DEVICE_OBJECT *device)
+static NTSTATUS keyboard_start(struct unix_device *iface)
 {
     if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
         return STATUS_NO_MEMORY;
@@ -257,9 +257,9 @@ static int WINAPI unix_device_compare(struct unix_device *iface, void *context)
     return iface->vtbl->compare(iface, context);
 }
 
-static NTSTATUS WINAPI unix_device_start(struct unix_device *iface, DEVICE_OBJECT *device)
+static NTSTATUS WINAPI unix_device_start(struct unix_device *iface)
 {
-    return iface->vtbl->start(iface, device);
+    return iface->vtbl->start(iface);
 }
 
 static NTSTATUS WINAPI unix_device_get_report_descriptor(struct unix_device *iface, BYTE *buffer,
