@@ -94,12 +94,15 @@ static struct udev *udev_context = NULL;
 static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
 static int udev_monitor_fd;
+static struct list event_queue = LIST_INIT(event_queue);
 
 static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
 static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
 
 struct platform_private
 {
+    struct unix_device unix_device;
+
     struct udev_device *udev_device;
     int device_fd;
 
@@ -107,9 +110,14 @@ struct platform_private
     int control_pipe[2];
 };
 
+static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
+{
+    return CONTAINING_RECORD(iface, struct platform_private, unix_device);
+}
+
 static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
 {
-    return (struct platform_private *)get_platform_private(device);
+    return impl_from_unix_device(get_unix_device(device));
 }
 
 #ifdef HAS_PROPER_INPUT_HEADER
@@ -551,6 +559,8 @@ static void hidraw_free_device(DEVICE_OBJECT *device)
 
     close(private->device_fd);
     udev_device_unref(private->udev_device);
+
+    HeapFree(GetProcessHeap(), 0, private);
 }
 
 static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
@@ -834,7 +844,7 @@ static const platform_vtbl hidraw_vtbl =
 
 static inline struct wine_input_private *input_impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
 {
-    return (struct wine_input_private*)get_platform_private(device);
+    return CONTAINING_RECORD(impl_from_DEVICE_OBJECT(device), struct wine_input_private, base);
 }
 
 static void lnxev_free_device(DEVICE_OBJECT *device)
@@ -856,6 +866,8 @@ static void lnxev_free_device(DEVICE_OBJECT *device)
 
     close(ext->base.device_fd);
     udev_device_unref(ext->base.udev_device);
+
+    HeapFree(GetProcessHeap(), 0, ext);
 }
 
 static DWORD CALLBACK lnxev_device_report_thread(void *args);
@@ -1082,6 +1094,7 @@ static void try_add_device(struct udev_device *dev)
 {
     DWORD vid = 0, pid = 0, version = 0;
     struct udev_device *hiddev = NULL, *walk_device;
+    struct platform_private *private;
     DEVICE_OBJECT *device = NULL;
     const char *subsystem;
     const char *devnode;
@@ -1175,20 +1188,25 @@ static void try_add_device(struct udev_device *dev)
 
     if (strcmp(subsystem, "hidraw") == 0)
     {
+        if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct platform_private))))
+            return;
         device = bus_create_hid_device(hidraw_busidW, vid, pid, input, version, 0, serial, is_gamepad,
-                                       &hidraw_vtbl, sizeof(struct platform_private));
+                                       &hidraw_vtbl, &private->unix_device);
+        if (!device) HeapFree(GetProcessHeap(), 0, private);
     }
 #ifdef HAS_PROPER_INPUT_HEADER
     else if (strcmp(subsystem, "input") == 0)
     {
+        if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct wine_input_private))))
+            return;
         device = bus_create_hid_device(lnxev_busidW, vid, pid, input, version, 0, serial, is_gamepad,
-                                       &lnxev_vtbl, sizeof(struct wine_input_private));
+                                       &lnxev_vtbl, &private->unix_device);
+        if (!device) HeapFree(GetProcessHeap(), 0, private);
     }
 #endif
 
     if (device)
     {
-        struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->udev_device = udev_device_ref(dev);
         private->device_fd = fd;
         IoInvalidateDeviceRelations(bus_pdo, BusRelations);
@@ -1204,17 +1222,8 @@ static void try_add_device(struct udev_device *dev)
 
 static void try_remove_device(struct udev_device *dev)
 {
-    DEVICE_OBJECT *device = NULL;
-
-    device = bus_find_hid_device(hidraw_busidW, dev);
-#ifdef HAS_PROPER_INPUT_HEADER
-    if (device == NULL)
-        device = bus_find_hid_device(lnxev_busidW, dev);
-#endif
-    if (!device) return;
-
-    bus_unlink_hid_device(device);
-    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
+    bus_event_queue_device_removed(&event_queue, hidraw_busidW, dev);
+    bus_event_queue_device_removed(&event_queue, lnxev_busidW, dev);
 }
 
 static void build_initial_deviceset(void)
@@ -1376,8 +1385,9 @@ NTSTATUS WINAPI udev_bus_init(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI udev_bus_wait(void)
+NTSTATUS WINAPI udev_bus_wait(void *args)
 {
+    struct bus_event **result = args;
     struct pollfd pfd[2];
 
     pfd[0].fd = udev_monitor_fd;
@@ -1387,14 +1397,20 @@ NTSTATUS WINAPI udev_bus_wait(void)
     pfd[1].events = POLLIN;
     pfd[1].revents = 0;
 
+    /* destroy previously returned event */
+    if (*result) bus_event_destroy(*result);
+    *result = NULL;
+
     while (1)
     {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
         if (poll(pfd, 2, -1) <= 0) continue;
         if (pfd[1].revents) break;
         process_monitor_event(udev_monitor);
     }
 
     TRACE("UDEV main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
     udev_monitor_unref(udev_monitor);
 
     udev_unref(udev_context);
@@ -1413,7 +1429,7 @@ NTSTATUS WINAPI udev_bus_init(void *args)
     return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS WINAPI udev_bus_wait(void)
+NTSTATUS WINAPI udev_bus_wait(void *args)
 {
     WARN("UDEV support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;

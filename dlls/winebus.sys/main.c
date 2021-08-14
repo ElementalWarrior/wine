@@ -136,7 +136,7 @@ struct device_extension
     DWORD buffer_size;
     LIST_ENTRY irp_queue;
 
-    BYTE platform_private[1];
+    struct unix_device *unix_device;
 };
 
 static CRITICAL_SECTION device_list_cs;
@@ -163,10 +163,10 @@ static inline WCHAR *strdupW(const WCHAR *src)
     return dst;
 }
 
-void *get_platform_private(DEVICE_OBJECT *device)
+struct unix_device *get_unix_device(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return ext->platform_private;
+    return ext->unix_device;
 }
 
 static DWORD get_device_index(WORD vid, WORD pid, WORD input)
@@ -254,7 +254,7 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
 
 DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
                                      WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
-                                     const platform_vtbl *vtbl, DWORD platform_data_size)
+                                     const platform_vtbl *vtbl, struct unix_device *unix_device)
 {
     static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e','\\','%','s','#','%','p',0};
     struct device_extension *ext;
@@ -263,19 +263,17 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     UNICODE_STRING nameW;
     WCHAR dev_name[256];
     NTSTATUS status;
-    DWORD length;
 
-    TRACE("(%s, %04x, %04x, %04x, %u, %u, %s, %u, %p, %u)\n",
+    TRACE("(%s, %04x, %04x, %04x, %u, %u, %s, %u, %p, %p)\n",
             debugstr_w(busidW), vid, pid, input, version, uid, debugstr_w(serialW),
-            is_gamepad, vtbl, platform_data_size);
+            is_gamepad, vtbl, unix_device);
 
     if (!(pnp_dev = HeapAlloc(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
     sprintfW(dev_name, device_name_fmtW, busidW, pnp_dev);
     RtlInitUnicodeString(&nameW, dev_name);
-    length = FIELD_OFFSET(struct device_extension, platform_private[platform_data_size]);
-    status = IoCreateDevice(driver_obj, length, &nameW, 0, 0, FALSE, &device);
+    status = IoCreateDevice(driver_obj, sizeof(struct device_extension), &nameW, 0, 0, FALSE, &device);
     if (status)
     {
         FIXME("failed to create device error %x\n", status);
@@ -302,8 +300,7 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     ext->last_report_size   = 0;
     ext->last_report_read   = TRUE;
     ext->buffer_size        = 0;
-
-    memset(ext->platform_private, 0, platform_data_size);
+    ext->unix_device        = unix_device;
 
     InitializeListHead(&ext->irp_queue);
     InitializeCriticalSection(&ext->cs);
@@ -367,7 +364,7 @@ DEVICE_OBJECT* bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function
     return ret;
 }
 
-void bus_unlink_hid_device(DEVICE_OBJECT *device)
+static void bus_unlink_hid_device(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct pnp_device *pnp_device = ext->pnp_device;
@@ -640,13 +637,15 @@ struct bus_main_params
     HANDLE init;
 
     NTSTATUS (WINAPI *bus_init)(void *args);
-    NTSTATUS (WINAPI *bus_wait)(void);
+    NTSTATUS (WINAPI *bus_wait)(void *args);
     void *bus_params;
 };
 
 static DWORD CALLBACK bus_main_thread(void *args)
 {
     struct bus_main_params bus = *(struct bus_main_params *)args;
+    struct bus_event *event = NULL;
+    DEVICE_OBJECT *device;
     NTSTATUS status;
 
     TRACE("%s main loop starting\n", debugstr_w(bus.name));
@@ -655,7 +654,25 @@ static DWORD CALLBACK bus_main_thread(void *args)
     TRACE("%s main loop started\n", debugstr_w(bus.name));
 
     if (status) WARN("%s bus init returned status %#x\n", debugstr_w(bus.name), status);
-    else while ((status = bus.bus_wait()) == STATUS_PENDING) {}
+    else while ((status = bus.bus_wait(&event)) == STATUS_PENDING)
+    {
+        EnterCriticalSection(&device_list_cs);
+        switch (event->type)
+        {
+        case BUS_EVENT_TYPE_NONE: break;
+        case BUS_EVENT_TYPE_DEVICE_REMOVED:
+            if (!(device = bus_find_hid_device(event->device_removed.bus_id, event->device_removed.context)))
+                WARN("could not find removed device matching bus %s, context %p\n",
+                     debugstr_w(event->device_removed.bus_id), event->device_removed.context);
+            else
+            {
+                bus_unlink_hid_device(device);
+                IoInvalidateDeviceRelations(bus_pdo, BusRelations);
+            }
+            break;
+        }
+        LeaveCriticalSection(&device_list_cs);
+    }
 
     if (status) WARN("%s bus wait returned status %#x\n", debugstr_w(bus.name), status);
     else TRACE("%s main loop exited\n", debugstr_w(bus.name));

@@ -100,18 +100,25 @@ static struct iohid_bus_options options;
 
 static IOHIDManagerRef hid_manager;
 static CFRunLoopRef run_loop;
+static struct list event_queue = LIST_INIT(event_queue);
 
 static const WCHAR busidW[] = {'I','O','H','I','D',0};
 
 struct platform_private
 {
+    struct unix_device unix_device;
     IOHIDDeviceRef device;
     uint8_t *buffer;
 };
 
+static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
+{
+    return CONTAINING_RECORD(iface, struct platform_private, unix_device);
+}
+
 static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
 {
-    return (struct platform_private *)get_platform_private(device);
+    return impl_from_unix_device(get_unix_device(device));
 }
 
 static void CFStringToWSTR(CFStringRef cstr, LPWSTR wstr, int length)
@@ -139,6 +146,8 @@ static void handle_IOHIDDeviceIOHIDReportCallback(void *context,
 
 static void free_device(DEVICE_OBJECT *device)
 {
+    struct platform_private *private = impl_from_DEVICE_OBJECT(device);
+    HeapFree(GetProcessHeap(), 0, private);
 }
 
 static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
@@ -284,6 +293,7 @@ static const platform_vtbl iohid_vtbl =
 
 static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
 {
+    struct platform_private *private;
     DEVICE_OBJECT *device;
     DWORD vid, pid, version, uid;
     CFStringRef str = NULL;
@@ -354,14 +364,15 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
     if (is_gamepad)
         input = 0;
 
+    if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct platform_private))))
+        return;
+
     device = bus_create_hid_device(busidW, vid, pid, input,
             version, uid, str ? serial_string : NULL, is_gamepad,
-            &iohid_vtbl, sizeof(struct platform_private));
-    if (!device)
-        ERR("Failed to create device\n");
+            &iohid_vtbl, &private->unix_device);
+    if (!device) HeapFree(GetProcessHeap(), 0, private);
     else
     {
-        struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->device = IOHIDDevice;
         private->buffer = NULL;
         IoInvalidateDeviceRelations(bus_pdo, BusRelations);
@@ -370,19 +381,13 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 
 static void handle_RemovalCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
 {
-    DEVICE_OBJECT *device;
     TRACE("OS/X IOHID Device Removed %p\n", IOHIDDevice);
     IOHIDDeviceRegisterInputReportCallback(IOHIDDevice, NULL, 0, NULL, NULL);
     /* Note: Yes, we leak the buffer. But according to research there is no
              safe way to deallocate that buffer. */
     IOHIDDeviceUnscheduleFromRunLoop(IOHIDDevice, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     IOHIDDeviceClose(IOHIDDevice, 0);
-    device = bus_find_hid_device(busidW, IOHIDDevice);
-    if (device)
-    {
-        bus_unlink_hid_device(device);
-        IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-    }
+    bus_event_queue_device_removed(&event_queue, busidW, IOHIDDevice);
 }
 
 NTSTATUS WINAPI iohid_bus_init(void *args)
@@ -401,11 +406,21 @@ NTSTATUS WINAPI iohid_bus_init(void *args)
     return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI iohid_bus_wait(void)
+NTSTATUS WINAPI iohid_bus_wait(void *args)
 {
-    CFRunLoopRun();
+    struct bus_event **result = args;
+
+    /* destroy previously returned event */
+    if (*result) bus_event_destroy(*result);
+    *result = NULL;
+
+    do
+    {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
+    } while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, TRUE) != kCFRunLoopRunStopped);
 
     TRACE("IOHID main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
     IOHIDManagerRegisterDeviceMatchingCallback(hid_manager, NULL, NULL);
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, NULL, NULL);
     CFRelease(hid_manager);
@@ -429,7 +444,7 @@ NTSTATUS WINAPI iohid_bus_init(void *args)
     return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS WINAPI iohid_bus_wait(void)
+NTSTATUS WINAPI iohid_bus_wait(void *args)
 {
     WARN("IOHID support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;

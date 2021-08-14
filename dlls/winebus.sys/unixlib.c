@@ -26,6 +26,7 @@
 #include "winternl.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
 
 #include "unix_private.h"
 
@@ -51,4 +52,44 @@ NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *pt
     if (reason != DLL_PROCESS_ATTACH) return STATUS_SUCCESS;
     *(const struct unix_funcs **)ptr_out = &unix_funcs;
     return STATUS_SUCCESS;
+}
+
+void bus_event_destroy(struct bus_event *event)
+{
+    HeapFree(GetProcessHeap(), 0, event);
+}
+
+void bus_event_queue_destroy(struct list *queue)
+{
+    struct bus_event *event, *next;
+
+    LIST_FOR_EACH_ENTRY_SAFE(event, next, queue, struct bus_event, entry)
+    {
+        list_remove(&event->entry);
+        bus_event_destroy(event);
+    }
+}
+
+BOOL bus_event_queue_device_removed(struct list *queue, const WCHAR *bus_id, void *context)
+{
+    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, sizeof(*event));
+    if (!event) return FALSE;
+
+    event->type = BUS_EVENT_TYPE_DEVICE_REMOVED;
+    event->device_removed.bus_id = bus_id;
+    event->device_removed.context = context;
+    list_add_tail(queue, &event->entry);
+
+    return TRUE;
+}
+
+BOOL bus_event_queue_pop(struct list *queue, struct bus_event **event)
+{
+    struct list *entry = list_head(queue);
+    if (!entry) return FALSE;
+
+    *event = LIST_ENTRY(entry, struct bus_event, entry);
+    list_remove(entry);
+
+    return TRUE;
 }

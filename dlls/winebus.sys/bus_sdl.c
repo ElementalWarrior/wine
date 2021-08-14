@@ -67,6 +67,7 @@ static const WCHAR sdl_busidW[] = {'S','D','L','J','O','Y',0};
 
 static void *sdl_handle = NULL;
 static UINT quit_event = -1;
+static struct list event_queue = LIST_INIT(event_queue);
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
 MAKE_FUNCPTR(SDL_GetError);
@@ -113,6 +114,8 @@ static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
 
 struct platform_private
 {
+    struct unix_device unix_device;
+
     SDL_Joystick *sdl_joystick;
     SDL_GameController *sdl_controller;
     SDL_JoystickID id;
@@ -132,9 +135,14 @@ struct platform_private
     int haptic_effect_id;
 };
 
+static inline struct platform_private *impl_from_unix_device(struct unix_device *iface)
+{
+    return CONTAINING_RECORD(iface, struct platform_private, unix_device);
+}
+
 static inline struct platform_private *impl_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
 {
-    return (struct platform_private *)get_platform_private(device);
+    return impl_from_unix_device(get_unix_device(device));
 }
 
 #define CONTROLLER_NUM_BUTTONS 11
@@ -482,6 +490,8 @@ static void free_device(DEVICE_OBJECT *device)
         pSDL_GameControllerClose(ext->sdl_controller);
     if (ext->sdl_haptic)
         pSDL_HapticClose(ext->sdl_haptic);
+
+    HeapFree(GetProcessHeap(), 0, ext);
 }
 
 static int compare_platform_device(DEVICE_OBJECT *device, void *context)
@@ -724,12 +734,6 @@ static BOOL set_mapped_report_from_event(DEVICE_OBJECT *device, SDL_Event *event
     return FALSE;
 }
 
-static void try_remove_device(DEVICE_OBJECT *device)
-{
-    bus_unlink_hid_device(device);
-    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-}
-
 static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD *version,
                               WCHAR *serial, USAGE_AND_PAGE *usage)
 {
@@ -765,6 +769,7 @@ static void get_joystick_info(SDL_Joystick *joystick, WORD *vid, WORD *pid, WORD
 static void try_add_device(unsigned int index)
 {
     USAGE_AND_PAGE usage = {.UsagePage = HID_USAGE_PAGE_GENERIC};
+    struct platform_private *private;
     WORD vid, pid, version, input;
     DEVICE_OBJECT *device = NULL;
     WCHAR serial[34] = {0};
@@ -798,21 +803,19 @@ static void try_add_device(unsigned int index)
     if (is_gamepad) input = 0;
     else input = -1;
 
-    device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index,
-            serial, is_gamepad, &sdl_vtbl, sizeof(struct platform_private));
+    if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*private))))
+        return;
 
-    if (device)
+    device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index,
+            serial, is_gamepad, &sdl_vtbl, &private->unix_device);
+    if (!device) HeapFree(GetProcessHeap(), 0, private);
+    else
     {
-        struct platform_private *private = impl_from_DEVICE_OBJECT(device);
         private->sdl_joystick = joystick;
         private->sdl_controller = controller;
         private->id = id;
         private->usage = usage;
         IoInvalidateDeviceRelations(bus_pdo, BusRelations);
-    }
-    else
-    {
-        WARN("Ignoring device %i\n", id);
     }
 }
 
@@ -828,9 +831,7 @@ static void process_device_event(SDL_Event *event)
     else if (event->type == SDL_JOYDEVICEREMOVED)
     {
         id = ((SDL_JoyDeviceEvent *)event)->which;
-        device = bus_find_hid_device(sdl_busidW, ULongToPtr(id));
-        if (device) try_remove_device(device);
-        else WARN("failed to find device with id %d\n",id);
+        bus_event_queue_device_removed(&event_queue, sdl_busidW, ULongToPtr(id));
     }
     else if (event->type >= SDL_JOYAXISMOTION && event->type <= SDL_JOYBUTTONUP)
     {
@@ -1000,17 +1001,24 @@ failed:
     return STATUS_UNSUCCESSFUL;
 }
 
-NTSTATUS WINAPI sdl_bus_wait(void)
+NTSTATUS WINAPI sdl_bus_wait(void *args)
 {
+    struct bus_event **result = args;
     SDL_Event event;
+
+    /* destroy previously returned event */
+    if (*result) bus_event_destroy(*result);
+    *result = NULL;
 
     do
     {
+        if (bus_event_queue_pop(&event_queue, result)) return STATUS_PENDING;
         if (pSDL_WaitEvent(&event) != 0) process_device_event(&event);
         else WARN("SDL_WaitEvent failed: %s\n", pSDL_GetError());
     } while (event.type != quit_event);
 
     TRACE("SDL main loop exiting\n");
+    bus_event_queue_destroy(&event_queue);
     dlclose(sdl_handle);
     sdl_handle = NULL;
     return STATUS_SUCCESS;
@@ -1024,7 +1032,7 @@ NTSTATUS WINAPI sdl_bus_init(void *args)
     return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS WINAPI sdl_bus_wait(void)
+NTSTATUS WINAPI sdl_bus_wait(void *args)
 {
     WARN("SDL support not compiled in!\n");
     return STATUS_NOT_IMPLEMENTED;
