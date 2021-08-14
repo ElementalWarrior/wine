@@ -167,7 +167,7 @@ static int unix_device_compare(DEVICE_OBJECT *device, void *context)
 static NTSTATUS unix_device_start(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return unix_funcs->device_start(ext->unix_device, device);
+    return unix_funcs->device_start(ext->unix_device);
 }
 
 static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length,
@@ -193,12 +193,6 @@ static void unix_device_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKE
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     return unix_funcs->device_set_feature_report(ext->unix_device, packet, io);
-}
-
-struct unix_device *get_unix_device(DEVICE_OBJECT *device)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return ext->unix_device;
 }
 
 static DWORD get_device_index(struct device_desc *desc)
@@ -382,32 +376,6 @@ static DEVICE_OBJECT *bus_find_unix_device(struct unix_device *unix_device)
     }
     LeaveCriticalSection(&device_list_cs);
 
-    return ret;
-}
-
-DEVICE_OBJECT* bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function, void* context)
-{
-    struct pnp_device *dev, *dev_next;
-    DEVICE_OBJECT *ret = NULL;
-    int cont;
-
-    TRACE("bus_id %p\n", debugstr_w(bus_id));
-
-    EnterCriticalSection(&device_list_cs);
-    LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &pnp_devset, struct pnp_device, entry)
-    {
-        struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (strcmpW(ext->desc.bus_id, bus_id)) continue;
-        LeaveCriticalSection(&device_list_cs);
-        cont = function(dev->device, context);
-        EnterCriticalSection(&device_list_cs);
-        if (!cont)
-        {
-            ret = dev->device;
-            break;
-        }
-    }
-    LeaveCriticalSection(&device_list_cs);
     return ret;
 }
 
