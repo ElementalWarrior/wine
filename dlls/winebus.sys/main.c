@@ -113,6 +113,7 @@ struct device_extension
 {
     CRITICAL_SECTION cs;
 
+    BOOL started;
     BOOL removed;
 
     struct pnp_device *pnp_device;
@@ -372,24 +373,6 @@ void bus_unlink_hid_device(DEVICE_OBJECT *device)
     LeaveCriticalSection(&device_list_cs);
 }
 
-void bus_remove_hid_device(DEVICE_OBJECT *device)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    struct pnp_device *pnp_device = ext->pnp_device;
-
-    TRACE("(%p)\n", device);
-
-    ext->cs.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&ext->cs);
-
-    HeapFree(GetProcessHeap(), 0, ext->serial);
-    HeapFree(GetProcessHeap(), 0, ext->last_report);
-    IoDeleteDevice(device);
-
-    /* pnp_device must be released after the device is gone */
-    HeapFree(GetProcessHeap(), 0, pnp_device);
-}
-
 static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
 {
     int i;
@@ -480,6 +463,18 @@ static void mouse_free_device(DEVICE_OBJECT *device)
 {
 }
 
+static NTSTATUS mouse_start_device(DEVICE_OBJECT *device)
+{
+    if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_add_buttons(&mouse_desc, HID_USAGE_PAGE_BUTTON, 1, 3))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_end(&mouse_desc))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS mouse_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
 {
     TRACE("buffer %p, length %u.\n", buffer, length);
@@ -528,6 +523,7 @@ static NTSTATUS mouse_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *
 static const platform_vtbl mouse_vtbl =
 {
     .free_device = mouse_free_device,
+    .start_device = mouse_start_device,
     .get_reportdescriptor = mouse_get_reportdescriptor,
     .get_string = mouse_get_string,
     .begin_report_processing = mouse_begin_report_processing,
@@ -539,20 +535,24 @@ static const platform_vtbl mouse_vtbl =
 static void mouse_device_create(void)
 {
     static const WCHAR busidW[] = {'W','I','N','E','M','O','U','S','E',0};
-
-    if (!hid_descriptor_begin(&mouse_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
-        return;
-    if (!hid_descriptor_add_buttons(&mouse_desc, HID_USAGE_PAGE_BUTTON, 1, 3))
-        return;
-    if (!hid_descriptor_end(&mouse_desc))
-        return;
-
     mouse_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &mouse_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
 static void keyboard_free_device(DEVICE_OBJECT *device)
 {
+}
+
+static NTSTATUS keyboard_start_device(DEVICE_OBJECT *device)
+{
+    if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_add_buttons(&keyboard_desc, HID_USAGE_PAGE_KEYBOARD, 0, 101))
+        return STATUS_NO_MEMORY;
+    if (!hid_descriptor_end(&keyboard_desc))
+        return STATUS_NO_MEMORY;
+
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS keyboard_get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *ret_length)
@@ -603,6 +603,7 @@ static NTSTATUS keyboard_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYT
 static const platform_vtbl keyboard_vtbl =
 {
     .free_device = keyboard_free_device,
+    .start_device = keyboard_start_device,
     .get_reportdescriptor = keyboard_get_reportdescriptor,
     .get_string = keyboard_get_string,
     .begin_report_processing = keyboard_begin_report_processing,
@@ -614,14 +615,6 @@ static const platform_vtbl keyboard_vtbl =
 static void keyboard_device_create(void)
 {
     static const WCHAR busidW[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
-
-    if (!hid_descriptor_begin(&keyboard_desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
-        return;
-    if (!hid_descriptor_add_buttons(&keyboard_desc, HID_USAGE_PAGE_KEYBOARD, 0, 101))
-        return;
-    if (!hid_descriptor_end(&keyboard_desc))
-        return;
-
     keyboard_obj = bus_create_hid_device(busidW, 0, 0, -1, 0, 0, busidW, FALSE, &keyboard_vtbl, 0);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
@@ -695,7 +688,11 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             break;
 
         case IRP_MN_START_DEVICE:
-            status = STATUS_SUCCESS;
+            EnterCriticalSection(&ext->cs);
+            if (ext->started) status = STATUS_SUCCESS;
+            else if (!(status = ext->vtbl->start_device(device))) ext->started = TRUE;
+            else ERR("failed to start device %p, status %#x\n", device, status);
+            LeaveCriticalSection(&ext->cs);
             break;
 
         case IRP_MN_SURPRISE_REMOVAL:
