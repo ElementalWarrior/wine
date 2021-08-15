@@ -226,6 +226,7 @@ void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size)
 
     if (!(iface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size))) return NULL;
     iface->vtbl = vtbl;
+    iface->ref = 1;
 
     return iface;
 }
@@ -235,10 +236,20 @@ void unix_device_destroy(struct unix_device *iface)
     HeapFree(GetProcessHeap(), 0, iface);
 }
 
+static void unix_device_decref(struct unix_device *iface)
+{
+    if (!InterlockedDecrement(&iface->ref)) iface->vtbl->destroy(iface);
+}
+
+static ULONG unix_device_incref(struct unix_device *iface)
+{
+    return InterlockedIncrement(&iface->ref);
+}
+
 static void WINAPI unix_device_remove(struct unix_device *iface)
 {
     iface->vtbl->stop(iface);
-    iface->vtbl->destroy(iface);
+    unix_device_decref(iface);
 }
 
 static int WINAPI unix_device_compare(struct unix_device *iface, void *context)
@@ -308,6 +319,7 @@ NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *pt
 
 void bus_event_destroy(struct bus_event *event)
 {
+    if (event->type == BUS_EVENT_TYPE_INPUT_REPORT) unix_device_decref(event->input_report.device);
     HeapFree(GetProcessHeap(), 0, event);
 }
 
@@ -343,6 +355,22 @@ BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *devi
     event->type = BUS_EVENT_TYPE_DEVICE_CREATED;
     event->device_created.device = device;
     event->device_created.desc = *desc;
+    list_add_tail(queue, &event->entry);
+
+    return TRUE;
+}
+
+BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device, BYTE *report, DWORD length)
+{
+    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, offsetof(struct bus_event, input_report.buffer[length]));
+    if (!event) return FALSE;
+
+    if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
+
+    event->type = BUS_EVENT_TYPE_INPUT_REPORT;
+    event->input_report.device = device;
+    event->input_report.length = length;
+    memcpy(event->input_report.buffer, report, length);
     list_add_tail(queue, &event->entry);
 
     return TRUE;
