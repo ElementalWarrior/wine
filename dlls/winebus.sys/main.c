@@ -101,8 +101,6 @@ struct device_extension
     WCHAR instance_id[MAX_PATH];
     WCHAR compatible_id[MAX_PATH];
 
-    const platform_vtbl *vtbl;
-
     BYTE *last_report;
     DWORD last_report_size;
     BOOL last_report_read;
@@ -122,6 +120,54 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 static CRITICAL_SECTION device_list_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static struct list pnp_devset = LIST_INIT(pnp_devset);
+
+static void unix_device_remove(DEVICE_OBJECT *device)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_remove(ext->unix_device);
+}
+
+static int unix_device_compare(DEVICE_OBJECT *device, void *context)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_compare(ext->unix_device, context);
+}
+
+static NTSTATUS unix_device_start(DEVICE_OBJECT *device)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_start(ext->unix_device, device);
+}
+
+static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_get_report_descriptor(ext->unix_device, buffer, length, out_length);
+}
+
+static NTSTATUS unix_device_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_get_string(ext->unix_device, index, buffer, length);
+}
+
+static void unix_device_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_set_output_report(ext->unix_device, packet, io);
+}
+
+static void unix_device_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_get_feature_report(ext->unix_device, packet, io);
+}
+
+static void unix_device_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    return unix_funcs->device_set_feature_report(ext->unix_device, packet, io);
+}
 
 struct unix_device *get_unix_device(DEVICE_OBJECT *device)
 {
@@ -221,8 +267,7 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
     }
 }
 
-DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, const platform_vtbl *vtbl,
-                                     struct unix_device *unix_device)
+DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct unix_device *unix_device)
 {
     static const WCHAR device_id_formatW[] =
     {
@@ -239,7 +284,7 @@ DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, const platform_vt
     NTSTATUS status;
     ULONG length;
 
-    TRACE("desc %s, vtbl %p, unix_device %p\n", debugstr_device_desc(desc), vtbl, unix_device);
+    TRACE("desc %s, unix_device %p\n", debugstr_device_desc(desc), unix_device);
 
     if (!(pnp_dev = HeapAlloc(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
@@ -261,7 +306,6 @@ DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, const platform_vt
     ext->pnp_device         = pnp_dev;
     ext->desc               = *desc;
     ext->index              = get_device_index(desc);
-    ext->vtbl               = vtbl;
     ext->last_report        = NULL;
     ext->last_report_size   = 0;
     ext->last_report_read   = TRUE;
@@ -303,7 +347,7 @@ DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
     {
         struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
         if (strcmpW(ext->desc.bus_id, bus_id)) continue;
-        if (ext->vtbl->compare_platform_device(dev->device, platform_dev) == 0)
+        if (unix_device_compare(dev->device, platform_dev) == 0)
         {
             ret = dev->device;
             break;
@@ -457,7 +501,7 @@ static void mouse_device_create(void)
     struct device_desc desc;
 
     if (unix_funcs->mouse_device_create(&device, &desc)) return;
-    mouse_obj = bus_create_hid_device(&desc, &mouse_vtbl, device);
+    mouse_obj = bus_create_hid_device(&desc, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -467,7 +511,7 @@ static void keyboard_device_create(void)
     struct device_desc desc;
 
     if (unix_funcs->keyboard_device_create(&device, &desc)) return;
-    keyboard_obj = bus_create_hid_device(&desc, &keyboard_vtbl, device);
+    keyboard_obj = bus_create_hid_device(&desc, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -711,7 +755,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         case IRP_MN_START_DEVICE:
             EnterCriticalSection(&ext->cs);
             if (ext->started) status = STATUS_SUCCESS;
-            else if (!(status = ext->vtbl->start_device(device))) ext->started = TRUE;
+            else if (!(status = unix_device_start(device))) ext->started = TRUE;
             else ERR("failed to start device %p, status %#x\n", device, status);
             LeaveCriticalSection(&ext->cs);
             break;
@@ -731,7 +775,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             remove_pending_irps(device);
 
             bus_unlink_hid_device(device);
-            ext->vtbl->free_device(device);
+            unix_device_remove(device);
 
             ext->cs.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&ext->cs);
@@ -845,7 +889,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
                 break;
             }
 
-            irp->IoStatus.Status = ext->vtbl->get_reportdescriptor(device, NULL, 0, &length);
+            irp->IoStatus.Status = unix_device_get_report_descriptor(device, NULL, 0, &length);
             if (irp->IoStatus.Status != STATUS_SUCCESS &&
                 irp->IoStatus.Status != STATUS_BUFFER_TOO_SMALL)
             {
@@ -868,7 +912,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         }
         case IOCTL_HID_GET_REPORT_DESCRIPTOR:
             TRACE("IOCTL_HID_GET_REPORT_DESCRIPTOR\n");
-            irp->IoStatus.Status = ext->vtbl->get_reportdescriptor(device, irp->UserBuffer, buffer_len, &buffer_len);
+            irp->IoStatus.Status = unix_device_get_report_descriptor(device, irp->UserBuffer, buffer_len, &buffer_len);
             irp->IoStatus.Information = buffer_len;
             break;
         case IOCTL_HID_GET_STRING:
@@ -876,7 +920,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             DWORD index = (ULONG_PTR)irpsp->Parameters.DeviceIoControl.Type3InputBuffer;
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
-            irp->IoStatus.Status = ext->vtbl->get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+            irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
@@ -914,21 +958,21 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_WRITE_REPORT / IOCTL_HID_SET_OUTPUT_REPORT\n");
-            ext->vtbl->set_output_report(device, packet, &irp->IoStatus);
+            unix_device_set_output_report(device, packet, &irp->IoStatus);
             break;
         }
         case IOCTL_HID_GET_FEATURE:
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_GET_FEATURE\n");
-            ext->vtbl->get_feature_report(device, packet, &irp->IoStatus);
+            unix_device_get_feature_report(device, packet, &irp->IoStatus);
             break;
         }
         case IOCTL_HID_SET_FEATURE:
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_SET_FEATURE\n");
-            ext->vtbl->set_feature_report(device, packet, &irp->IoStatus);
+            unix_device_set_feature_report(device, packet, &irp->IoStatus);
             break;
         }
         default:
