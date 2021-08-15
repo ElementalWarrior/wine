@@ -212,7 +212,7 @@ void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size)
 {
     struct unix_device *iface;
 
-    if (!(iface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size))) return NULL;
+    if (!(iface = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, size))) return NULL;
     iface->vtbl = vtbl;
     iface->ref = 1;
 
@@ -221,7 +221,7 @@ void *unix_device_create(const struct unix_device_vtbl *vtbl, SIZE_T size)
 
 void unix_device_destroy(struct unix_device *iface)
 {
-    HeapFree(GetProcessHeap(), 0, iface);
+    RtlFreeHeap(GetProcessHeap(), 0, iface);
 }
 
 static void unix_device_decref(struct unix_device *iface)
@@ -302,7 +302,7 @@ NTSTATUS CDECL __wine_init_unix_lib(HMODULE module, DWORD reason, const void *pt
 void bus_event_destroy(struct bus_event *event)
 {
     unix_device_decref(event->device);
-    HeapFree(GetProcessHeap(), 0, event);
+    RtlFreeHeap(GetProcessHeap(), 0, event);
 }
 
 void bus_event_queue_destroy(struct list *queue)
@@ -318,7 +318,7 @@ void bus_event_queue_destroy(struct list *queue)
 
 BOOL bus_event_queue_device_removed(struct list *queue, struct unix_device *device)
 {
-    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, sizeof(*event));
+    struct bus_event *event = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*event));
     if (!event) return FALSE;
 
     if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
@@ -332,7 +332,7 @@ BOOL bus_event_queue_device_removed(struct list *queue, struct unix_device *devi
 
 BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *device, struct device_desc *desc)
 {
-    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, sizeof(*event));
+    struct bus_event *event = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*event));
     if (!event) return FALSE;
 
     if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */
@@ -347,7 +347,7 @@ BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *devi
 
 BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device, BYTE *report, DWORD length)
 {
-    struct bus_event *event = HeapAlloc(GetProcessHeap(), 0, offsetof(struct bus_event, input_report.buffer[length]));
+    struct bus_event *event = RtlAllocateHeap(GetProcessHeap(), 0, offsetof(struct bus_event, input_report.buffer[length]));
     if (!event) return FALSE;
 
     if (unix_device_incref(device) == 1) return FALSE; /* being destroyed */

@@ -373,7 +373,7 @@ static NTSTATUS build_report_descriptor(struct platform_private *ext)
         return STATUS_NO_MEMORY;
 
     ext->buffer_length = report_size;
-    if (!(ext->report_buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
+    if (!(ext->report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
         goto failed;
 
     /* Initialize axis in the report */
@@ -385,7 +385,7 @@ static NTSTATUS build_report_descriptor(struct platform_private *ext)
     return STATUS_SUCCESS;
 
 failed:
-    HeapFree(GetProcessHeap(), 0, ext->report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->report_buffer);
     hid_descriptor_free(&ext->desc);
     return STATUS_NO_MEMORY;
 }
@@ -474,7 +474,7 @@ static NTSTATUS build_mapped_report_descriptor(struct platform_private *ext)
     if (!hid_descriptor_end(&ext->desc))
         return STATUS_NO_MEMORY;
 
-    if (!(ext->report_buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ext->buffer_length)))
+    if (!(ext->report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, ext->buffer_length)))
         goto failed;
 
     /* Initialize axis in the report */
@@ -490,7 +490,7 @@ static NTSTATUS build_mapped_report_descriptor(struct platform_private *ext)
     return STATUS_SUCCESS;
 
 failed:
-    HeapFree(GetProcessHeap(), 0, ext->report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->report_buffer);
     hid_descriptor_free(&ext->desc);
     return STATUS_NO_MEMORY;
 }

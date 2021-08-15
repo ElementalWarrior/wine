@@ -546,9 +546,9 @@ static NTSTATUS build_report_descriptor(struct wine_input_private *ext, struct u
     TRACE("Report will be %i bytes\n", report_size);
 
     ext->buffer_length = report_size;
-    if (!(ext->current_report_buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
+    if (!(ext->current_report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
         goto failed;
-    if (!(ext->last_report_buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
+    if (!(ext->last_report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
         goto failed;
     ext->report_state = FIRST;
 
@@ -560,8 +560,8 @@ static NTSTATUS build_report_descriptor(struct wine_input_private *ext, struct u
     return STATUS_SUCCESS;
 
 failed:
-    HeapFree(GetProcessHeap(), 0, ext->current_report_buffer);
-    HeapFree(GetProcessHeap(), 0, ext->last_report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->current_report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->last_report_buffer);
     hid_descriptor_free(&ext->desc);
     return STATUS_NO_MEMORY;
 }
@@ -811,8 +811,8 @@ static void lnxev_device_destroy(struct unix_device *iface)
 {
     struct wine_input_private *ext = input_impl_from_unix_device(iface);
 
-    HeapFree(GetProcessHeap(), 0, ext->current_report_buffer);
-    HeapFree(GetProcessHeap(), 0, ext->last_report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->current_report_buffer);
+    RtlFreeHeap(GetProcessHeap(), 0, ext->last_report_buffer);
     hid_descriptor_free(&ext->desc);
 
     udev_device_unref(ext->base.udev_device);

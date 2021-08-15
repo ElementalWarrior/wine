@@ -271,7 +271,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
 
     TRACE("desc %s, unix_device %p\n", debugstr_device_desc(desc), unix_device);
 
-    if (!(pnp_dev = HeapAlloc(GetProcessHeap(), 0, sizeof(*pnp_dev))))
+    if (!(pnp_dev = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
     sprintfW(dev_name, device_name_fmtW, desc->bus_id, pnp_dev);
@@ -280,7 +280,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     if (status)
     {
         FIXME("failed to create device error %x\n", status);
-        HeapFree(GetProcessHeap(), 0, pnp_dev);
+        RtlFreeHeap(GetProcessHeap(), 0, pnp_dev);
         return NULL;
     }
 
@@ -388,8 +388,8 @@ static void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length
 
     if (length > ext->buffer_size)
     {
-        HeapFree(GetProcessHeap(), 0, ext->last_report);
-        ext->last_report = HeapAlloc(GetProcessHeap(), 0, length);
+        RtlFreeHeap(GetProcessHeap(), 0, ext->last_report);
+        ext->last_report = RtlAllocateHeap(GetProcessHeap(), 0, length);
         if (!ext->last_report)
         {
             ERR_(hid_report)("Failed to alloc last report\n");
@@ -610,8 +610,8 @@ static void sdl_bus_free_mappings(struct sdl_bus_options *options)
     DWORD count = options->mappings_count;
     char **mappings = options->mappings;
 
-    while (count) HeapFree(GetProcessHeap(), 0, mappings[--count]);
-    HeapFree(GetProcessHeap(), 0, mappings);
+    while (count) RtlFreeHeap(GetProcessHeap(), 0, mappings[--count]);
+    RtlFreeHeap(GetProcessHeap(), 0, mappings);
 }
 
 static void sdl_bus_load_mappings(struct sdl_bus_options *options)
@@ -635,9 +635,9 @@ static void sdl_bus_load_mappings(struct sdl_bus_options *options)
     if (status) return;
 
     capacity = 1024;
-    mappings = HeapAlloc(GetProcessHeap(), 0, capacity * sizeof(*mappings));
+    mappings = RtlAllocateHeap(GetProcessHeap(), 0, capacity * sizeof(*mappings));
     info_max_size = offsetof(KEY_VALUE_FULL_INFORMATION, Name) + 512;
-    info = HeapAlloc(GetProcessHeap(), 0, info_max_size);
+    info = RtlAllocateHeap(GetProcessHeap(), 0, info_max_size);
 
     while (!status && info && mappings)
     {
@@ -645,7 +645,7 @@ static void sdl_bus_load_mappings(struct sdl_bus_options *options)
         while (status == STATUS_BUFFER_OVERFLOW)
         {
             info_max_size = info_size;
-            if (!(info = HeapReAlloc(GetProcessHeap(), 0, info, info_max_size))) break;
+            if (!(info = RtlReAllocateHeap(GetProcessHeap(), 0, info, info_max_size))) break;
             status = NtEnumerateValueKey(key, idx, KeyValueFullInformation, info, info_max_size, &info_size);
         }
 
@@ -663,12 +663,11 @@ static void sdl_bus_load_mappings(struct sdl_bus_options *options)
         RtlUnicodeToMultiByteSize(&len, (WCHAR *)((char *)info + info->DataOffset), info_size - info->DataOffset);
         if (!len) continue;
 
-        if (!(mappings[count++] = HeapAlloc(GetProcessHeap(), 0, len + 1))) break;
+        if (!(mappings[count++] = RtlAllocateHeap(GetProcessHeap(), 0, len + 1))) break;
         if (count > capacity)
         {
             capacity = capacity * 3 / 2;
-            if (!(mappings = HeapReAlloc(GetProcessHeap(), 0, mappings, capacity * sizeof(*mappings))))
-                break;
+            if (!(mappings = RtlReAllocateHeap(GetProcessHeap(), 0, mappings, capacity * sizeof(*mappings)))) break;
         }
 
         RtlUnicodeToMultiByteN(mappings[count], len, NULL, (WCHAR *)((char *)info + info->DataOffset),
@@ -676,11 +675,11 @@ static void sdl_bus_load_mappings(struct sdl_bus_options *options)
         if (mappings[len - 1]) mappings[len] = 0;
     }
 
-    if (mappings) while (count) HeapFree(GetProcessHeap(), 0, mappings[--count]);
-    HeapFree(GetProcessHeap(), 0, mappings);
+    if (mappings) while (count) RtlFreeHeap(GetProcessHeap(), 0, mappings[--count]);
+    RtlFreeHeap(GetProcessHeap(), 0, mappings);
 
 done:
-    HeapFree(GetProcessHeap(), 0, info);
+    RtlFreeHeap(GetProcessHeap(), 0, info);
     NtClose(key);
 }
 
@@ -901,7 +900,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             ext->cs.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&ext->cs);
 
-            HeapFree(GetProcessHeap(), 0, ext->last_report);
+            RtlFreeHeap(GetProcessHeap(), 0, ext->last_report);
 
             irp->IoStatus.Status = STATUS_SUCCESS;
             IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -909,7 +908,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             IoDeleteDevice(device);
 
             /* pnp_device must be released after the device is gone */
-            HeapFree(GetProcessHeap(), 0, pnp_device);
+            RtlFreeHeap(GetProcessHeap(), 0, pnp_device);
 
             return STATUS_SUCCESS;
         }
