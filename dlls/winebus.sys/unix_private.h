@@ -44,6 +44,7 @@ struct unix_device_vtbl
 struct unix_device
 {
     const struct unix_device_vtbl *vtbl;
+    struct list entry;
 };
 
 extern NTSTATUS WINAPI sdl_bus_init(void *args) DECLSPEC_HIDDEN;
