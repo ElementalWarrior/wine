@@ -359,32 +359,6 @@ DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
     return ret;
 }
 
-DEVICE_OBJECT *bus_enumerate_hid_devices(const WCHAR *bus_id, enum_func function, void *context)
-{
-    struct pnp_device *dev, *dev_next;
-    DEVICE_OBJECT *ret = NULL;
-    int cont;
-
-    TRACE("bus_id %p\n", debugstr_w(bus_id));
-
-    EnterCriticalSection(&device_list_cs);
-    LIST_FOR_EACH_ENTRY_SAFE(dev, dev_next, &pnp_devset, struct pnp_device, entry)
-    {
-        struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (strcmpW(ext->desc.bus_id, bus_id)) continue;
-        LeaveCriticalSection(&device_list_cs);
-        cont = function(dev->device, context);
-        EnterCriticalSection(&device_list_cs);
-        if (!cont)
-        {
-            ret = dev->device;
-            break;
-        }
-    }
-    LeaveCriticalSection(&device_list_cs);
-    return ret;
-}
-
 static void bus_unlink_hid_device(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
