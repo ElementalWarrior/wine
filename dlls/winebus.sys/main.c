@@ -803,11 +803,9 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         mouse_device_create();
         keyboard_device_create();
 
-        if (!check_bus_option(L"Enable SDL", 1) || sdl_driver_init())
-        {
-            udev_driver_init();
-            iohid_driver_init();
-        }
+        sdl_driver_init();
+        udev_driver_init();
+        iohid_driver_init();
 
         irp->IoStatus.Status = STATUS_SUCCESS;
         break;
