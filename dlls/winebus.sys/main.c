@@ -997,6 +997,12 @@ void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
         return;
 
     EnterCriticalSection(&ext->cs);
+    if (!ext->started || ext->removed)
+    {
+        LeaveCriticalSection(&ext->cs);
+        return;
+    }
+
     if (length > ext->buffer_size)
     {
         HeapFree(GetProcessHeap(), 0, ext->last_report);
