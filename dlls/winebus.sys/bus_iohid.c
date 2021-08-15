@@ -126,6 +126,16 @@ static inline struct platform_private *impl_from_unix_device(struct unix_device 
     return CONTAINING_RECORD(iface, struct platform_private, unix_device);
 }
 
+static struct platform_private *find_device_from_iohid(IOHIDDeviceRef IOHIDDevice)
+{
+    struct platform_private *private;
+
+    LIST_FOR_EACH_ENTRY(private, &device_list, struct platform_private, unix_device.entry)
+        if (!private->device == IOHIDDevice) return private;
+
+    return NULL;
+}
+
 static void CFStringToWSTR(CFStringRef cstr, LPWSTR wstr, int length)
 {
     int len = min(CFStringGetLength(cstr), length-1);
@@ -360,13 +370,18 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 
 static void handle_RemovalCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
 {
+    struct platform_private *device;
+
     TRACE("OS/X IOHID Device Removed %p\n", IOHIDDevice);
     IOHIDDeviceRegisterInputReportCallback(IOHIDDevice, NULL, 0, NULL, NULL);
     /* Note: Yes, we leak the buffer. But according to research there is no
              safe way to deallocate that buffer. */
     IOHIDDeviceUnscheduleFromRunLoop(IOHIDDevice, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     IOHIDDeviceClose(IOHIDDevice, 0);
-    bus_event_queue_device_removed(&event_queue, busidW, IOHIDDevice);
+
+    device = find_device_from_iohid(IOHIDDevice);
+    if (device) bus_event_queue_device_removed(&event_queue, &device->unix_device);
+    else WARN("failed to find device for iohid device %p\n", IOHIDDevice);
 }
 
 NTSTATUS WINAPI iohid_bus_init(void *args)

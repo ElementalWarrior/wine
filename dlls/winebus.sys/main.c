@@ -330,30 +330,6 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     return device;
 }
 
-static DEVICE_OBJECT *bus_find_hid_device(const WCHAR *bus_id, void *platform_dev)
-{
-    struct pnp_device *dev;
-    DEVICE_OBJECT *ret = NULL;
-
-    TRACE("bus_id %s, platform_dev %p\n", debugstr_w(bus_id), platform_dev);
-
-    EnterCriticalSection(&device_list_cs);
-    LIST_FOR_EACH_ENTRY(dev, &pnp_devset, struct pnp_device, entry)
-    {
-        struct device_extension *ext = (struct device_extension *)dev->device->DeviceExtension;
-        if (strcmpW(ext->desc.bus_id, bus_id)) continue;
-        if (unix_device_compare(dev->device, platform_dev) == 0)
-        {
-            ret = dev->device;
-            break;
-        }
-    }
-    LeaveCriticalSection(&device_list_cs);
-
-    TRACE("returning %p\n", ret);
-    return ret;
-}
-
 static DEVICE_OBJECT *bus_find_unix_device(struct unix_device *unix_device)
 {
     struct device_extension *ext;
@@ -604,9 +580,8 @@ static DWORD CALLBACK bus_main_thread(void *args)
         {
         case BUS_EVENT_TYPE_NONE: break;
         case BUS_EVENT_TYPE_DEVICE_REMOVED:
-            if (!(device = bus_find_hid_device(event->device_removed.bus_id, event->device_removed.context)))
-                WARN("could not find removed device matching bus %s, context %p\n",
-                     debugstr_w(event->device_removed.bus_id), event->device_removed.context);
+            device = bus_find_unix_device(event->device);
+            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->device);
             else
             {
                 bus_unlink_hid_device(device);
@@ -614,17 +589,17 @@ static DWORD CALLBACK bus_main_thread(void *args)
             }
             break;
         case BUS_EVENT_TYPE_DEVICE_CREATED:
-            device = bus_create_hid_device(&event->device_created.desc, event->device_created.device);
+            device = bus_create_hid_device(&event->device_created.desc, event->device);
             if (device) IoInvalidateDeviceRelations(bus_pdo, BusRelations);
             else
             {
-                WARN("failed to create device for %s bus device %p\n", debugstr_w(bus.name), event->device_created.device);
-                unix_funcs->device_remove(event->device_created.device);
+                WARN("failed to create device for %s bus device %p\n", debugstr_w(bus.name), event->device);
+                unix_funcs->device_remove(event->device);
             }
             break;
         case BUS_EVENT_TYPE_INPUT_REPORT:
-            device = bus_find_unix_device(event->input_report.device);
-            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->input_report.device);
+            device = bus_find_unix_device(event->device);
+            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->device);
             else process_hid_report(device, event->input_report.buffer, event->input_report.length);
             break;
         }

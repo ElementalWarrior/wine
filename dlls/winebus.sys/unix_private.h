@@ -65,7 +65,7 @@ extern NTSTATUS WINAPI iohid_bus_stop(void) DECLSPEC_HIDDEN;
 
 extern void bus_event_destroy(struct bus_event *event) DECLSPEC_HIDDEN;
 extern void bus_event_queue_destroy(struct list *queue) DECLSPEC_HIDDEN;
-extern BOOL bus_event_queue_device_removed(struct list *queue, const WCHAR *bus_id, void *context) DECLSPEC_HIDDEN;
+extern BOOL bus_event_queue_device_removed(struct list *queue, struct unix_device *device) DECLSPEC_HIDDEN;
 extern BOOL bus_event_queue_device_created(struct list *queue, struct unix_device *device, struct device_desc *desc) DECLSPEC_HIDDEN;
 extern BOOL bus_event_queue_input_report(struct list *queue, struct unix_device *device,
                                          BYTE *report, DWORD length) DECLSPEC_HIDDEN;

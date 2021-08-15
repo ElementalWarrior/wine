@@ -74,24 +74,17 @@ struct bus_event
 {
     struct list entry;
     enum bus_event_type type;
+    struct unix_device *device;
 
     union
     {
         struct
         {
-            const WCHAR *bus_id;
-            void *context;
-        } device_removed;
-
-        struct
-        {
-            struct unix_device *device;
             struct device_desc desc;
         } device_created;
 
         struct
         {
-            struct unix_device *device;
             ULONG length;
             BYTE buffer[1];
         } input_report;
