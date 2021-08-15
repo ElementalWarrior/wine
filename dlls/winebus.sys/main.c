@@ -148,12 +148,6 @@ static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *b
     return unix_funcs->device_get_report_descriptor(ext->unix_device, buffer, length, out_length);
 }
 
-static NTSTATUS unix_device_get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return unix_funcs->device_get_string(ext->unix_device, index, buffer, length);
-}
-
 static void unix_device_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
@@ -934,8 +928,6 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
             irp->IoStatus.Status = hid_get_device_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
-            if (irp->IoStatus.Status != STATUS_SUCCESS)
-                irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
