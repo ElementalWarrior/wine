@@ -39,11 +39,11 @@ struct device_desc
     DWORD version;
     DWORD interface;
     DWORD location_id;
-    WCHAR serial[256];
     BOOL is_gamepad;
 
     char manufacturer[MAX_PATH];
     char product[MAX_PATH];
+    char serialnumber[MAX_PATH];
 };
 
 struct sdl_bus_options
@@ -121,9 +121,9 @@ struct unix_funcs
 static inline const char *debugstr_device_desc(struct device_desc *desc)
 {
     if (!desc) return "(null)";
-    return wine_dbg_sprintf("{bus %s, vid %04x, pid %04x, rev %04x, interface %d, location_id %08x, serial %s, is_gamepad %u}",
+    return wine_dbg_sprintf("{bus %s, vid %04x, pid %04x, rev %04x, interface %d, location_id %08x, is_gamepad %u}",
                             debugstr_w(desc->bus_id), desc->vendor_id, desc->product_id, desc->version,
-                            desc->interface, desc->location_id, debugstr_w(desc->serial), desc->is_gamepad);
+                            desc->interface, desc->location_id, desc->is_gamepad);
 }
 
 #endif /* __WINEBUS_UNIXLIB_H */

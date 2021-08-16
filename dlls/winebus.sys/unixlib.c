@@ -115,10 +115,10 @@ static const struct device_desc mouse_device_desc =
     .version = 0,
     .interface = -1,
     .location_id = 0,
-    .serial = {'0','0','0','0',0},
     .is_gamepad = FALSE,
     .manufacturer = {"The Wine Project"},
     .product = {"Wine HID mouse"},
+    .serialnumber = {"0000"},
 };
 static struct unix_device mouse_device = {.vtbl = &mouse_vtbl};
 
@@ -208,10 +208,10 @@ static const struct device_desc keyboard_device_desc =
     .version = 0,
     .interface = -1,
     .location_id = 0,
-    .serial = {'0','0','0','0',0},
     .is_gamepad = FALSE,
     .manufacturer = {"The Wine Project"},
     .product = {"Wine HID keyboard"},
+    .serialnumber = {"0000"},
 };
 static struct unix_device keyboard_device = {.vtbl = &keyboard_vtbl};
 

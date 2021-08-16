@@ -99,6 +99,7 @@ struct device_extension
 
     WCHAR manufacturer[MAX_PATH];
     WCHAR product[MAX_PATH];
+    WCHAR serialnumber[MAX_PATH];
     WCHAR device_id[MAX_PATH];
     WCHAR instance_id[MAX_PATH];
     WCHAR compatible_id[MAX_PATH];
@@ -316,11 +317,12 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
 
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->manufacturer, MAX_PATH);
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->product, MAX_PATH);
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.serialnumber, -1, ext->serialnumber, MAX_PATH);
 
     length = sprintfW(ext->device_id, device_id_formatW, desc->bus_id, desc->vendor_id, desc->product_id);
     if (desc->interface != (WORD)-1) sprintfW(ext->device_id + length, miW, desc->interface);
 
-    sprintfW(ext->instance_id, instance_id_formatW, desc->version, desc->serial, desc->location_id, ext->index);
+    sprintfW(ext->instance_id, instance_id_formatW, desc->version, ext->serialnumber, desc->location_id, ext->index);
 
     if (desc->is_gamepad)
     {
@@ -830,6 +832,10 @@ static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     case HID_STRING_ID_IPRODUCT:
         if (strlenW(ext->product) >= length) return STATUS_BUFFER_TOO_SMALL;
         else strcpyW(buffer, ext->product);
+        return STATUS_SUCCESS;
+    case HID_STRING_ID_ISERIALNUMBER:
+        if (strlenW(ext->serialnumber) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->serialnumber);
         return STATUS_SUCCESS;
     }
 
