@@ -28,6 +28,19 @@
 #include <hidusage.h>
 
 #include "wine/list.h"
+#include "wine/debug.h"
+
+struct device_desc
+{
+    const WCHAR *bus_id;
+    DWORD vendor_id;
+    DWORD product_id;
+    DWORD version;
+    DWORD interface;
+    DWORD location_id;
+    WCHAR serial[256];
+    BOOL is_gamepad;
+};
 
 struct sdl_bus_options
 {
@@ -81,8 +94,16 @@ struct unix_funcs
     NTSTATUS (WINAPI *iohid_bus_wait)(void *);
     NTSTATUS (WINAPI *iohid_bus_stop)(void);
 
-    NTSTATUS (WINAPI *mouse_device_create)(struct unix_device **);
-    NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **);
+    NTSTATUS (WINAPI *mouse_device_create)(struct unix_device **, struct device_desc *);
+    NTSTATUS (WINAPI *keyboard_device_create)(struct unix_device **, struct device_desc *);
 };
+
+static inline const char *debugstr_device_desc(struct device_desc *desc)
+{
+    if (!desc) return "(null)";
+    return wine_dbg_sprintf("{bus %s, vid %04x, pid %04x, rev %04x, interface %d, location_id %08x, serial %s, is_gamepad %u}",
+                            debugstr_w(desc->bus_id), desc->vendor_id, desc->product_id, desc->version,
+                            desc->interface, desc->location_id, debugstr_w(desc->serial), desc->is_gamepad);
+}
 
 #endif /* __WINEBUS_UNIXLIB_H */

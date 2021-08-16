@@ -1015,8 +1015,7 @@ static int check_device_syspath(DEVICE_OBJECT *device, void* context)
     return strcmp(get_device_syspath(private->udev_device), context);
 }
 
-static void get_device_subsystem_info(struct udev_device *dev, char const *subsystem, DWORD *vendor_id,
-                                      DWORD *product_id, DWORD *input, DWORD *version, WCHAR **serial_number)
+static void get_device_subsystem_info(struct udev_device *dev, char const *subsystem, struct device_desc *desc)
 {
     struct udev_device *parent = NULL;
     const char *ptr, *next, *tmp;
@@ -1036,41 +1035,49 @@ static void get_device_subsystem_info(struct udev_device *dev, char const *subsy
             if (!strncmp(ptr, "HID_UNIQ=", 9))
             {
                 if (sscanf(ptr, "HID_UNIQ=%256s\n", buffer) != 1 || !*buffer) continue;
-                if (!*serial_number) *serial_number = strdupAtoW(buffer);
+                if (!desc->serial[0]) MultiByteToWideChar(CP_UNIXCP, 0, buffer, -1, desc->serial, ARRAY_SIZE(desc->serial));
             }
             if (!strncmp(ptr, "HID_PHYS=", 9) || !strncmp(ptr, "PHYS=\"", 6))
             {
                 if (!(tmp = strstr(ptr, "/input")) || tmp >= next) continue;
-                if (*input == -1) sscanf(tmp, "/input%d\n", input);
+                if (desc->interface == -1) sscanf(tmp, "/input%d\n", &desc->interface);
             }
             if (!strncmp(ptr, "HID_ID=", 7))
             {
-                if (bus || *vendor_id || *product_id) continue;
-                sscanf(ptr, "HID_ID=%x:%x:%x\n", &bus, vendor_id, product_id);
+                if (bus || desc->vendor_id || desc->product_id) continue;
+                sscanf(ptr, "HID_ID=%x:%x:%x\n", &bus, &desc->vendor_id, &desc->product_id);
             }
             if (!strncmp(ptr, "PRODUCT=", 8))
             {
-                if (*version) continue;
+                if (desc->version) continue;
                 if (!strcmp(subsystem, "usb"))
-                    sscanf(ptr, "PRODUCT=%x/%x/%x\n", vendor_id, product_id, version);
+                    sscanf(ptr, "PRODUCT=%x/%x/%x\n", &desc->vendor_id, &desc->product_id, &desc->version);
                 else
-                    sscanf(ptr, "PRODUCT=%x/%x/%x/%x\n", &bus, vendor_id, product_id, version);
+                    sscanf(ptr, "PRODUCT=%x/%x/%x/%x\n", &bus, &desc->vendor_id, &desc->product_id, &desc->version);
             }
         }
     }
 }
 
-static void try_add_device(struct udev_device *dev)
+static void udev_add_device(struct udev_device *dev)
 {
-    DWORD vid = 0, pid = 0, version = 0, input = -1;
+    static const WCHAR base_serial[] = {'0','0','0','0',0};
+    struct device_desc desc =
+    {
+        .bus_id = NULL,
+        .vendor_id = 0,
+        .product_id = 0,
+        .version = 0,
+        .interface = -1,
+        .location_id = 0,
+        .serial = {0},
+        .is_gamepad = FALSE,
+    };
     struct platform_private *private;
     DEVICE_OBJECT *device = NULL;
     const char *subsystem;
     const char *devnode;
-    WCHAR *serial = NULL;
-    BOOL is_gamepad = FALSE;
     int fd;
-    static const CHAR *base_serial = "0000";
 
     if (!(devnode = udev_device_get_devnode(dev)))
         return;
@@ -1094,9 +1101,9 @@ static void try_add_device(struct udev_device *dev)
     }
 #endif
 
-    get_device_subsystem_info(dev, "hid", &vid, &pid, &input, &version, &serial);
-    get_device_subsystem_info(dev, "input", &vid, &pid, &input, &version, &serial);
-    get_device_subsystem_info(dev, "usb", &vid, &pid, &input, &version, &serial);
+    get_device_subsystem_info(dev, "hid", &desc);
+    get_device_subsystem_info(dev, "input", &desc);
+    get_device_subsystem_info(dev, "usb", &desc);
 
     subsystem = udev_device_get_subsystem(dev);
 #ifdef HAS_PROPER_INPUT_HEADER
@@ -1110,44 +1117,42 @@ static void try_add_device(struct udev_device *dev)
             WARN("ioctl(EVIOCGID) failed: %d %s\n", errno, strerror(errno));
         else
         {
-            vid = device_id.vendor;
-            pid = device_id.product;
-            version = device_id.version;
+            desc.vendor_id = device_id.vendor;
+            desc.product_id = device_id.product;
+            desc.version = device_id.version;
         }
 
         device_uid[0] = 0;
         if (ioctl(fd, EVIOCGUNIQ(254), device_uid) >= 0 && device_uid[0])
-            serial = strdupAtoW(device_uid);
+            MultiByteToWideChar(CP_UNIXCP, 0, device_uid, -1, desc.serial, ARRAY_SIZE(desc.serial));
 
         axes = count_abs_axis(fd);
         buttons = count_buttons(fd, NULL);
-        is_gamepad = (axes == 6  && buttons >= 14);
+        desc.is_gamepad = (axes == 6 && buttons >= 14);
     }
 #endif
 
-    if (serial == NULL) serial = strdupAtoW(base_serial);
+    if (!desc.serial[0]) lstrcpyW(desc.serial, base_serial);
 
-    if (input == (WORD)-1 && is_gamepad)
-        input = 0;
+    if (desc.interface == (WORD)-1 && desc.is_gamepad) desc.interface = 0;
 
-    TRACE("Found udev device %s (vid %04x, pid %04x, version %04x, input %d, serial %s)\n",
-          debugstr_a(devnode), vid, pid, version, input, debugstr_w(serial));
+    TRACE("dev %p, node %s, desc %s.\n", dev, debugstr_a(devnode), debugstr_device_desc(&desc));
 
     if (strcmp(subsystem, "hidraw") == 0)
     {
+        desc.bus_id = hidraw_busidW;
         if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct platform_private))))
             return;
-        device = bus_create_hid_device(hidraw_busidW, vid, pid, input, version, 0, serial,
-                                       is_gamepad, &hidraw_vtbl, &private->unix_device);
+        device = bus_create_hid_device(&desc, &hidraw_vtbl, &private->unix_device);
         if (!device) HeapFree(GetProcessHeap(), 0, private);
     }
 #ifdef HAS_PROPER_INPUT_HEADER
     else if (strcmp(subsystem, "input") == 0)
     {
+        desc.bus_id = lnxev_busidW;
         if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct wine_input_private))))
             return;
-        device = bus_create_hid_device(lnxev_busidW, vid, pid, input, version, 0, serial,
-                                       is_gamepad, &lnxev_vtbl, &private->unix_device);
+        device = bus_create_hid_device(&desc, &lnxev_vtbl, &private->unix_device);
         if (!device) HeapFree(GetProcessHeap(), 0, private);
     }
 #endif
@@ -1163,8 +1168,6 @@ static void try_add_device(struct udev_device *dev)
         WARN("Ignoring device %s with subsystem %s\n", debugstr_a(devnode), subsystem);
         close(fd);
     }
-
-    HeapFree(GetProcessHeap(), 0, serial);
 }
 
 static void try_remove_device(struct udev_device *dev)
@@ -1208,7 +1211,7 @@ static void build_initial_deviceset(void)
         path = udev_list_entry_get_name(dev_list_entry);
         if ((dev = udev_device_new_from_syspath(udev_context, path)))
         {
-            try_add_device(dev);
+            udev_add_device(dev);
             udev_device_unref(dev);
         }
     }
@@ -1281,7 +1284,7 @@ static void process_monitor_event(struct udev_monitor *monitor)
     if (!action)
         WARN("No action received\n");
     else if (strcmp(action, "add") == 0)
-        try_add_device(dev);
+        udev_add_device(dev);
     else if (strcmp(action, "remove") == 0)
         try_remove_device(dev);
     else

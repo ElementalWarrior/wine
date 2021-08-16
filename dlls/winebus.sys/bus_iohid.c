@@ -296,26 +296,31 @@ static const platform_vtbl iohid_vtbl =
 
 static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
 {
+    struct device_desc desc =
+    {
+        .bus_id = busidW,
+        .vendor_id = 0,
+        .product_id = 0,
+        .version = 0,
+        .interface = -1,
+        .location_id = 0,
+        .serial = {'0','0','0','0',0},
+        .is_gamepad = FALSE,
+    };
     struct platform_private *private;
     DEVICE_OBJECT *device;
-    DWORD vid, pid, version, uid;
     CFStringRef str = NULL;
-    WCHAR serial_string[256];
-    BOOL is_gamepad = FALSE;
-    WORD input = -1;
 
-    TRACE("OS/X IOHID Device Added %p\n", IOHIDDevice);
-
-    vid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVendorIDKey)));
-    pid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductIDKey)));
-    version = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVersionNumberKey)));
+    desc.vendor_id = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVendorIDKey)));
+    desc.product_id = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDProductIDKey)));
+    desc.version = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDVersionNumberKey)));
     str = IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDSerialNumberKey));
-    if (str) CFStringToWSTR(str, serial_string, ARRAY_SIZE(serial_string));
-    uid = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDLocationIDKey)));
+    if (str) CFStringToWSTR(str, desc.serial, ARRAY_SIZE(desc.serial));
+    desc.location_id = CFNumberToDWORD(IOHIDDeviceGetProperty(IOHIDDevice, CFSTR(kIOHIDLocationIDKey)));
 
     if (IOHIDDeviceOpen(IOHIDDevice, 0) != kIOReturnSuccess)
     {
-        ERR("Failed to open HID device %p (vid %04x, pid %04x)\n", IOHIDDevice, vid, pid);
+        ERR("Failed to open HID device %p (vid %04x, pid %04x)\n", IOHIDDevice, desc.vendor_id, desc.product_id);
         return;
     }
     IOHIDDeviceScheduleWithRunLoop(IOHIDDevice, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
@@ -332,41 +337,36 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
             CFIndex count = CFArrayGetCount(element_array);
             for (index = 0; index < count; index++)
             {
-                IOHIDElementRef element = (IOHIDElementRef)CFArrayGetValueAtIndex(element_array, index);
-                if (element)
+                int type = IOHIDElementGetType(element);
+                if (type == kIOHIDElementTypeInput_Button) buttons++;
+                if (type == kIOHIDElementTypeInput_Axis) axes++;
+                if (type == kIOHIDElementTypeInput_Misc)
                 {
-                    int type = IOHIDElementGetType(element);
-                    if (type == kIOHIDElementTypeInput_Button) buttons++;
-                    if (type == kIOHIDElementTypeInput_Axis) axes++;
-                    if (type == kIOHIDElementTypeInput_Misc)
+                    uint32_t usage = IOHIDElementGetUsage(element);
+                    switch (usage)
                     {
-                        uint32_t usage = IOHIDElementGetUsage(element);
-                        switch (usage)
-                        {
-                            case kHIDUsage_GD_X:
-                            case kHIDUsage_GD_Y:
-                            case kHIDUsage_GD_Z:
-                            case kHIDUsage_GD_Rx:
-                            case kHIDUsage_GD_Ry:
-                            case kHIDUsage_GD_Rz:
-                            case kHIDUsage_GD_Slider:
-                                axes ++;
-                        }
+                        case kHIDUsage_GD_X:
+                        case kHIDUsage_GD_Y:
+                        case kHIDUsage_GD_Z:
+                        case kHIDUsage_GD_Rx:
+                        case kHIDUsage_GD_Ry:
+                        case kHIDUsage_GD_Rz:
+                        case kHIDUsage_GD_Slider:
+                            axes ++;
                     }
                 }
             }
-            CFRelease(element_array);
         }
-        is_gamepad = (axes == 6  && buttons >= 14);
+        desc.is_gamepad = (axes == 6 && buttons >= 14);
     }
-    if (is_gamepad)
-        input = 0;
+    if (desc.is_gamepad) desc.interface = 0;
+
+    TRACE("dev %p, desc %s.\n", IOHIDDevice, debugstr_device_desc(&desc));
 
     if (!(private = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct platform_private))))
         return;
 
-    device = bus_create_hid_device(busidW, vid, pid, input, version, uid, str ? serial_string : NULL,
-                                   is_gamepad, &iohid_vtbl, &private->unix_device);
+    device = bus_create_hid_device(&desc, &iohid_vtbl, &private->unix_device);
     if (!device) HeapFree(GetProcessHeap(), 0, private);
     else
     {
