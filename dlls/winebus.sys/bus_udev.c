@@ -675,9 +675,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
     {
         switch (index)
         {
-            case HID_STRING_ID_IPRODUCT:
-                str = get_sysattr_string(usbdev, "product");
-                break;
             case HID_STRING_ID_ISERIALNUMBER:
                 str = get_sysattr_string(usbdev, "serial");
                 break;
@@ -691,15 +688,6 @@ static NTSTATUS hidraw_device_get_string(struct unix_device *iface, DWORD index,
 #ifdef HAVE_LINUX_HIDRAW_H
         switch (index)
         {
-            case HID_STRING_ID_IPRODUCT:
-            {
-                char buf[MAX_PATH];
-                if (ioctl(private->device_fd, HIDIOCGRAWNAME(MAX_PATH), buf) == -1)
-                    WARN("ioctl(HIDIOCGRAWNAME) failed: %d %s\n", errno, strerror(errno));
-                else
-                    str = strdupAtoW(buf);
-                break;
-            }
             case HID_STRING_ID_ISERIALNUMBER:
                 break;
             default:
@@ -962,9 +950,6 @@ static NTSTATUS lnxev_device_get_string(struct unix_device *iface, DWORD index, 
     str[0] = 0;
     switch (index)
     {
-        case HID_STRING_ID_IPRODUCT:
-            ioctl(ext->base.device_fd, EVIOCGNAME(sizeof(str)), str);
-            break;
         case HID_STRING_ID_ISERIALNUMBER:
             ioctl(ext->base.device_fd, EVIOCGUNIQ(sizeof(str)), str);
             break;
@@ -1084,6 +1069,9 @@ static void get_device_subsystem_info(struct udev_device *dev, char const *subsy
 
     if (!desc->manufacturer[0] && (tmp = udev_device_get_sysattr_value(dev, "manufacturer")))
         lstrcpynA(desc->manufacturer, tmp, sizeof(desc->manufacturer));
+
+    if (!desc->product[0] && (tmp = udev_device_get_sysattr_value(dev, "product")))
+        lstrcpynA(desc->product, tmp, sizeof(desc->product));
 }
 
 static void udev_add_device(struct udev_device *dev)
@@ -1100,6 +1088,7 @@ static void udev_add_device(struct udev_device *dev)
         .serial = {0},
         .is_gamepad = FALSE,
         .manufacturer = {0},
+        .product = {0},
     };
     struct platform_private *private;
     const char *subsystem;
@@ -1137,6 +1126,11 @@ static void udev_add_device(struct udev_device *dev)
     if (!strcmp(subsystem, "hidraw"))
     {
         if (!desc.manufacturer[0]) strcpy(desc.manufacturer, "hidraw");
+
+#ifdef HAVE_LINUX_HIDRAW_H
+        if (!desc.product[0] && ioctl(fd, HIDIOCGRAWNAME(sizeof(desc.product) - 1), desc.product) < 0)
+            desc.product[0] = 0;
+#endif
     }
 #ifdef HAS_PROPER_INPUT_HEADER
     if (!strcmp(subsystem, "input"))
@@ -1159,6 +1153,9 @@ static void udev_add_device(struct udev_device *dev)
             MultiByteToWideChar(CP_UNIXCP, 0, device_uid, -1, desc.serial, ARRAY_SIZE(desc.serial));
 
         if (!desc.manufacturer[0]) strcpy(desc.manufacturer, "evdev");
+
+        if (!desc.product[0] && ioctl(fd, EVIOCGNAME(sizeof(desc.product) - 1), desc.product) <= 0)
+            desc.product[0] = 0;
 
         axes = count_abs_axis(fd);
         buttons = count_buttons(fd, NULL);
