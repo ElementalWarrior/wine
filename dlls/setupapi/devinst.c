@@ -4590,9 +4590,12 @@ BOOL WINAPI SetupDiRegisterCoDeviceInstallers(HDEVINFO devinfo, SP_DEVINFO_DATA 
  * own hardware or compatible IDs. */
 static BOOL device_matches_id(const struct device *device, const WCHAR *id_type, const WCHAR *id)
 {
+    BOOL wildcard = (id[0] == '*');
+    const WCHAR *p, *tmp;
     WCHAR *device_ids;
-    const WCHAR *p;
     DWORD size;
+
+    if (wildcard) id++;
 
     if (!RegGetValueW(device->key, NULL, id_type, RRF_RT_REG_MULTI_SZ, NULL, NULL, &size))
     {
@@ -4601,7 +4604,10 @@ static BOOL device_matches_id(const struct device *device, const WCHAR *id_type,
         {
             for (p = device_ids; *p; p += lstrlenW(p) + 1)
             {
-                if (!wcsicmp(p, id))
+                if (!wildcard) tmp = p;
+                else if (!(tmp = wcschr(p, '\\'))) continue;
+                else tmp += 1;
+                if (!wcsicmp(tmp, id))
                 {
                     heap_free(device_ids);
                     return TRUE;
