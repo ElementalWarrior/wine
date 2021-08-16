@@ -31,6 +31,7 @@
 #include "ddk/wdm.h"
 #include "ddk/hidport.h"
 #include "ddk/hidpddi.h"
+#include "ddk/hidtypes.h"
 
 #include "wine/debug.h"
 
@@ -205,6 +206,24 @@ static IRP *pop_pending_read(struct device_state *state)
     return pending;
 }
 
+struct device_strings
+{
+    const WCHAR* id;
+    const WCHAR* product;
+};
+
+static const struct device_strings device_strings[] =
+{
+    { .id = L"VID_045E&PID_028E&IG_00", .product = L"Controller (XBOX 360 For Windows)" },
+    { .id = L"VID_045E&PID_028F&IG_00", .product = L"Controller (XBOX 360 For Windows)" },
+    { .id = L"VID_045E&PID_02D1&IG_00", .product = L"Controller (XBOX One For Windows)" },
+    { .id = L"VID_045E&PID_02DD&IG_00", .product = L"Controller (XBOX One For Windows)" },
+    { .id = L"VID_045E&PID_02E3&IG_00", .product = L"Controller (XBOX One For Windows)" },
+    { .id = L"VID_045E&PID_02EA&IG_00", .product = L"Controller (XBOX One For Windows)" },
+    { .id = L"VID_045E&PID_02FD&IG_00", .product = L"Controller (XBOX One For Windows)" },
+    { .id = L"VID_045E&PID_0719&IG_00", .product = L"Controller (XBOX 360 For Windows)" },
+};
+
 static NTSTATUS WINAPI xinput_ioctl(DEVICE_OBJECT *device, IRP *irp)
 {
     struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
@@ -212,11 +231,44 @@ static NTSTATUS WINAPI xinput_ioctl(DEVICE_OBJECT *device, IRP *irp)
     ULONG output_len = stack->Parameters.DeviceIoControl.OutputBufferLength;
     ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
     struct device_state *state = ext->state;
+    const WCHAR *str = NULL, *match_id;
+    DWORD i;
 
     TRACE("device %p, irp %p, code %#x, bus_pdo %p.\n", device, irp, code, state->bus_pdo);
 
     switch (code)
     {
+    case IOCTL_HID_GET_STRING:
+        switch ((ULONG_PTR)stack->Parameters.DeviceIoControl.Type3InputBuffer)
+        {
+        case HID_STRING_ID_IPRODUCT:
+            match_id = ext->device_id + wcslen(ext->bus_id) + 1;
+            for (i = 0; i < ARRAY_SIZE(device_strings); ++i)
+                if (!wcsicmp(device_strings[i].id, match_id))
+                    break;
+            if (i < ARRAY_SIZE(device_strings)) str = device_strings[i].product;
+            break;
+        }
+
+        if (!str)
+        {
+            IoSkipCurrentIrpStackLocation(irp);
+            return IoCallDriver(state->bus_pdo, irp);
+        }
+
+        irp->IoStatus.Information = (wcslen(str) + 1) * sizeof(WCHAR);
+        if (output_len < irp->IoStatus.Information)
+        {
+            irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        wcscpy(irp->UserBuffer, str);
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_SUCCESS;
+
     case IOCTL_HID_GET_DEVICE_DESCRIPTOR:
     {
         HID_DESCRIPTOR *descriptor = (HID_DESCRIPTOR *)irp->UserBuffer;
