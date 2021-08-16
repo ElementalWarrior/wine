@@ -64,32 +64,6 @@ struct product_desc
     const WCHAR* serialnumber;
 };
 
-#define VID_MICROSOFT 0x045e
-
-static const WCHAR xbox360_product_string[] = {
-    'C','o','n','t','r','o','l','l','e','r',' ','(','X','B','O','X',' ','3','6','0',' ','F','o','r',' ','W','i','n','d','o','w','s',')',0
-};
-
-static const WCHAR xboxone_product_string[] = {
-    'C','o','n','t','r','o','l','l','e','r',' ','(','X','B','O','X',' ','O','n','e',' ','F','o','r',' ','W','i','n','d','o','w','s',')',0
-};
-
-static const struct product_desc XBOX_CONTROLLERS[] = {
-    {VID_MICROSOFT, 0x0202, NULL, NULL, NULL}, /* Xbox Controller */
-    {VID_MICROSOFT, 0x0285, NULL, NULL, NULL}, /* Xbox Controller S */
-    {VID_MICROSOFT, 0x0289, NULL, NULL, NULL}, /* Xbox Controller S */
-    {VID_MICROSOFT, 0x028e, NULL, xbox360_product_string, NULL}, /* Xbox360 Controller */
-    {VID_MICROSOFT, 0x028f, NULL, xbox360_product_string, NULL}, /* Xbox360 Wireless Controller */
-    {VID_MICROSOFT, 0x02d1, NULL, xboxone_product_string, NULL}, /* Xbox One Controller */
-    {VID_MICROSOFT, 0x02dd, NULL, xboxone_product_string, NULL}, /* Xbox One Controller (Covert Forces/Firmware 2015) */
-    {VID_MICROSOFT, 0x02e0, NULL, NULL, NULL}, /* Xbox One X Controller */
-    {VID_MICROSOFT, 0x02e3, NULL, xboxone_product_string, NULL}, /* Xbox One Elite Controller */
-    {VID_MICROSOFT, 0x02e6, NULL, NULL, NULL}, /* Wireless XBox Controller Dongle */
-    {VID_MICROSOFT, 0x02ea, NULL, xboxone_product_string, NULL}, /* Xbox One S Controller */
-    {VID_MICROSOFT, 0x02fd, NULL, xboxone_product_string, NULL}, /* Xbox One S Controller (Firmware 2017) */
-    {VID_MICROSOFT, 0x0719, NULL, xbox360_product_string, NULL}, /* Xbox 360 Wireless Adapter */
-};
-
 static DRIVER_OBJECT *driver_obj;
 
 static DEVICE_OBJECT *mouse_obj;
@@ -308,8 +282,7 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
 
     if (is_gamepad)
     {
-        length = sprintfW(ext->compatible_id, device_id_formatW, busidW,
-                          VID_MICROSOFT, 0x0202);
+        length = sprintfW(ext->compatible_id, device_id_formatW, busidW, 0x045e, 0x0202);
         sprintfW(ext->compatible_id + length, miW, 0);
     }
 
@@ -772,55 +745,6 @@ static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_l
     }
 }
 
-static NTSTATUS hid_get_native_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
-{
-    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    const struct product_desc *vendor_products;
-    unsigned int i, vendor_products_size = 0;
-
-    if (ext->vid == VID_MICROSOFT)
-    {
-        vendor_products = XBOX_CONTROLLERS;
-        vendor_products_size = ARRAY_SIZE(XBOX_CONTROLLERS);
-    }
-
-    for (i = 0; i < vendor_products_size; i++)
-    {
-        if (ext->pid == vendor_products[i].pid)
-            break;
-    }
-
-    if (i >= vendor_products_size)
-        return STATUS_UNSUCCESSFUL;
-
-    switch (index)
-    {
-    case HID_STRING_ID_IPRODUCT:
-        if (vendor_products[i].product)
-        {
-            strcpyW(buffer, vendor_products[i].product);
-            return STATUS_SUCCESS;
-        }
-        break;
-    case HID_STRING_ID_IMANUFACTURER:
-        if (vendor_products[i].manufacturer)
-        {
-            strcpyW(buffer, vendor_products[i].manufacturer);
-            return STATUS_SUCCESS;
-        }
-        break;
-    case HID_STRING_ID_ISERIALNUMBER:
-        if (vendor_products[i].serialnumber)
-        {
-            strcpyW(buffer, vendor_products[i].serialnumber);
-            return STATUS_SUCCESS;
-        }
-        break;
-    }
-
-    return STATUS_UNSUCCESSFUL;
-}
-
 static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
@@ -912,9 +836,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             DWORD index = (ULONG_PTR)irpsp->Parameters.DeviceIoControl.Type3InputBuffer;
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
-            irp->IoStatus.Status = hid_get_native_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
-            if (irp->IoStatus.Status != STATUS_SUCCESS)
-                irp->IoStatus.Status = ext->vtbl->get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+            irp->IoStatus.Status = ext->vtbl->get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
