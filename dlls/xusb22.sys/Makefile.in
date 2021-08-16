@@ -1,5 +1,5 @@
 MODULE = xusb22.sys
-IMPORTS = ntoskrnl
+IMPORTS = ntoskrnl hidparse
 EXTRADLLFLAGS = -mno-cygwin -Wl,--subsystem,native
 
 C_SRCS = \

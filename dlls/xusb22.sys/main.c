@@ -30,6 +30,7 @@
 
 #include "ddk/wdm.h"
 #include "ddk/hidport.h"
+#include "ddk/hidpddi.h"
 
 #include "wine/debug.h"
 
@@ -58,6 +59,8 @@ struct device_state
     DEVICE_OBJECT *xinput_pdo;
 
     WCHAR instance_id[MAX_PATH];
+
+    HIDP_CAPS caps;
 };
 
 struct device_extension
@@ -67,12 +70,26 @@ struct device_extension
 
     WCHAR bus_id[MAX_PATH];
     WCHAR device_id[MAX_PATH];
+    HIDP_DEVICE_DESC device_desc;
+
     struct device_state *state;
 };
 
 static inline struct device_extension *ext_from_DEVICE_OBJECT(DEVICE_OBJECT *device)
 {
     return (struct device_extension *)device->DeviceExtension;
+}
+
+static NTSTATUS sync_ioctl(DEVICE_OBJECT *device, DWORD code, void *in_buf, DWORD in_len, void *out_buf, DWORD out_len)
+{
+    IO_STATUS_BLOCK io;
+    KEVENT event;
+    IRP *irp;
+
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    irp = IoBuildDeviceIoControlRequest(code, device, in_buf, in_len, out_buf, out_len, TRUE, &event, &io);
+    if (IoCallDriver(device, irp) == STATUS_PENDING) KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+    return io.Status;
 }
 
 static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
@@ -93,6 +110,41 @@ static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
 
     IoSkipCurrentIrpStackLocation(irp);
     return IoCallDriver(state->bus_pdo, irp);
+}
+
+static NTSTATUS xinput_pdo_start_device(DEVICE_OBJECT *device)
+{
+    struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
+    struct device_state *state = ext->state;
+    PHIDP_REPORT_DESCRIPTOR report_desc;
+    HID_DESCRIPTOR hid_desc;
+    ULONG report_desc_len;
+    NTSTATUS status;
+
+    if ((status = sync_ioctl(state->bus_pdo, IOCTL_HID_GET_DEVICE_DESCRIPTOR, NULL, 0, &hid_desc, sizeof(hid_desc))))
+        return status;
+
+    if (!(report_desc_len = hid_desc.DescriptorList[0].wReportLength)) return STATUS_UNSUCCESSFUL;
+    if (!(report_desc = malloc(report_desc_len))) return STATUS_NO_MEMORY;
+
+    status = sync_ioctl(state->bus_pdo, IOCTL_HID_GET_REPORT_DESCRIPTOR, NULL, 0, report_desc, report_desc_len);
+    if (!status) status = HidP_GetCollectionDescription(report_desc, report_desc_len, PagedPool, &ext->device_desc);
+    free(report_desc);
+    if (status != HIDP_STATUS_SUCCESS) return status;
+
+    status = HidP_GetCaps(ext->device_desc.CollectionDesc->PreparsedData, &state->caps);
+    if (status != HIDP_STATUS_SUCCESS) WARN("HidP_GetCaps returned %#x\n", status);
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS xinput_pdo_remove_device(DEVICE_OBJECT *device)
+{
+    struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
+
+    HidP_FreeCollectionDescription(&ext->device_desc);
+
+    return STATUS_SUCCESS;
 }
 
 static WCHAR *query_instance_id(DEVICE_OBJECT *device)
@@ -161,7 +213,7 @@ static NTSTATUS WINAPI pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
     switch (code)
     {
     case IRP_MN_START_DEVICE:
-        status = STATUS_SUCCESS;
+        status = xinput_pdo_start_device(device);
         break;
 
     case IRP_MN_SURPRISE_REMOVAL:
@@ -170,6 +222,7 @@ static NTSTATUS WINAPI pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
         break;
 
     case IRP_MN_REMOVE_DEVICE:
+        xinput_pdo_remove_device(device);
         irp->IoStatus.Status = STATUS_SUCCESS;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
         IoDeleteDevice(device);
