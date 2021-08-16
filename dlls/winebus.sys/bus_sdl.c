@@ -44,6 +44,7 @@
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "ddk/hidtypes.h"
+#include "ddk/hidsdi.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "hidusage.h"
@@ -137,6 +138,9 @@ struct platform_private
     int hat_bit_offs; /* hatswitches are reported in the same bytes as buttons */
 
     struct hid_descriptor desc;
+
+    BYTE input_report_id;
+    BYTE vendor_rumble_report_id;
 
     int buffer_length;
     BYTE *report_buffer;
@@ -255,7 +259,7 @@ static BOOL descriptor_add_haptic(struct platform_private *ext)
         {
             pSDL_HapticStopAll(ext->sdl_haptic);
             pSDL_HapticRumbleInit(ext->sdl_haptic);
-            if (!hid_descriptor_add_haptics(&ext->desc))
+            if (!hid_descriptor_add_haptics(&ext->desc, &ext->vendor_rumble_report_id))
                 return FALSE;
             ext->haptic_effect_id = -1;
         }
@@ -316,6 +320,9 @@ static NTSTATUS build_joystick_report_descriptor(struct platform_private *ext)
     if (!hid_descriptor_begin(&ext->desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_JOYSTICK))
         return STATUS_NO_MEMORY;
 
+    if (!hid_descriptor_begin_report(&ext->desc, HidP_Input, &ext->input_report_id))
+        return STATUS_NO_MEMORY;
+
     if (axis_count && !hid_descriptor_add_axes(&ext->desc, axis_count, HID_USAGE_PAGE_GENERIC,
                                                joystick_usages, FALSE, 16, -32768, 32767))
         return STATUS_NO_MEMORY;
@@ -330,6 +337,9 @@ static NTSTATUS build_joystick_report_descriptor(struct platform_private *ext)
     if (hat_count && !hid_descriptor_add_hatswitch(&ext->desc, hat_count))
         return STATUS_NO_MEMORY;
 
+    if (!hid_descriptor_end_report(&ext->desc))
+        return STATUS_NO_MEMORY;
+
     if (!descriptor_add_haptic(ext))
         return STATUS_NO_MEMORY;
 
@@ -339,6 +349,7 @@ static NTSTATUS build_joystick_report_descriptor(struct platform_private *ext)
     ext->buffer_length = report_size;
     if (!(ext->report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, report_size)))
         goto failed;
+    ext->report_buffer[0] = ext->input_report_id;
 
     /* Initialize axis in the report */
     for (i = 0; i < axis_count; i++)
@@ -398,6 +409,9 @@ static NTSTATUS build_controller_report_descriptor(struct platform_private *ext)
     if (!hid_descriptor_begin(&ext->desc, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_GAMEPAD))
         return STATUS_NO_MEMORY;
 
+    if (!hid_descriptor_begin_report(&ext->desc, HidP_Input, &ext->input_report_id))
+        return STATUS_NO_MEMORY;
+
     if (!hid_descriptor_add_axes(&ext->desc, 2, HID_USAGE_PAGE_GENERIC, left_axis_usages,
                                  FALSE, 16, -32768, 32767))
         return STATUS_NO_MEMORY;
@@ -419,6 +433,9 @@ static NTSTATUS build_controller_report_descriptor(struct platform_private *ext)
     if (alignment && !hid_descriptor_add_padding(&ext->desc, 8 - alignment))
         return STATUS_NO_MEMORY;
 
+    if (!hid_descriptor_end_report(&ext->desc))
+        return STATUS_NO_MEMORY;
+
     if (!descriptor_add_haptic(ext))
         return STATUS_NO_MEMORY;
 
@@ -427,6 +444,7 @@ static NTSTATUS build_controller_report_descriptor(struct platform_private *ext)
 
     if (!(ext->report_buffer = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, ext->buffer_length)))
         goto failed;
+    ext->report_buffer[0] = ext->input_report_id;
 
     /* Initialize axis in the report */
     for (i = SDL_CONTROLLER_AXIS_LEFTX; i < SDL_CONTROLLER_AXIS_MAX; i++)
@@ -482,7 +500,7 @@ static void sdl_device_set_output_report(struct unix_device *iface, HID_XFER_PAC
 {
     struct platform_private *ext = impl_from_unix_device(iface);
 
-    if (ext->sdl_haptic && packet->reportId == 0)
+    if (ext->sdl_haptic && packet->reportId == ext->vendor_rumble_report_id)
     {
         WORD left = packet->reportBuffer[2] * 128;
         WORD right = packet->reportBuffer[3] * 128;

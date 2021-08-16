@@ -33,6 +33,8 @@
 
 #include "unix_private.h"
 
+#include "ddk/hidsdi.h"
+
 BOOL hid_descriptor_append(struct hid_descriptor *desc, const BYTE *buffer, SIZE_T size)
 {
     BYTE *tmp = desc->data;
@@ -94,6 +96,29 @@ BOOL hid_descriptor_end(struct hid_descriptor *desc)
 void hid_descriptor_free(struct hid_descriptor *desc)
 {
     RtlFreeHeap(GetProcessHeap(), 0, desc->data);
+}
+
+BOOL hid_descriptor_begin_report(struct hid_descriptor *desc, BYTE type, BYTE *id)
+{
+    const BYTE report_id = ++desc->next_report_id[type];
+    const BYTE template[] =
+    {
+        COLLECTION(1, Report),
+            REPORT_ID(1, report_id),
+    };
+
+    *id = report_id;
+    return hid_descriptor_append(desc, template, sizeof(template));
+}
+
+BOOL hid_descriptor_end_report(struct hid_descriptor *desc)
+{
+    static const BYTE template[] =
+    {
+        END_COLLECTION,
+    };
+
+    return hid_descriptor_append(desc, template, sizeof(template));
 }
 
 BOOL hid_descriptor_add_buttons(struct hid_descriptor *desc, USAGE usage_page,
@@ -222,30 +247,35 @@ BOOL hid_descriptor_add_axes(struct hid_descriptor *desc, BYTE count, USAGE usag
     return TRUE;
 }
 
-BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc)
+BOOL hid_descriptor_add_haptics(struct hid_descriptor *desc, BYTE *id)
 {
-    static const BYTE template[] =
+    const BYTE report_id = ++desc->next_report_id[HidP_Output];
+    const BYTE template[] =
     {
         USAGE_PAGE(2, HID_USAGE_PAGE_VENDOR_DEFINED_BEGIN),
-        USAGE(1, 0x01),
-        /* padding */
-        REPORT_COUNT(1, 0x02),
-        REPORT_SIZE(1, 0x08),
-        OUTPUT(1, Data|Var|Abs),
-        /* actuators */
-        LOGICAL_MINIMUM(1, 0x00),
-        LOGICAL_MAXIMUM(1, 0xff),
-        PHYSICAL_MINIMUM(1, 0x00),
-        PHYSICAL_MAXIMUM(1, 0xff),
-        REPORT_SIZE(1, 0x08),
-        REPORT_COUNT(1, 0x02),
-        OUTPUT(1, Data|Var|Abs),
-        /* padding */
-        REPORT_COUNT(1, 0x02),
-        REPORT_SIZE(1, 0x08),
-        OUTPUT(1, Data|Var|Abs),
+        COLLECTION(1, Report),
+            REPORT_ID(1, report_id),
+            /* padding */
+            REPORT_COUNT(1, 0x02),
+            REPORT_SIZE(1, 0x08),
+            OUTPUT(1, Data|Var|Abs),
+            /* actuators */
+            USAGE(1, 0x01),
+            LOGICAL_MINIMUM(1, 0x00),
+            LOGICAL_MAXIMUM(1, 0xff),
+            PHYSICAL_MINIMUM(1, 0x00),
+            PHYSICAL_MAXIMUM(1, 0xff),
+            REPORT_SIZE(1, 0x08),
+            REPORT_COUNT(1, 0x02),
+            OUTPUT(1, Data|Var|Abs),
+            /* padding */
+            REPORT_COUNT(1, 0x02),
+            REPORT_SIZE(1, 0x08),
+            OUTPUT(1, Data|Var|Abs),
+        END_COLLECTION,
     };
 
+    *id = report_id;
     return hid_descriptor_append(desc, template, sizeof(template));
 }
 
