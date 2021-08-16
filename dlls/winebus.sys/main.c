@@ -111,7 +111,7 @@ struct device_extension
     DWORD last_report_size;
     BOOL last_report_read;
     DWORD buffer_size;
-    LIST_ENTRY irp_queue;
+    IRP *pending_read;
 
     struct unix_device *unix_device;
 };
@@ -239,17 +239,42 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
     return dst;
 }
 
+static BOOL set_pending_read(struct device_extension *ext, IRP *irp)
+{
+    IRP *previous;
+
+    if (!(previous = ext->pending_read))
+    {
+        ext->pending_read = irp;
+        IoMarkIrpPending(irp);
+        irp->IoStatus.Status = STATUS_PENDING;
+    }
+
+    return previous == NULL;
+}
+
+static IRP *pop_pending_read(struct device_extension *ext)
+{
+    IRP *pending;
+
+    RtlEnterCriticalSection(&ext->cs);
+    pending = ext->pending_read;
+    ext->pending_read = NULL;
+    RtlLeaveCriticalSection(&ext->cs);
+
+    return pending;
+}
+
 static void remove_pending_irps(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = device->DeviceExtension;
-    LIST_ENTRY *entry;
+    IRP *pending;
 
-    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+    if ((pending = pop_pending_read(ext)))
     {
-        IRP *queued_irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
-        queued_irp->IoStatus.Status = STATUS_DELETE_PENDING;
-        queued_irp->IoStatus.Information = 0;
-        IoCompleteRequest(queued_irp, IO_NO_INCREMENT);
+        pending->IoStatus.Status = STATUS_DELETE_PENDING;
+        pending->IoStatus.Information = 0;
+        IoCompleteRequest(pending, IO_NO_INCREMENT);
     }
 }
 
@@ -308,7 +333,6 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_d
         swprintf(ext->compatible_id + length, MAX_PATH - length, L"&MI_%02i", 0);
     }
 
-    InitializeListHead(&ext->irp_queue);
     InitializeCriticalSection(&ext->cs);
     ext->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
 
@@ -370,8 +394,9 @@ static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_l
 static void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+    IO_STACK_LOCATION *stack;
+    ULONG buffer_len;
     IRP *irp;
-    LIST_ENTRY *entry;
 
     if (!length || !report) return;
 
@@ -403,14 +428,11 @@ static void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length
     ext->last_report_size = length;
     ext->last_report_read = FALSE;
 
-    while ((entry = RemoveHeadList(&ext->irp_queue)) != &ext->irp_queue)
+    if ((irp = pop_pending_read(ext)))
     {
-        IO_STACK_LOCATION *irpsp;
-        TRACE_(hid_report)("Processing Request\n");
-        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
-        irpsp = IoGetCurrentIrpStackLocation(irp);
-        irp->IoStatus.Status = deliver_last_report(ext, irpsp->Parameters.DeviceIoControl.OutputBufferLength,
-                                                   irp->UserBuffer, &irp->IoStatus.Information);
+        stack = IoGetCurrentIrpStackLocation(irp);
+        buffer_len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+        irp->IoStatus.Status = deliver_last_report(ext, buffer_len, irp->UserBuffer, &irp->IoStatus.Information);
         ext->last_report_read = TRUE;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
@@ -843,6 +865,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     struct device_extension *ext = device->DeviceExtension;
     NTSTATUS status = irp->IoStatus.Status;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
+    IRP *pending;
 
     TRACE("device %p, irp %p, minor function %#x.\n", device, irp, irpsp->MinorFunction);
 
@@ -1057,10 +1080,10 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
                     buffer_len, irp->UserBuffer, &irp->IoStatus.Information);
                 ext->last_report_read = TRUE;
             }
-            else
+            else if (!set_pending_read(ext, irp))
             {
-                InsertTailList(&ext->irp_queue, &irp->Tail.Overlay.ListEntry);
-                irp->IoStatus.Status = STATUS_PENDING;
+                ERR("another read IRP was already pending!\n");
+                irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
             }
             break;
         }
