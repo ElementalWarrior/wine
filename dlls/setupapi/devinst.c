@@ -109,6 +109,7 @@ static const WCHAR emptyW[] = {0};
 
 struct driver
 {
+    ULONG score;
     WCHAR inf_path[MAX_PATH];
     WCHAR manufacturer[LINE_LEN];
     WCHAR mfg_key[LINE_LEN];
@@ -4693,19 +4694,23 @@ static void enum_compat_drivers_from_file(struct device *device, const WCHAR *pa
             {
                 if (device_matches_id(device, HardwareId, id) || device_matches_id(device, CompatibleIDs, id))
                 {
-                    unsigned int count = ++device->driver_count;
+                    unsigned int count = ++device->driver_count, score = wcslen(id);
 
                     device->drivers = heap_realloc(device->drivers, count * sizeof(*device->drivers));
-                    lstrcpyW(device->drivers[count - 1].inf_path, path);
-                    lstrcpyW(device->drivers[count - 1].manufacturer, mfg_name);
-                    lstrcpyW(device->drivers[count - 1].mfg_key, mfg_key_ext);
-                    SetupGetStringFieldW(&ctx, 0, device->drivers[count - 1].description,
-                            ARRAY_SIZE(device->drivers[count - 1].description), NULL);
-                    SetupGetStringFieldW(&ctx, 1, device->drivers[count - 1].section,
-                            ARRAY_SIZE(device->drivers[count - 1].section), NULL);
+                    for (i = 0; i < count - 1; ++i) if (device->drivers[i].score < score) break;
+                    if (i < count - 1) memmove(device->drivers + i + 1, device->drivers + i, count - 1 - i);
+
+                    device->drivers[i].score = score;
+                    lstrcpyW(device->drivers[i].inf_path, path);
+                    lstrcpyW(device->drivers[i].manufacturer, mfg_name);
+                    lstrcpyW(device->drivers[i].mfg_key, mfg_key_ext);
+                    SetupGetStringFieldW(&ctx, 0, device->drivers[i].description,
+                            ARRAY_SIZE(device->drivers[i].description), NULL);
+                    SetupGetStringFieldW(&ctx, 1, device->drivers[i].section,
+                            ARRAY_SIZE(device->drivers[i].section), NULL);
 
                     TRACE("Found compatible driver: manufacturer %s, desc %s.\n",
-                            debugstr_w(mfg_name), debugstr_w(device->drivers[count - 1].description));
+                            debugstr_w(mfg_name), debugstr_w(device->drivers[i].description));
                 }
             }
         }
