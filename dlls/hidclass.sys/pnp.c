@@ -38,6 +38,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
 
 DEFINE_DEVPROPKEY(DEVPROPKEY_HID_HANDLE, 0xbc62e415, 0xf4fe, 0x405c, 0x8e, 0xda, 0x63, 0x6f, 0xb5, 0x9f, 0x08, 0x98, 2);
+DEFINE_GUID(GUID_DEVINTERFACE_XINPUT, 0xec87f1e3, 0xc13b, 0x4100, 0xb5, 0xf7, 0x8b, 0x84, 0xd5, 0x42, 0x60, 0xcb);
 
 #if defined(__i386__) && !defined(_WIN32)
 
@@ -384,6 +385,7 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
     HIDP_COLLECTION_DESC *desc = ext->u.pdo.device_desc.CollectionDesc;
     NTSTATUS status = irp->IoStatus.Status;
+    const GUID *guid;
     KIRQL irql;
 
     TRACE("irp %p, minor function %#x.\n", irp, irpsp->MinorFunction);
@@ -449,7 +451,10 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
         }
 
         case IRP_MN_START_DEVICE:
-            if ((status = IoRegisterDeviceInterface(device, &GUID_DEVINTERFACE_HID, NULL, &ext->u.pdo.link_name)))
+            if (!wcscmp(ext->bus_id, L"WINEXINPUT")) guid = &GUID_DEVINTERFACE_XINPUT;
+            else guid = &GUID_DEVINTERFACE_HID;
+
+            if ((status = IoRegisterDeviceInterface(device, guid, NULL, &ext->u.pdo.link_name)))
             {
                 ERR("Failed to register interface, status %#x.\n", status);
                 break;

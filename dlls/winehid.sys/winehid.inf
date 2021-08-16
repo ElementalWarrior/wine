@@ -7,6 +7,7 @@ Class=HIDClass
 Wine=mfg_section
 
 [mfg_section]
+Wine internal XInput device=device_section,WINEXINPUT
 Wine XInput HID device=device_section,XINPUT
 Wine hidraw device=device_section,HIDRAW
 Wine IOHID device=device_section,IOHID

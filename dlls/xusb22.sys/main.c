@@ -57,15 +57,22 @@ struct device_state
 {
     DEVICE_OBJECT *bus_pdo;
     DEVICE_OBJECT *xinput_pdo;
+    DEVICE_OBJECT *internal_pdo;
 
     WCHAR instance_id[MAX_PATH];
 
     HIDP_CAPS caps;
+
+    CRITICAL_SECTION cs;
+    IRP *pending_read;
+    ULONG report_len;
+    char *report_buf;
 };
 
 struct device_extension
 {
     BOOL is_fdo;
+    BOOL is_xinput;
     BOOL removed;
 
     WCHAR bus_id[MAX_PATH];
@@ -92,12 +99,117 @@ static NTSTATUS sync_ioctl(DEVICE_OBJECT *device, DWORD code, void *in_buf, DWOR
     return io.Status;
 }
 
+static BOOL set_pending_read(struct device_state *state, IRP *irp)
+{
+    IRP *previous;
+
+    RtlEnterCriticalSection(&state->cs);
+    if (!(previous = state->pending_read))
+    {
+        state->pending_read = irp;
+        IoMarkIrpPending(irp);
+    }
+    RtlLeaveCriticalSection(&state->cs);
+
+    return previous == NULL;
+}
+
+static IRP *pop_pending_read(struct device_state *state)
+{
+    IRP *pending;
+
+    RtlEnterCriticalSection(&state->cs);
+    pending = state->pending_read;
+    state->pending_read = NULL;
+    RtlLeaveCriticalSection(&state->cs);
+
+    return pending;
+}
+
+static NTSTATUS WINAPI xinput_ioctl(DEVICE_OBJECT *device, IRP *irp)
+{
+    struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
+    ULONG output_len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+    struct device_state *state = ext->state;
+
+    TRACE("device %p, irp %p, code %#x, bus_pdo %p.\n", device, irp, code, state->bus_pdo);
+
+    switch (code)
+    {
+    case IOCTL_HID_GET_INPUT_REPORT:
+    {
+        HID_XFER_PACKET *packet = (HID_XFER_PACKET *)irp->UserBuffer;
+        irp->IoStatus.Information = state->report_len;
+        if (packet->reportBufferLen < state->report_len)
+        {
+            irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        RtlEnterCriticalSection(&state->cs);
+        memcpy(packet->reportBuffer, state->report_buf, state->report_len);
+        RtlLeaveCriticalSection(&state->cs);
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_SUCCESS;
+    }
+
+    case IOCTL_HID_READ_REPORT:
+        irp->IoStatus.Information = state->report_len;
+        if (output_len < state->report_len)
+        {
+            irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (!set_pending_read(state, irp))
+        {
+            ERR("another read IRP was already pending!\n");
+            irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
+            IoCompleteRequest(irp, IO_NO_INCREMENT);
+            return STATUS_UNSUCCESSFUL;
+        }
+
+        return STATUS_PENDING;
+
+    default:
+        IoSkipCurrentIrpStackLocation(irp);
+        return IoCallDriver(state->bus_pdo, irp);
+    }
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS WINAPI hid_read_report_completion(DEVICE_OBJECT *device, IRP *irp, void *context)
+{
+    struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
+    ULONG report_len = irp->IoStatus.Information;
+    struct device_state *state = ext->state;
+    char *report_buf = irp->UserBuffer;
+
+    TRACE("device %p, irp %p, bus_pdo %p.\n", device, irp, state->bus_pdo);
+
+    RtlEnterCriticalSection(&state->cs);
+    if (!state->report_buf) WARN("report buffer not created yet.\n");
+    else if (report_len == state->report_len) memcpy(state->report_buf, report_buf, report_len);
+    else ERR("report length mismatch %u, expected %u\n", report_len, state->report_len);
+    RtlLeaveCriticalSection(&state->cs);
+
+    if (irp->PendingReturned) IoMarkIrpPending(irp);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
 {
     struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
     ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
     struct device_state *state = ext->state;
+    IRP *pending;
 
     if (InterlockedOr(&ext->removed, FALSE))
     {
@@ -106,9 +218,27 @@ static NTSTATUS WINAPI internal_ioctl(DEVICE_OBJECT *device, IRP *irp)
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
 
+    if (ext->is_xinput) return xinput_ioctl(device, irp);
+
     TRACE("device %p, irp %p, code %#x, bus_pdo %p.\n", device, irp, code, state->bus_pdo);
 
-    IoSkipCurrentIrpStackLocation(irp);
+    if (code == IOCTL_HID_READ_REPORT)
+    {
+        /* we completed the previous internal read, send the fixed up report to xinput pdo */
+        if ((pending = pop_pending_read(state)))
+        {
+            RtlEnterCriticalSection(&state->cs);
+            memcpy(pending->UserBuffer, state->report_buf, state->report_len);
+            pending->IoStatus.Information = state->report_len;
+            RtlLeaveCriticalSection(&state->cs);
+            pending->IoStatus.Status = irp->IoStatus.Status;
+            IoCompleteRequest(pending, IO_NO_INCREMENT);
+        }
+
+        IoCopyCurrentIrpStackLocationToNext(irp);
+        IoSetCompletionRoutine(irp, hid_read_report_completion, NULL, TRUE, FALSE, FALSE);
+    }
+    else IoSkipCurrentIrpStackLocation(irp);
     return IoCallDriver(state->bus_pdo, irp);
 }
 
@@ -135,12 +265,26 @@ static NTSTATUS xinput_pdo_start_device(DEVICE_OBJECT *device)
     status = HidP_GetCaps(ext->device_desc.CollectionDesc->PreparsedData, &state->caps);
     if (status != HIDP_STATUS_SUCCESS) WARN("HidP_GetCaps returned %#x\n", status);
 
+    status = STATUS_SUCCESS;
+    RtlEnterCriticalSection(&state->cs);
+    state->report_len = state->caps.InputReportByteLength;
+    if (!ext->device_desc.ReportIDs[0].ReportID) state->report_len--;
+    if (!(state->report_buf = malloc(state->report_len))) status = STATUS_NO_MEMORY;
+    RtlLeaveCriticalSection(&state->cs);
+    if (status) return status;
+
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS xinput_pdo_remove_device(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = ext_from_DEVICE_OBJECT(device);
+    struct device_state *state = ext->state;
+
+    RtlEnterCriticalSection(&state->cs);
+    free(state->report_buf);
+    state->report_buf = NULL;
+    RtlLeaveCriticalSection(&state->cs);
 
     HidP_FreeCollectionDescription(&ext->device_desc);
 
@@ -207,22 +351,33 @@ static NTSTATUS WINAPI pdo_pnp(DEVICE_OBJECT *device, IRP *irp)
     struct device_state *state = ext->state;
     ULONG code = stack->MinorFunction;
     NTSTATUS status;
+    IRP *pending;
 
     TRACE("device %p, irp %p, code %#x, bus_pdo %p.\n", device, irp, code, state->bus_pdo);
 
     switch (code)
     {
     case IRP_MN_START_DEVICE:
-        status = xinput_pdo_start_device(device);
+        if (ext->is_xinput) status = xinput_pdo_start_device(device);
+        else status = STATUS_SUCCESS;
         break;
 
     case IRP_MN_SURPRISE_REMOVAL:
         status = STATUS_SUCCESS;
         if (InterlockedExchange(&ext->removed, TRUE)) break;
+
+        if (!ext->is_xinput) break;
+
+        if ((pending = pop_pending_read(state)))
+        {
+            pending->IoStatus.Status = STATUS_DELETE_PENDING;
+            pending->IoStatus.Information = 0;
+            IoCompleteRequest(pending, IO_NO_INCREMENT);
+        }
         break;
 
     case IRP_MN_REMOVE_DEVICE:
-        xinput_pdo_remove_device(device);
+        if (ext->is_xinput) xinput_pdo_remove_device(device);
         irp->IoStatus.Status = STATUS_SUCCESS;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
         IoDeleteDevice(device);
@@ -264,7 +419,7 @@ static void create_child_pdos(DEVICE_OBJECT *fdo)
 {
     struct device_extension *fdo_ext = fdo->DeviceExtension, *pdo_ext;
     struct device_state *state = fdo_ext->state;
-    DEVICE_OBJECT *xinput_pdo;
+    DEVICE_OBJECT *internal_pdo, *xinput_pdo;
     UNICODE_STRING string;
     WCHAR *tmp, pdo_name[255];
     NTSTATUS status;
@@ -277,17 +432,37 @@ static void create_child_pdos(DEVICE_OBJECT *fdo)
         return;
     }
 
+    swprintf(pdo_name, ARRAY_SIZE(pdo_name), L"\\Device\\WINEXINPUT#%p&%p", fdo->DriverObject, state->bus_pdo);
+    RtlInitUnicodeString(&string, pdo_name);
+    if ((status = IoCreateDevice(fdo->DriverObject, sizeof(*pdo_ext), &string, 0, 0, FALSE, &internal_pdo)))
+    {
+        ERR( "failed to create internal PDO, status %#x.\n", status );
+        IoDeleteDevice(xinput_pdo);
+        return;
+    }
+
     pdo_ext = xinput_pdo->DeviceExtension;
     pdo_ext->is_fdo = FALSE;
+    pdo_ext->is_xinput = TRUE;
     pdo_ext->state = state;
     wcscpy(pdo_ext->bus_id, L"XINPUT");
     swprintf(pdo_ext->device_id, MAX_PATH, L"XINPUT\\%s", fdo_ext->device_id);
     if ((tmp = wcsstr(pdo_ext->device_id, L"&MI_"))) memcpy(tmp, L"&IG", 6);
     else wcscat(pdo_ext->device_id, L"&IG_00");
 
-    state->xinput_pdo = xinput_pdo;
+    pdo_ext = internal_pdo->DeviceExtension;
+    pdo_ext->is_fdo = FALSE;
+    pdo_ext->is_xinput = FALSE;
+    pdo_ext->state = state;
+    wcscpy(pdo_ext->bus_id, L"WINEXINPUT");
+    swprintf(pdo_ext->device_id, MAX_PATH, L"WINEXINPUT\\%s", fdo_ext->device_id);
+    if ((tmp = wcsstr(pdo_ext->device_id, L"&MI_"))) memcpy(tmp, L"&XI", 6);
+    else wcscat(pdo_ext->device_id, L"&XI_00");
 
-    TRACE("fdo %p, xinput PDO %p.\n", fdo, xinput_pdo);
+    state->xinput_pdo = xinput_pdo;
+    state->internal_pdo = internal_pdo;
+
+    TRACE("fdo %p, internal PDO %p, xinput PDO %p.\n", fdo, internal_pdo, xinput_pdo);
 
     IoInvalidateDeviceRelations(state->bus_pdo, BusRelations);
 }
@@ -317,6 +492,12 @@ static NTSTATUS WINAPI fdo_pnp(DEVICE_OBJECT *device, IRP *irp)
             }
 
             devices->Count = 0;
+            if ((child = state->internal_pdo))
+            {
+                devices->Objects[devices->Count] = child;
+                call_fastcall_func1(ObfReferenceObject, child);
+                devices->Count++;
+            }
             if ((child = state->xinput_pdo))
             {
                 devices->Objects[devices->Count] = child;
@@ -428,6 +609,7 @@ static NTSTATUS WINAPI add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *bus_pdo)
     wcscpy(ext->bus_id, bus_id);
     wcscpy(ext->device_id, device_id);
     wcscpy(state->instance_id, instance_id);
+    RtlInitializeCriticalSection(&state->cs);
 
     TRACE("fdo %p, bus %s, device %s, instance %s.\n", fdo, debugstr_w(ext->bus_id), debugstr_w(ext->device_id), debugstr_w(state->instance_id));
 
