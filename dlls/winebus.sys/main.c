@@ -119,10 +119,11 @@ struct device_extension
     struct pnp_device *pnp_device;
 
     WORD vid, pid, input;
-    DWORD uid, version, index;
-    BOOL is_gamepad;
-    WCHAR *serial;
+    DWORD version, index;
+
     const WCHAR *busid;  /* Expected to be a static constant */
+    WCHAR device_id[MAX_PATH];
+    WCHAR instance_id[MAX_PATH];
 
     const platform_vtbl *vtbl;
 
@@ -145,19 +146,6 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 static CRITICAL_SECTION device_list_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static struct list pnp_devset = LIST_INIT(pnp_devset);
-
-static const WCHAR zero_serialW[]= {'0','0','0','0',0};
-static const WCHAR miW[] = {'M','I',0};
-static const WCHAR igW[] = {'I','G',0};
-
-static inline WCHAR *strdupW(const WCHAR *src)
-{
-    WCHAR *dst;
-    if (!src) return NULL;
-    dst = HeapAlloc(GetProcessHeap(), 0, (strlenW(src) + 1)*sizeof(WCHAR));
-    if (dst) strcpyW(dst, src);
-    return dst;
-}
 
 void *get_platform_private(DEVICE_OBJECT *device)
 {
@@ -182,40 +170,24 @@ static DWORD get_device_index(WORD vid, WORD pid, WORD input)
 
 static WCHAR *get_instance_id(DEVICE_OBJECT *device)
 {
-    static const WCHAR formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    const WCHAR *serial = ext->serial ? ext->serial : zero_serialW;
-    DWORD len = strlenW(serial) + 33;
+    DWORD len = strlenW(ext->instance_id);
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-        sprintfW(dst, formatW, ext->version, serial, ext->uid, ext->index);
+        strcpyW(dst, ext->instance_id);
 
     return dst;
 }
 
 static WCHAR *get_device_id(DEVICE_OBJECT *device)
 {
-    static const WCHAR formatW[] = {'%','s','\\','v','i','d','_','%','0','4','x',
-            '&','p','i','d','_','%','0','4','x',0};
-    static const WCHAR format_inputW[] = {'%','s','\\','v','i','d','_','%','0','4','x',
-            '&','p','i','d','_','%','0','4','x','&','%','s','_','%','0','2','i',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = strlenW(ext->busid) + 34;
+    DWORD len = strlenW(ext->device_id);
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-    {
-        if (ext->input == (WORD)-1)
-        {
-            sprintfW(dst, formatW, ext->busid, ext->vid, ext->pid);
-        }
-        else
-        {
-            sprintfW(dst, format_inputW, ext->busid, ext->vid, ext->pid,
-                    ext->is_gamepad ? igW : miW, ext->input);
-        }
-    }
+        strcpyW(dst, ext->device_id);
 
     return dst;
 }
@@ -252,7 +224,15 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
                                      WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
                                      const platform_vtbl *vtbl, DWORD platform_data_size)
 {
+    static const WCHAR device_id_formatW[] =
+    {
+        '%','s','\\','v','i','d','_','%','0','4','x','&','p','i','d','_','%','0','4','x',0
+    };
     static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e','\\','%','s','#','%','p',0};
+    static const WCHAR instance_id_formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
+    static const WCHAR zero_serialW[]= {'0','0','0','0',0};
+    static const WCHAR miW[] = {'&','M','I','_','%','0','2','i',0};
+    static const WCHAR igW[] = {'&','I','G','_','%','0','2','i',0};
     struct device_extension *ext;
     struct pnp_device *pnp_dev;
     DEVICE_OBJECT *device;
@@ -287,17 +267,20 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     ext->vid                = vid;
     ext->pid                = pid;
     ext->input              = input;
-    ext->uid                = uid;
     ext->version            = version;
     ext->index              = get_device_index(vid, pid, input);
-    ext->is_gamepad         = is_gamepad;
-    ext->serial             = strdupW(serialW);
     ext->busid              = busidW;
     ext->vtbl               = vtbl;
     ext->last_report        = NULL;
     ext->last_report_size   = 0;
     ext->last_report_read   = TRUE;
     ext->buffer_size        = 0;
+
+    length = sprintfW(ext->device_id, device_id_formatW, busidW, vid, pid);
+    if (input != (WORD)-1) sprintfW(ext->device_id + length, is_gamepad ? igW : miW, input);
+
+    sprintfW(ext->instance_id, instance_id_formatW, version,
+             serialW ? serialW : zero_serialW, uid, ext->index);
 
     memset(ext->platform_private, 0, platform_data_size);
 
@@ -709,7 +692,6 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             ext->cs.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&ext->cs);
 
-            HeapFree(GetProcessHeap(), 0, ext->serial);
             HeapFree(GetProcessHeap(), 0, ext->last_report);
 
             irp->IoStatus.Status = STATUS_SUCCESS;
