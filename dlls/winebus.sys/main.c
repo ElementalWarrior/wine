@@ -81,6 +81,13 @@ static DEVICE_OBJECT *bus_fdo;
 
 static HANDLE driver_key;
 
+struct hid_report
+{
+    struct list entry;
+    ULONG length;
+    BYTE buffer[1];
+};
+
 struct pnp_device
 {
     struct list entry;
@@ -107,10 +114,8 @@ struct device_extension
     WCHAR instance_id[MAX_PATH];
     WCHAR compatible_id[MAX_PATH];
 
-    BYTE *last_report;
-    DWORD last_report_size;
-    BOOL last_report_read;
-    DWORD buffer_size;
+    struct list reports;
+    struct hid_report *last_report;
     IRP *pending_read;
 
     struct unix_device *unix_device;
@@ -313,10 +318,8 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_d
     ext->desc               = *desc;
     ext->index              = get_device_index(desc);
     ext->last_report        = NULL;
-    ext->last_report_size   = 0;
-    ext->last_report_read   = TRUE;
-    ext->buffer_size        = 0;
     ext->unix_device        = unix_device;
+    list_init(&ext->reports);
 
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->manufacturer, MAX_PATH);
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->product, MAX_PATH);
@@ -375,65 +378,62 @@ static void bus_unlink_hid_device(DEVICE_OBJECT *device)
     RtlLeaveCriticalSection(&device_list_cs);
 }
 
-static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_length, BYTE *buffer,
-                                    ULONG_PTR *out_length)
+static BOOL deliver_next_report(struct device_extension *ext, IRP *irp)
 {
-    if (buffer_length < ext->last_report_size)
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
+    ULONG buffer_len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    struct hid_report *report;
+    struct list *entry;
+
+    if (!(entry = list_head(&ext->reports))) return FALSE;
+
+    report = LIST_ENTRY(entry, struct hid_report, entry);
+    list_remove(&report->entry);
+
+    irp->IoStatus.Information = report->length;
+    if (buffer_len < report->length)
     {
-        *out_length = 0;
-        return STATUS_BUFFER_TOO_SMALL;
+        ERR("invalid HID read size %u, expected >= %u\n", buffer_len, report->length);
+        irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
     }
     else
     {
-        if (ext->last_report) memcpy(buffer, ext->last_report, ext->last_report_size);
-        *out_length = ext->last_report_size;
-        return STATUS_SUCCESS;
+        memcpy(irp->UserBuffer, report->buffer, report->length);
+        irp->IoStatus.Status = STATUS_SUCCESS;
     }
+
+    if (ext->last_report != report) RtlFreeHeap(GetProcessHeap(), 0, report);
+    return TRUE;
 }
 
-static void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length)
+static void process_hid_report(DEVICE_OBJECT *device, BYTE *report_buf, DWORD report_len)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    IO_STACK_LOCATION *stack;
-    ULONG buffer_len;
+    struct hid_report *report;
     IRP *irp;
 
-    if (!length || !report) return;
+    if (!(report = RtlAllocateHeap(GetProcessHeap(), 0, offsetof(struct hid_report, buffer[report_len]))))
+        return;
+
+    memcpy(report->buffer, report_buf, report_len);
+    report->length = report_len;
 
     RtlEnterCriticalSection(&ext->cs);
     if (!ext->started || ext->removed)
     {
         RtlLeaveCriticalSection(&ext->cs);
+        RtlFreeHeap(GetProcessHeap(), 0, report);
         return;
     }
 
-    if (length > ext->buffer_size)
-    {
-        RtlFreeHeap(GetProcessHeap(), 0, ext->last_report);
-        ext->last_report = RtlAllocateHeap(GetProcessHeap(), 0, length);
-        if (!ext->last_report)
-        {
-            ERR_(hid_report)("Failed to alloc last report\n");
-            ext->buffer_size = 0;
-            ext->last_report_size = 0;
-            ext->last_report_read = TRUE;
-            RtlLeaveCriticalSection(&ext->cs);
-            return;
-        }
-        else
-            ext->buffer_size = length;
-    }
+    list_add_tail(&ext->reports, &report->entry);
 
-    memcpy(ext->last_report, report, length);
-    ext->last_report_size = length;
-    ext->last_report_read = FALSE;
+    if (ext->last_report) RtlFreeHeap(GetProcessHeap(), 0, ext->last_report);
+    ext->last_report = report;
 
     if ((irp = pop_pending_read(ext)))
     {
-        stack = IoGetCurrentIrpStackLocation(irp);
-        buffer_len = stack->Parameters.DeviceIoControl.OutputBufferLength;
-        irp->IoStatus.Status = deliver_last_report(ext, buffer_len, irp->UserBuffer, &irp->IoStatus.Information);
-        ext->last_report_read = TRUE;
+        deliver_next_report(ext, irp);
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
     RtlLeaveCriticalSection(&ext->cs);
@@ -865,7 +865,6 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     struct device_extension *ext = device->DeviceExtension;
     NTSTATUS status = irp->IoStatus.Status;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
-    IRP *pending;
 
     TRACE("device %p, irp %p, minor function %#x.\n", device, irp, irpsp->MinorFunction);
 
@@ -898,6 +897,7 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         case IRP_MN_REMOVE_DEVICE:
         {
             struct pnp_device *pnp_device = ext->pnp_device;
+            struct hid_report *report, *next;
 
             remove_pending_irps(device);
 
@@ -907,7 +907,11 @@ static NTSTATUS pdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             ext->cs.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&ext->cs);
 
-            RtlFreeHeap(GetProcessHeap(), 0, ext->last_report);
+            LIST_FOR_EACH_ENTRY_SAFE(report, next, &ext->reports, struct hid_report, entry)
+            {
+                list_remove(&report->entry);
+                RtlFreeHeap(GetProcessHeap(), 0, report);
+            }
 
             irp->IoStatus.Status = STATUS_SUCCESS;
             IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -1063,30 +1067,32 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
         {
             HID_XFER_PACKET *packet = (HID_XFER_PACKET*)(irp->UserBuffer);
             TRACE_(hid_report)("IOCTL_HID_GET_INPUT_REPORT\n");
-            irp->IoStatus.Status = deliver_last_report(ext,
-                packet->reportBufferLen, packet->reportBuffer,
-                &irp->IoStatus.Information);
+            if (!ext->last_report)
+            {
+                irp->IoStatus.Information = 0;
+                irp->IoStatus.Status = STATUS_SUCCESS;
+                break;
+            }
 
-            if (irp->IoStatus.Status == STATUS_SUCCESS)
-                packet->reportBufferLen = irp->IoStatus.Information;
+            if (packet->reportBufferLen < ext->last_report->length)
+            {
+                irp->IoStatus.Information = 0;
+                irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+
+            memcpy(packet->reportBuffer, ext->last_report, ext->last_report->length);
+            irp->IoStatus.Information = ext->last_report->length;
+            irp->IoStatus.Status = STATUS_SUCCESS;
             break;
         }
         case IOCTL_HID_READ_REPORT:
-        {
-            TRACE_(hid_report)("IOCTL_HID_READ_REPORT\n");
-            if (!ext->last_report_read)
-            {
-                irp->IoStatus.Status = deliver_last_report(ext,
-                    buffer_len, irp->UserBuffer, &irp->IoStatus.Information);
-                ext->last_report_read = TRUE;
-            }
-            else if (!set_pending_read(ext, irp))
+            if (!deliver_next_report(ext, irp) && !set_pending_read(ext, irp))
             {
                 ERR("another read IRP was already pending!\n");
                 irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
             }
             break;
-        }
         case IOCTL_HID_SET_OUTPUT_REPORT:
         case IOCTL_HID_WRITE_REPORT:
         {
