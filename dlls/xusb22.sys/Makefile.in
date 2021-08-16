@@ -1,6 +1,7 @@
 MODULE = xusb22.sys
 IMPORTS = ntoskrnl hidparse
 EXTRADLLFLAGS = -mno-cygwin -Wl,--subsystem,native
+PARENTSRC = ../winebus.sys
 
 C_SRCS = \
 	main.c
