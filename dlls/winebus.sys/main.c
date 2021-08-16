@@ -124,6 +124,7 @@ struct device_extension
     const WCHAR *busid;  /* Expected to be a static constant */
     WCHAR device_id[MAX_PATH];
     WCHAR instance_id[MAX_PATH];
+    WCHAR compatible_id[MAX_PATH];
 
     const platform_vtbl *vtbl;
 
@@ -192,21 +193,24 @@ static WCHAR *get_device_id(DEVICE_OBJECT *device)
     return dst;
 }
 
-static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
+static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
 {
     static const WCHAR device_instance_formatW[] = {'%','s','\\','%','s',0};
     static const WCHAR formatW[] = {'%','s',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = 0, bus_len, device_len, instance_len;
+    DWORD len = 0, bus_len, device_len, instance_len, compatible_len;
     WCHAR *dst, *tmp;
 
     bus_len = strlenW(ext->busid);
     device_len = strlenW(ext->device_id);
     instance_len = strlenW(ext->instance_id);
+    compatible_len = strlenW(ext->compatible_id);
+    if (type == BusQueryHardwareIDs) compatible_len = 0;
 
     len += device_len + instance_len + 2;
     len += device_len + 2;
     len += bus_len + 2;
+    if (compatible_len) len += compatible_len + 2;
 
     if ((dst = tmp = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
     {
@@ -216,6 +220,12 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
         *tmp++ = 0;
         tmp += sprintfW(tmp, formatW, ext->busid);
         *tmp++ = 0;
+
+        if (compatible_len)
+        {
+            tmp += sprintfW(tmp, formatW, ext->compatible_id);
+            *tmp++ = 0;
+        }
     }
 
     return dst;
@@ -296,6 +306,13 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
 
     sprintfW(ext->instance_id, instance_id_formatW, version,
              serialW ? serialW : zero_serialW, uid, ext->index);
+
+    if (is_gamepad)
+    {
+        length = sprintfW(ext->compatible_id, device_id_formatW, busidW,
+                          VID_MICROSOFT, 0x0202);
+        sprintfW(ext->compatible_id + length, miW, 0);
+    }
 
     memset(ext->platform_private, 0, platform_data_size);
 
@@ -434,11 +451,11 @@ static NTSTATUS handle_IRP_MN_QUERY_ID(DEVICE_OBJECT *device, IRP *irp)
     {
         case BusQueryHardwareIDs:
             TRACE("BusQueryHardwareIDs\n");
-            irp->IoStatus.Information = (ULONG_PTR)get_compatible_ids(device);
+            irp->IoStatus.Information = (ULONG_PTR)get_compatible_ids(device, type);
             break;
         case BusQueryCompatibleIDs:
             TRACE("BusQueryCompatibleIDs\n");
-            irp->IoStatus.Information = (ULONG_PTR)get_compatible_ids(device);
+            irp->IoStatus.Information = (ULONG_PTR)get_compatible_ids(device, type);
             break;
         case BusQueryDeviceID:
             TRACE("BusQueryDeviceID\n");
