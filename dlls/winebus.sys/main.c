@@ -17,11 +17,14 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#include "config.h"
+
 #include <stdarg.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winnls.h"
 #include "winternl.h"
 #include "winioctl.h"
 #include "hidusage.h"
@@ -30,7 +33,6 @@
 #include "ddk/hidtypes.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 
 #include "bus.h"
@@ -179,11 +181,11 @@ static DWORD get_device_index(struct device_desc *desc)
 static WCHAR *get_instance_id(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = strlenW(ext->instance_id);
+    DWORD len = wcslen(ext->instance_id);
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-        strcpyW(dst, ext->instance_id);
+        wcscpy(dst, ext->instance_id);
 
     return dst;
 }
@@ -191,11 +193,11 @@ static WCHAR *get_instance_id(DEVICE_OBJECT *device)
 static WCHAR *get_device_id(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = strlenW(ext->device_id);
+    DWORD len = wcslen(ext->device_id);
     WCHAR *dst;
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
-        strcpyW(dst, ext->device_id);
+        wcscpy(dst, ext->device_id);
 
     return dst;
 }
@@ -205,13 +207,13 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
     static const WCHAR device_instance_formatW[] = {'%','s','\\','%','s',0};
     static const WCHAR formatW[] = {'%','s',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    DWORD len = 0, bus_len, device_len, instance_len, compatible_len;
-    WCHAR *dst, *tmp;
+    DWORD pos = 0, len = 0, bus_len, device_len, instance_len, compatible_len;
+    WCHAR *dst;
 
-    bus_len = strlenW(ext->desc.bus_id);
-    device_len = strlenW(ext->device_id);
-    instance_len = strlenW(ext->instance_id);
-    compatible_len = strlenW(ext->compatible_id);
+    bus_len = wcslen(ext->desc.bus_id);
+    device_len = wcslen(ext->device_id);
+    instance_len = wcslen(ext->instance_id);
+    compatible_len = wcslen(ext->compatible_id);
     if (type == BusQueryHardwareIDs) compatible_len = 0;
 
     len += device_len + instance_len + 2;
@@ -219,19 +221,19 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
     len += bus_len + 2;
     if (compatible_len) len += compatible_len + 2;
 
-    if ((dst = tmp = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
+    if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
     {
-        tmp += sprintfW(tmp, device_instance_formatW, ext->device_id, ext->instance_id);
-        *tmp++ = 0;
-        tmp += sprintfW(tmp, formatW, ext->device_id);
-        *tmp++ = 0;
-        tmp += sprintfW(tmp, formatW, ext->desc.bus_id);
-        *tmp++ = 0;
+        pos += swprintf(dst + pos, len - pos, device_instance_formatW, ext->device_id, ext->instance_id);
+        dst[pos++] = 0;
+        pos += swprintf(dst + pos, len - pos, formatW, ext->device_id);
+        dst[pos++] = 0;
+        pos += swprintf(dst + pos, len - pos, formatW, ext->desc.bus_id);
+        dst[pos++] = 0;
 
         if (compatible_len)
         {
-            tmp += sprintfW(tmp, formatW, ext->compatible_id);
-            *tmp++ = 0;
+            pos += swprintf(dst + pos, len - pos, formatW, ext->compatible_id);
+            dst[pos++] = 0;
         }
     }
 
@@ -274,7 +276,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     if (!(pnp_dev = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
-    sprintfW(dev_name, device_name_fmtW, desc->bus_id, pnp_dev);
+    swprintf(dev_name, ARRAY_SIZE(dev_name), device_name_fmtW, desc->bus_id, pnp_dev);
     RtlInitUnicodeString(&nameW, dev_name);
     status = IoCreateDevice(driver_obj, sizeof(struct device_extension), &nameW, 0, 0, FALSE, &device);
     if (status)
@@ -301,15 +303,15 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->product, MAX_PATH);
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.serialnumber, -1, ext->serialnumber, MAX_PATH);
 
-    length = sprintfW(ext->device_id, device_id_formatW, desc->bus_id, desc->vendor_id, desc->product_id);
-    if (desc->interface != (WORD)-1) sprintfW(ext->device_id + length, miW, desc->interface);
+    length = swprintf(ext->device_id, MAX_PATH, device_id_formatW, desc->bus_id, desc->vendor_id, desc->product_id);
+    if (desc->interface != (WORD)-1) swprintf(ext->device_id + length, MAX_PATH - length, miW, desc->interface);
 
-    sprintfW(ext->instance_id, instance_id_formatW, desc->version, ext->serialnumber, desc->location_id, ext->index);
+    swprintf(ext->instance_id, MAX_PATH, instance_id_formatW, desc->version, ext->serialnumber, desc->location_id, ext->index);
 
     if (desc->is_gamepad)
     {
-        length = sprintfW(ext->compatible_id, device_id_formatW, desc->bus_id, 0x045e, 0x0202);
-        sprintfW(ext->compatible_id + length, miW, 0);
+        length = swprintf(ext->compatible_id, MAX_PATH, device_id_formatW, desc->bus_id, 0x045e, 0x0202);
+        swprintf(ext->compatible_id + length, MAX_PATH - length, miW, 0);
     }
 
     InitializeListHead(&ext->irp_queue);
@@ -940,16 +942,16 @@ static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR 
     switch (index)
     {
     case HID_STRING_ID_IMANUFACTURER:
-        if (strlenW(ext->manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
-        else strcpyW(buffer, ext->manufacturer);
+        if (wcslen(ext->manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else wcscpy(buffer, ext->manufacturer);
         return STATUS_SUCCESS;
     case HID_STRING_ID_IPRODUCT:
-        if (strlenW(ext->product) >= length) return STATUS_BUFFER_TOO_SMALL;
-        else strcpyW(buffer, ext->product);
+        if (wcslen(ext->product) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else wcscpy(buffer, ext->product);
         return STATUS_SUCCESS;
     case HID_STRING_ID_ISERIALNUMBER:
-        if (strlenW(ext->serialnumber) >= length) return STATUS_BUFFER_TOO_SMALL;
-        else strcpyW(buffer, ext->serialnumber);
+        if (wcslen(ext->serialnumber) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else wcscpy(buffer, ext->serialnumber);
         return STATUS_SUCCESS;
     }
 
@@ -1049,7 +1051,7 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 
             irp->IoStatus.Status = hid_get_device_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
-                irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
+                irp->IoStatus.Information = (wcslen((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
         }
         case IOCTL_HID_GET_INPUT_REPORT:
