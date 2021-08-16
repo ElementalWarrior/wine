@@ -1049,19 +1049,6 @@ DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
     return default_value;
 }
 
-BOOL is_xbox_gamepad(WORD vid, WORD pid)
-{
-    int i;
-
-    if (vid != VID_MICROSOFT)
-        return FALSE;
-
-    for (i = 0; i < ARRAY_SIZE(XBOX_CONTROLLERS); i++)
-        if (pid == XBOX_CONTROLLERS[i].pid) return TRUE;
-
-    return FALSE;
-}
-
 static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *pdo)
 {
     NTSTATUS ret;

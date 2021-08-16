@@ -1088,6 +1088,7 @@ static void try_add_device(struct udev_device *dev)
     if (!strcmp(subsystem, "input"))
     {
         struct input_id device_id = {0};
+        int axes = 0, buttons = 0;
         char device_uid[255];
 
         if (ioctl(fd, EVIOCGID, &device_id) < 0)
@@ -1102,22 +1103,15 @@ static void try_add_device(struct udev_device *dev)
         device_uid[0] = 0;
         if (ioctl(fd, EVIOCGUNIQ(254), device_uid) >= 0 && device_uid[0])
             serial = strdupAtoW(device_uid);
-    }
-#endif
 
-    if (serial == NULL) serial = strdupAtoW(base_serial);
-
-    if (is_xbox_gamepad(vid, pid))
-        is_gamepad = TRUE;
-#ifdef HAS_PROPER_INPUT_HEADER
-    else
-    {
-        int axes=0, buttons=0;
         axes = count_abs_axis(fd);
         buttons = count_buttons(fd, NULL);
         is_gamepad = (axes == 6  && buttons >= 14);
     }
 #endif
+
+    if (serial == NULL) serial = strdupAtoW(base_serial);
+
     if (input == (WORD)-1 && is_gamepad)
         input = 0;
 
