@@ -12,6 +12,7 @@ AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
 
 libwine_version="1.0"
+wineext_version=0
 
 dnl autoconf versions before 2.63b don't have AS_VAR_APPEND or AS_VAR_IF
 m4_ifdef([AS_VAR_APPEND],,[as_fn_append () { eval $[1]=\$$[1]\$[2]; }
@@ -114,6 +115,7 @@ AC_ARG_WITH(xslt,      AS_HELP_STRING([--without-xslt],[do not use XSLT]))
 AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree video mode extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; ac_cv_header_X11_extensions_xf86vmproto_h=no; fi])
 
+AC_ARG_WITH(wine-ext,  AS_HELP_STRING([--with-wine-ext=DIR],[use Wine external dependencies from directory DIR]))
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
 AC_ARG_WITH(wine64,    AS_HELP_STRING([--with-wine64=DIR],[use the 64-bit Wine in DIR for a Wow64 build]))
 
@@ -251,6 +253,25 @@ case $host_cpu in
   *arm*)            AC_SUBST(ARCH,"arm") ;;
   *)                AC_SUBST(ARCH,"") ;;
 esac
+
+AC_CACHE_CHECK([for the directory containing Wine external dependencies], wine_cv_extdir,
+  [wine_cv_extdir="$with_wine_ext"
+   if test -z "$with_wine_ext"; then
+     WINE_WARNING([Wine external dependencies not found, some modules will not be built.])
+   elif ! test -f "$with_wine_ext/VERSION"; then
+     AC_MSG_ERROR([could not find Wine external dependencies in $wine_cv_extdir])
+     wine_cv_extdir=""
+   fi])
+if test -f "$wine_cv_extdir/VERSION"; then
+  extdir_version=`cat $wine_cv_extdir/VERSION`
+fi
+if test "${extdir_version:-0}" -ne $wineext_version; then
+ AC_MSG_ERROR([incompatible version $extdir_version of Wine external dependencies, version $wineext_version required.])
+ wine_cv_extdir=""
+fi
+if test -n "$wine_cv_extdir"; then
+  AC_SUBST(EXTSRCDIR,$wine_cv_extdir)
+fi
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
   [wine_cv_toolsdir="$with_wine_tools"
