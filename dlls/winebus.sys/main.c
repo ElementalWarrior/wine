@@ -257,7 +257,6 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     static const WCHAR instance_id_formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
     static const WCHAR zero_serialW[]= {'0','0','0','0',0};
     static const WCHAR miW[] = {'&','M','I','_','%','0','2','i',0};
-    static const WCHAR igW[] = {'&','I','G','_','%','0','2','i',0};
     struct device_extension *ext;
     struct pnp_device *pnp_dev;
     DEVICE_OBJECT *device;
@@ -302,7 +301,7 @@ DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
     ext->buffer_size        = 0;
 
     length = sprintfW(ext->device_id, device_id_formatW, busidW, vid, pid);
-    if (input != (WORD)-1) sprintfW(ext->device_id + length, is_gamepad ? igW : miW, input);
+    if (input != (WORD)-1) sprintfW(ext->device_id + length, miW, input);
 
     sprintfW(ext->instance_id, instance_id_formatW, version,
              serialW ? serialW : zero_serialW, uid, ext->index);

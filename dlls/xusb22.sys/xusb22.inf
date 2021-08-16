@@ -1,0 +1,35 @@
+[Version]
+Signature="$CHICAGO$"
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Class=System
+
+[Manufacturer]
+Wine=mfg_section
+
+[mfg_section]
+Wine internal XUSB22 device=device_section,XUSB22
+Xbox Controller=device_section,*VID_045e&PID_0202&MI_00
+Xbox Controller S=device_section,*VID_045e&PID_0285&MI_00
+Xbox Controller S=device_section,*VID_045e&PID_0289&MI_00
+Xbox360 Controller=device_section,*VID_045e&PID_028e&MI_00
+Xbox360 Wireless Controller=device_section,*VID_045e&PID_028f&MI_00
+Xbox One Controller=device_section,*VID_045e&PID_02d1&MI_00
+Xbox One Controller (Covert Forces/Firmware 2015)=device_section,*VID_045e&PID_02dd&MI_00
+Xbox One X Controller=device_section,*VID_045e&PID_02e0&MI_00
+Xbox One Elite Controller=device_section,*VID_045e&PID_02e3&MI_00
+Wireless XBox Controller Dongle=device_section,*VID_045e&PID_02e6&MI_00
+Xbox One S Controller=device_section,*VID_045e&PID_02ea&MI_00
+Xbox One S Controller (Firmware 2017)=device_section,*VID_045e&PID_02fd&MI_00
+Xbox 360 Wireless Adapter=device_section,*VID_045e&PID_0719&MI_00
+
+[device_section.Services]
+AddService = xusb22,0x2,svc_section
+
+[svc_section]
+Description="Wine XInput filter driver"
+DisplayName="Wine XInput"
+ServiceBinary="%12%\xusb22.sys"
+LoadOrderGroup="WinePlugPlay"
+ServiceType=1
+StartType=3
+ErrorControl=1
