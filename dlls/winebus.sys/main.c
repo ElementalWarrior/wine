@@ -194,13 +194,28 @@ static WCHAR *get_device_id(DEVICE_OBJECT *device)
 
 static WCHAR *get_compatible_ids(DEVICE_OBJECT *device)
 {
+    static const WCHAR device_instance_formatW[] = {'%','s','\\','%','s',0};
+    static const WCHAR formatW[] = {'%','s',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    WCHAR *dst;
+    DWORD len = 0, bus_len, device_len, instance_len;
+    WCHAR *dst, *tmp;
 
-    if ((dst = ExAllocatePool(PagedPool, (strlenW(ext->busid) + 2) * sizeof(WCHAR))))
+    bus_len = strlenW(ext->busid);
+    device_len = strlenW(ext->device_id);
+    instance_len = strlenW(ext->instance_id);
+
+    len += device_len + instance_len + 2;
+    len += device_len + 2;
+    len += bus_len + 2;
+
+    if ((dst = tmp = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
     {
-        strcpyW(dst, ext->busid);
-        dst[strlenW(dst) + 1] = 0;
+        tmp += sprintfW(tmp, device_instance_formatW, ext->device_id, ext->instance_id);
+        *tmp++ = 0;
+        tmp += sprintfW(tmp, formatW, ext->device_id);
+        *tmp++ = 0;
+        tmp += sprintfW(tmp, formatW, ext->busid);
+        *tmp++ = 0;
     }
 
     return dst;
