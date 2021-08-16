@@ -530,9 +530,6 @@ static NTSTATUS sdl_device_get_string(struct unix_device *iface, DWORD index, WC
             else
                 str = pSDL_JoystickName(ext->sdl_joystick);
             break;
-        case HID_STRING_ID_IMANUFACTURER:
-            str = "SDL";
-            break;
         case HID_STRING_ID_ISERIALNUMBER:
             str = "000000";
             break;
@@ -746,6 +743,7 @@ static void sdl_add_device(unsigned int index)
         .location_id = 0,
         .serial = {'0','0','0','0',0},
         .is_gamepad = FALSE,
+        .manufacturer = {"SDL"},
     };
     struct platform_private *private;
     char guid_str[34];

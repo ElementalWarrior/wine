@@ -97,6 +97,7 @@ struct device_extension
     struct device_desc desc;
     DWORD index;
 
+    WCHAR manufacturer[MAX_PATH];
     WCHAR device_id[MAX_PATH];
     WCHAR instance_id[MAX_PATH];
     WCHAR compatible_id[MAX_PATH];
@@ -311,6 +312,8 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     ext->last_report_read   = TRUE;
     ext->buffer_size        = 0;
     ext->unix_device        = unix_device;
+
+    MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.manufacturer, -1, ext->manufacturer, MAX_PATH);
 
     length = sprintfW(ext->device_id, device_id_formatW, desc->bus_id, desc->vendor_id, desc->product_id);
     if (desc->interface != (WORD)-1) sprintfW(ext->device_id + length, miW, desc->interface);
@@ -812,6 +815,21 @@ static NTSTATUS deliver_last_report(struct device_extension *ext, DWORD buffer_l
     }
 }
 
+static NTSTATUS hid_get_device_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
+{
+    struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
+
+    switch (index)
+    {
+    case HID_STRING_ID_IMANUFACTURER:
+        if (strlenW(ext->manufacturer) >= length) return STATUS_BUFFER_TOO_SMALL;
+        else strcpyW(buffer, ext->manufacturer);
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
@@ -903,7 +921,9 @@ static NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp)
             DWORD index = (ULONG_PTR)irpsp->Parameters.DeviceIoControl.Type3InputBuffer;
             TRACE("IOCTL_HID_GET_STRING[%08x]\n", index);
 
-            irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+            irp->IoStatus.Status = hid_get_device_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
+            if (irp->IoStatus.Status != STATUS_SUCCESS)
+                irp->IoStatus.Status = unix_device_get_string(device, index, (WCHAR *)irp->UserBuffer, buffer_len / sizeof(WCHAR));
             if (irp->IoStatus.Status == STATUS_SUCCESS)
                 irp->IoStatus.Information = (strlenW((WCHAR *)irp->UserBuffer) + 1) * sizeof(WCHAR);
             break;
