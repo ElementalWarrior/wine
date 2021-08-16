@@ -102,6 +102,7 @@ struct device_extension
     WCHAR manufacturer[MAX_PATH];
     WCHAR product[MAX_PATH];
     WCHAR serialnumber[MAX_PATH];
+    const WCHAR *bus_id;
     WCHAR device_id[MAX_PATH];
     WCHAR instance_id[MAX_PATH];
     WCHAR compatible_id[MAX_PATH];
@@ -210,7 +211,7 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
     DWORD pos = 0, len = 0, bus_len, device_len, instance_len, compatible_len;
     WCHAR *dst;
 
-    bus_len = wcslen(ext->desc.bus_id);
+    bus_len = wcslen(ext->bus_id);
     device_len = wcslen(ext->device_id);
     instance_len = wcslen(ext->instance_id);
     compatible_len = wcslen(ext->compatible_id);
@@ -227,7 +228,7 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
         dst[pos++] = 0;
         pos += swprintf(dst + pos, len - pos, formatW, ext->device_id);
         dst[pos++] = 0;
-        pos += swprintf(dst + pos, len - pos, formatW, ext->desc.bus_id);
+        pos += swprintf(dst + pos, len - pos, formatW, ext->bus_id);
         dst[pos++] = 0;
 
         if (compatible_len)
@@ -254,7 +255,8 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
     }
 }
 
-static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct unix_device *unix_device)
+static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_desc *desc,
+                                            struct unix_device *unix_device)
 {
     static const WCHAR device_id_formatW[] =
     {
@@ -271,12 +273,12 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     NTSTATUS status;
     ULONG length;
 
-    TRACE("desc %s, unix_device %p\n", debugstr_device_desc(desc), unix_device);
+    TRACE("bus_id %s, desc %s, unix_device %p\n", debugstr_w(bus_id), debugstr_device_desc(desc), unix_device);
 
     if (!(pnp_dev = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
-    swprintf(dev_name, ARRAY_SIZE(dev_name), device_name_fmtW, desc->bus_id, pnp_dev);
+    swprintf(dev_name, ARRAY_SIZE(dev_name), device_name_fmtW, bus_id, pnp_dev);
     RtlInitUnicodeString(&nameW, dev_name);
     status = IoCreateDevice(driver_obj, sizeof(struct device_extension), &nameW, 0, 0, FALSE, &device);
     if (status)
@@ -291,6 +293,7 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     /* fill out device_extension struct */
     ext = (struct device_extension *)device->DeviceExtension;
     ext->pnp_device         = pnp_dev;
+    ext->bus_id             = bus_id;
     ext->desc               = *desc;
     ext->index              = get_device_index(desc);
     ext->last_report        = NULL;
@@ -303,14 +306,14 @@ static DEVICE_OBJECT *bus_create_hid_device(struct device_desc *desc, struct uni
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->product, MAX_PATH);
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.serialnumber, -1, ext->serialnumber, MAX_PATH);
 
-    length = swprintf(ext->device_id, MAX_PATH, device_id_formatW, desc->bus_id, desc->vendor_id, desc->product_id);
+    length = swprintf(ext->device_id, MAX_PATH, device_id_formatW, bus_id, desc->vendor_id, desc->product_id);
     if (desc->interface != (WORD)-1) swprintf(ext->device_id + length, MAX_PATH - length, miW, desc->interface);
 
     swprintf(ext->instance_id, MAX_PATH, instance_id_formatW, desc->version, ext->serialnumber, desc->location_id, ext->index);
 
     if (desc->is_gamepad)
     {
-        length = swprintf(ext->compatible_id, MAX_PATH, device_id_formatW, desc->bus_id, 0x045e, 0x0202);
+        length = swprintf(ext->compatible_id, MAX_PATH, device_id_formatW, bus_id, 0x045e, 0x0202);
         swprintf(ext->compatible_id + length, MAX_PATH - length, miW, 0);
     }
 
@@ -529,7 +532,7 @@ static void mouse_device_create(void)
     struct device_desc desc;
 
     if (unix_funcs->mouse_device_create(&device, &desc)) return;
-    mouse_obj = bus_create_hid_device(&desc, device);
+    mouse_obj = bus_create_hid_device(L"WINEMOUSE", &desc, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -539,7 +542,7 @@ static void keyboard_device_create(void)
     struct device_desc desc;
 
     if (unix_funcs->keyboard_device_create(&device, &desc)) return;
-    keyboard_obj = bus_create_hid_device(&desc, device);
+    keyboard_obj = bus_create_hid_device(L"WINEKEYBOARD", &desc, device);
     IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 }
 
@@ -585,7 +588,7 @@ static DWORD CALLBACK bus_main_thread(void *args)
             }
             break;
         case BUS_EVENT_TYPE_DEVICE_CREATED:
-            device = bus_create_hid_device(&event->device_created.desc, event->device);
+            device = bus_create_hid_device(bus.name, &event->device_created.desc, event->device);
             if (device) IoInvalidateDeviceRelations(bus_pdo, BusRelations);
             else
             {
@@ -687,13 +690,12 @@ done:
 
 static NTSTATUS sdl_driver_init(void)
 {
-    static const WCHAR sdl_bus_name[] = {'S','D','L',0};
     static const WCHAR controller_modeW[] = {'M','a','p',' ','C','o','n','t','r','o','l','l','e','r','s',0};
     static const UNICODE_STRING controller_mode = {sizeof(controller_modeW) - sizeof(WCHAR), sizeof(controller_modeW), (WCHAR*)controller_modeW};
     struct sdl_bus_options sdl_params;
     struct bus_main_params params =
     {
-        .name = sdl_bus_name,
+        .name = L"SDL",
         .bus_init = unix_funcs->sdl_bus_init,
         .bus_wait = unix_funcs->sdl_bus_wait,
         .bus_params = &sdl_params,
@@ -728,7 +730,6 @@ static NTSTATUS sdl_driver_init(void)
 
 static NTSTATUS udev_driver_init(void)
 {
-    static const WCHAR udev_bus_name[] = {'U','D','E','V',0};
     static const WCHAR hidraw_disabledW[] = {'D','i','s','a','b','l','e','H','i','d','r','a','w',0};
     static const UNICODE_STRING hidraw_disabled = {sizeof(hidraw_disabledW) - sizeof(WCHAR), sizeof(hidraw_disabledW), (WCHAR*)hidraw_disabledW};
     static const WCHAR input_disabledW[] = {'D','i','s','a','b','l','e','I','n','p','u','t',0};
@@ -736,7 +737,7 @@ static NTSTATUS udev_driver_init(void)
     struct udev_bus_options udev_params;
     struct bus_main_params params =
     {
-        .name = udev_bus_name,
+        .name = L"UDEV",
         .bus_init = unix_funcs->udev_bus_init,
         .bus_wait = unix_funcs->udev_bus_wait,
         .bus_params = &udev_params,
@@ -770,11 +771,10 @@ static NTSTATUS udev_driver_init(void)
 
 static NTSTATUS iohid_driver_init(void)
 {
-    static const WCHAR iohid_bus_name[] = {'I','O','H','I','D',0};
     struct iohid_bus_options iohid_params;
     struct bus_main_params params =
     {
-        .name = iohid_bus_name,
+        .name = L"IOHID",
         .bus_init = unix_funcs->iohid_bus_init,
         .bus_wait = unix_funcs->iohid_bus_wait,
         .bus_params = &iohid_params,

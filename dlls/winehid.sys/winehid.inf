@@ -9,10 +9,9 @@ Wine=mfg_section
 [mfg_section]
 Wine internal XInput device=device_section,WINEXINPUT
 Wine XInput HID device=device_section,XINPUT
-Wine hidraw device=device_section,HIDRAW
 Wine IOHID device=device_section,IOHID
-Wine libevent device=device_section,LNXEV
-Wine SDL HID device=device_section,SDLJOY
+Wine UDEV HID device=device_section,UDEV
+Wine SDL HID device=device_section,SDL
 Wine mouse device=device_section,WINEMOUSE
 Wine keyboard device=device_section,WINEKEYBOARD
 

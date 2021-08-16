@@ -103,10 +103,8 @@ static const struct unix_device_vtbl mouse_vtbl =
     mouse_set_feature_report,
 };
 
-static const WCHAR mouse_bus_id[] = {'W','I','N','E','M','O','U','S','E',0};
 static const struct device_desc mouse_device_desc =
 {
-    .bus_id = mouse_bus_id,
     .vendor_id = 0,
     .product_id = 0,
     .version = 0,
@@ -189,10 +187,8 @@ static const struct unix_device_vtbl keyboard_vtbl =
     keyboard_set_feature_report,
 };
 
-static const WCHAR keyboard_bus_id[] = {'W','I','N','E','K','E','Y','B','O','A','R','D',0};
 static const struct device_desc keyboard_device_desc =
 {
-    .bus_id = keyboard_bus_id,
     .vendor_id = 0,
     .product_id = 0,
     .version = 0,

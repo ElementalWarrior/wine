@@ -109,9 +109,6 @@ static int deviceloop_control[2];
 static struct list event_queue = LIST_INIT(event_queue);
 static struct list device_list = LIST_INIT(device_list);
 
-static const WCHAR hidraw_busidW[] = {'H','I','D','R','A','W',0};
-static const WCHAR lnxev_busidW[] = {'L','N','X','E','V',0};
-
 struct platform_private
 {
     struct unix_device unix_device;
@@ -964,7 +961,6 @@ static void udev_add_device(struct udev_device *dev)
 {
     struct device_desc desc =
     {
-        .bus_id = NULL,
         .vendor_id = 0,
         .product_id = 0,
         .version = 0,
@@ -1051,7 +1047,6 @@ static void udev_add_device(struct udev_device *dev)
 
     if (strcmp(subsystem, "hidraw") == 0)
     {
-        desc.bus_id = hidraw_busidW;
         if (!(private = unix_device_create(&hidraw_device_vtbl, sizeof(struct platform_private)))) return;
         list_add_tail(&device_list, &private->unix_device.entry);
         private->read_report = hidraw_device_read_report;
@@ -1063,7 +1058,6 @@ static void udev_add_device(struct udev_device *dev)
 #ifdef HAS_PROPER_INPUT_HEADER
     else if (strcmp(subsystem, "input") == 0)
     {
-        desc.bus_id = lnxev_busidW;
         if (!(private = unix_device_create(&lnxev_device_vtbl, sizeof(struct wine_input_private)))) return;
         list_add_tail(&device_list, &private->unix_device.entry);
         private->read_report = lnxev_device_read_report;

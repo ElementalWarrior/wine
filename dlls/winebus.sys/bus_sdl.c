@@ -75,8 +75,6 @@ static CRITICAL_SECTION_DEBUG sdl_cs_debug =
 };
 static CRITICAL_SECTION sdl_cs = { &sdl_cs_debug, -1, 0, 0, 0, 0 };
 
-static const WCHAR sdl_busidW[] = {'S','D','L','J','O','Y',0};
-
 static void *sdl_handle = NULL;
 static UINT quit_event = -1;
 static struct list event_queue = LIST_INIT(event_queue);
@@ -724,7 +722,6 @@ static void sdl_add_device(unsigned int index)
 {
     struct device_desc desc =
     {
-        .bus_id = sdl_busidW,
         .vendor_id = 0,
         .product_id = 0,
         .version = 0,

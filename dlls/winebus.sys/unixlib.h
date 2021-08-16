@@ -32,7 +32,6 @@
 
 struct device_desc
 {
-    const WCHAR *bus_id;
     DWORD vendor_id;
     DWORD product_id;
     DWORD version;
@@ -122,9 +121,8 @@ struct unix_funcs
 static inline const char *debugstr_device_desc(struct device_desc *desc)
 {
     if (!desc) return "(null)";
-    return wine_dbg_sprintf("{bus %s, vid %04x, pid %04x, rev %04x, interface %d, location_id %08x, is_gamepad %u}",
-                            debugstr_w(desc->bus_id), desc->vendor_id, desc->product_id, desc->version,
-                            desc->interface, desc->location_id, desc->is_gamepad);
+    return wine_dbg_sprintf("{vid %04x, pid %04x, rev %04x, interface %d, location_id %08x, is_gamepad %u}",
+                            desc->vendor_id, desc->product_id, desc->version, desc->interface, desc->location_id, desc->is_gamepad);
 }
 
 #endif /* __WINEBUS_UNIXLIB_H */

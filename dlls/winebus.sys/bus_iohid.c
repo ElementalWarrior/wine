@@ -116,8 +116,6 @@ static CFRunLoopRef run_loop;
 static struct list event_queue = LIST_INIT(event_queue);
 static struct list device_list = LIST_INIT(device_list);
 
-static const WCHAR busidW[] = {'I','O','H','I','D',0};
-
 struct platform_private
 {
     struct unix_device unix_device;
@@ -282,7 +280,6 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 {
     struct device_desc desc =
     {
-        .bus_id = busidW,
         .vendor_id = 0,
         .product_id = 0,
         .version = 0,
