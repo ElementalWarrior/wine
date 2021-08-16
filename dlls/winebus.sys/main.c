@@ -205,8 +205,6 @@ static WCHAR *get_device_id(DEVICE_OBJECT *device)
 
 static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
 {
-    static const WCHAR device_instance_formatW[] = {'%','s','\\','%','s',0};
-    static const WCHAR formatW[] = {'%','s',0};
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     DWORD pos = 0, len = 0, bus_len, device_len, instance_len, compatible_len;
     WCHAR *dst;
@@ -224,16 +222,16 @@ static WCHAR *get_compatible_ids(DEVICE_OBJECT *device, DWORD type)
 
     if ((dst = ExAllocatePool(PagedPool, len * sizeof(WCHAR))))
     {
-        pos += swprintf(dst + pos, len - pos, device_instance_formatW, ext->device_id, ext->instance_id);
+        pos += swprintf(dst + pos, len - pos, L"%s\\%s", ext->device_id, ext->instance_id);
         dst[pos++] = 0;
-        pos += swprintf(dst + pos, len - pos, formatW, ext->device_id);
+        pos += swprintf(dst + pos, len - pos, L"%s", ext->device_id);
         dst[pos++] = 0;
-        pos += swprintf(dst + pos, len - pos, formatW, ext->bus_id);
+        pos += swprintf(dst + pos, len - pos, L"%s", ext->bus_id);
         dst[pos++] = 0;
 
         if (compatible_len)
         {
-            pos += swprintf(dst + pos, len - pos, formatW, ext->compatible_id);
+            pos += swprintf(dst + pos, len - pos, L"%s", ext->compatible_id);
             dst[pos++] = 0;
         }
     }
@@ -258,13 +256,6 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
 static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_desc *desc,
                                             struct unix_device *unix_device)
 {
-    static const WCHAR device_id_formatW[] =
-    {
-        '%','s','\\','v','i','d','_','%','0','4','x','&','p','i','d','_','%','0','4','x',0
-    };
-    static const WCHAR device_name_fmtW[] = {'\\','D','e','v','i','c','e','\\','%','s','#','%','p',0};
-    static const WCHAR instance_id_formatW[] =  {'%','i','&','%','s','&','%','x','&','%','i',0};
-    static const WCHAR miW[] = {'&','M','I','_','%','0','2','i',0};
     struct device_extension *ext;
     struct pnp_device *pnp_dev;
     DEVICE_OBJECT *device;
@@ -278,7 +269,7 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_d
     if (!(pnp_dev = RtlAllocateHeap(GetProcessHeap(), 0, sizeof(*pnp_dev))))
         return NULL;
 
-    swprintf(dev_name, ARRAY_SIZE(dev_name), device_name_fmtW, bus_id, pnp_dev);
+    swprintf(dev_name, ARRAY_SIZE(dev_name), L"\\Device\\%s#%p", bus_id, pnp_dev);
     RtlInitUnicodeString(&nameW, dev_name);
     status = IoCreateDevice(driver_obj, sizeof(struct device_extension), &nameW, 0, 0, FALSE, &device);
     if (status)
@@ -306,15 +297,15 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_id, struct device_d
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.product, -1, ext->product, MAX_PATH);
     MultiByteToWideChar(CP_UNIXCP, 0, ext->desc.serialnumber, -1, ext->serialnumber, MAX_PATH);
 
-    length = swprintf(ext->device_id, MAX_PATH, device_id_formatW, bus_id, desc->vendor_id, desc->product_id);
-    if (desc->interface != (WORD)-1) swprintf(ext->device_id + length, MAX_PATH - length, miW, desc->interface);
+    length = swprintf(ext->device_id, MAX_PATH, L"%s\\vid_%04x&pid_%04x", bus_id, desc->vendor_id, desc->product_id);
+    if (desc->interface != (WORD)-1) swprintf(ext->device_id + length, MAX_PATH - length, L"&MI_%02i", desc->interface);
 
-    swprintf(ext->instance_id, MAX_PATH, instance_id_formatW, desc->version, ext->serialnumber, desc->location_id, ext->index);
+    swprintf(ext->instance_id, MAX_PATH, L"%i&%s&%x&%i", desc->version, ext->serialnumber, desc->location_id, ext->index);
 
     if (desc->is_gamepad)
     {
-        length = swprintf(ext->compatible_id, MAX_PATH, device_id_formatW, bus_id, 0x045e, 0x0202);
-        swprintf(ext->compatible_id + length, MAX_PATH - length, miW, 0);
+        length = swprintf(ext->compatible_id, MAX_PATH, L"%s\\vid_%04x&pid_%04x", bus_id, 0x045e, 0x0202);
+        swprintf(ext->compatible_id + length, MAX_PATH - length, L"&MI_%02i", 0);
     }
 
     InitializeListHead(&ext->irp_queue);
@@ -452,13 +443,16 @@ static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
     return STATUS_SUCCESS;
 }
 
-static DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value)
+static DWORD check_bus_option(const WCHAR *option, DWORD default_value)
 {
     char buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[sizeof(DWORD)])];
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    UNICODE_STRING str;
     DWORD size;
 
-    if (NtQueryValueKey(driver_key, option, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
+    RtlInitUnicodeString(&str, option);
+
+    if (NtQueryValueKey(driver_key, &str, KeyValuePartialInformation, info, sizeof(buffer), &size) == STATUS_SUCCESS)
     {
         if (info->Type == REG_DWORD) return *(DWORD *)info->Data;
     }
@@ -621,8 +615,6 @@ static void sdl_bus_free_mappings(struct sdl_bus_options *options)
 
 static void sdl_bus_load_mappings(struct sdl_bus_options *options)
 {
-    static const WCHAR szPath[] = {'m','a','p',0};
-
     ULONG idx = 0, len, count = 0, capacity, info_size, info_max_size;
     KEY_VALUE_FULL_INFORMATION *info;
     OBJECT_ATTRIBUTES attr = {0};
@@ -634,7 +626,7 @@ static void sdl_bus_load_mappings(struct sdl_bus_options *options)
     options->mappings_count = 0;
     options->mappings = NULL;
 
-    RtlInitUnicodeString(&path, szPath);
+    RtlInitUnicodeString(&path, L"map");
     InitializeObjectAttributes(&attr, &path, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, driver_key, NULL);
     status = NtOpenKey(&key, KEY_ALL_ACCESS, &attr);
     if (status) return;
@@ -690,8 +682,6 @@ done:
 
 static NTSTATUS sdl_driver_init(void)
 {
-    static const WCHAR controller_modeW[] = {'M','a','p',' ','C','o','n','t','r','o','l','l','e','r','s',0};
-    static const UNICODE_STRING controller_mode = {sizeof(controller_modeW) - sizeof(WCHAR), sizeof(controller_modeW), (WCHAR*)controller_modeW};
     struct sdl_bus_options sdl_params;
     struct bus_main_params params =
     {
@@ -709,7 +699,7 @@ static NTSTATUS sdl_driver_init(void)
         return STATUS_UNSUCCESSFUL;
     }
 
-    sdl_params.map_controllers = check_bus_option(&controller_mode, 1);
+    sdl_params.map_controllers = check_bus_option(L"Map Controllers", 1);
     if (!sdl_params.map_controllers) TRACE("SDL controller to XInput HID gamepad mapping disabled\n");
     sdl_bus_load_mappings(&sdl_params);
 
@@ -730,10 +720,6 @@ static NTSTATUS sdl_driver_init(void)
 
 static NTSTATUS udev_driver_init(void)
 {
-    static const WCHAR hidraw_disabledW[] = {'D','i','s','a','b','l','e','H','i','d','r','a','w',0};
-    static const UNICODE_STRING hidraw_disabled = {sizeof(hidraw_disabledW) - sizeof(WCHAR), sizeof(hidraw_disabledW), (WCHAR*)hidraw_disabledW};
-    static const WCHAR input_disabledW[] = {'D','i','s','a','b','l','e','I','n','p','u','t',0};
-    static const UNICODE_STRING input_disabled = {sizeof(input_disabledW) - sizeof(WCHAR), sizeof(input_disabledW), (WCHAR*)input_disabledW};
     struct udev_bus_options udev_params;
     struct bus_main_params params =
     {
@@ -751,9 +737,9 @@ static NTSTATUS udev_driver_init(void)
         return STATUS_UNSUCCESSFUL;
     }
 
-    udev_params.disable_hidraw = check_bus_option(&hidraw_disabled, 0);
+    udev_params.disable_hidraw = check_bus_option(L"DisableHidraw", 0);
     if (udev_params.disable_hidraw) TRACE("UDEV hidraw devices disabled in registry\n");
-    udev_params.disable_input = check_bus_option(&input_disabled, 0);
+    udev_params.disable_input = check_bus_option(L"DisableInput", 0);
     if (udev_params.disable_input) TRACE("UDEV input devices disabled in registry\n");
 
     if (!(bus_thread[i] = CreateThread(NULL, 0, bus_main_thread, &params, 0, NULL)))
@@ -803,8 +789,6 @@ static NTSTATUS iohid_driver_init(void)
 
 static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
 {
-    static const WCHAR SDL_enabledW[] = {'E','n','a','b','l','e',' ','S','D','L',0};
-    static const UNICODE_STRING SDL_enabled = {sizeof(SDL_enabledW) - sizeof(WCHAR), sizeof(SDL_enabledW), (WCHAR*)SDL_enabledW};
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation(irp);
     NTSTATUS ret;
 
@@ -819,7 +803,7 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
         mouse_device_create();
         keyboard_device_create();
 
-        if (!check_bus_option(&SDL_enabled, 1) || sdl_driver_init())
+        if (!check_bus_option(L"Enable SDL", 1) || sdl_driver_init())
         {
             udev_driver_init();
             iohid_driver_init();
