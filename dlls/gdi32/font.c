@@ -2955,6 +2955,26 @@ static UINT get_font_type( const NEWTEXTMETRICEXW *ntm )
     return ret;
 }
 
+static BOOL load_font( struct gdi_font *font )
+{
+    SIZE_T font_data_size;
+    void *font_data;
+
+    if (!font_funcs->map_font( font, &font_data, &font_data_size ))
+    {
+        free_gdi_font( font );
+        return FALSE;
+    }
+
+    if (!font_funcs->load_font( font, font_data, font_data_size ))
+    {
+        free_gdi_font( font );
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 static BOOL get_face_enum_data( struct gdi_font_face *face, ENUMLOGFONTEXW *elf, NEWTEXTMETRICEXW *ntm )
 {
     struct gdi_font *font;
@@ -2964,7 +2984,7 @@ static BOOL get_face_enum_data( struct gdi_font_face *face, ENUMLOGFONTEXW *elf,
 
     if (!(font = create_gdi_font( face, NULL, &lf ))) return FALSE;
 
-    if (!font_funcs->load_font( font ))
+    if (!load_font( font ))
     {
         free_gdi_font( font );
         return FALSE;
@@ -2977,7 +2997,7 @@ static BOOL get_face_enum_data( struct gdi_font_face *face, ENUMLOGFONTEXW *elf,
         free_gdi_font( font );
 
         if (!(font = create_gdi_font( face, NULL, &lf ))) return FALSE;
-        if (!font_funcs->load_font( font ))
+        if (!load_font( font ))
         {
             free_gdi_font( font );
             return FALSE;
@@ -3237,7 +3257,7 @@ static UINT get_glyph_index_linked( struct gdi_font **font, UINT glyph )
 
     LIST_FOR_EACH_ENTRY( child, &(*font)->child_fonts, struct gdi_font, entry )
     {
-        if (!child->private && !font_funcs->load_font( child )) continue;
+        if (!child->private && !load_font( child )) continue;
         if ((res = get_glyph_index( child, glyph )))
         {
             *font = child;
@@ -3985,7 +4005,7 @@ static struct gdi_font *select_font( LOGFONTW *lf, FMAT2 dcmat, BOOL can_use_bit
         TRACE("font scale y: %d\n", font->scale_y);
     }
 
-    if (!font_funcs->load_font( font ))
+    if (!load_font( font ))
     {
         free_gdi_font( font );
         return NULL;
@@ -7047,7 +7067,7 @@ BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, LPCWSTR resource_file,
 
     if (!(font = alloc_gdi_font( path, NULL, 0 ))) goto done;
     font->lf.lfHeight = 100;
-    if (!font_funcs->load_font( font )) goto done;
+    if (!load_font( font )) goto done;
     if (!font_funcs->set_outline_text_metrics( font )) goto done;
 
     if (!(font->otm.otmTextMetrics.tmPitchAndFamily & TMPF_TRUETYPE)) goto done;
