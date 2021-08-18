@@ -1,11 +1,12 @@
 MODULE    = cabinet.dll
 IMPORTLIB = cabinet
+IMPORTS   = winezlib
+EXTRAINCL = -I$(EXTSRCDIR)/zlib
 
 EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	cabinet_main.c \
-	deflate.c \
 	fci.c \
 	fdi.c
 
