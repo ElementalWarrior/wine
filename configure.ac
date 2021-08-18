@@ -275,6 +275,18 @@ else
   AC_SUBST(EXTSRCDIR,$wine_cv_extdir)
 fi
 
+if test "x$enable_winefaudio" = "xno"
+then
+  enable_x3daudio1_0=${enable_x3daudio1_0:-no}
+  enable_x3daudio1_1=${enable_x3daudio1_1:-no}
+  enable_x3daudio1_2=${enable_x3daudio1_2:-no}
+  enable_x3daudio1_3=${enable_x3daudio1_3:-no}
+  enable_x3daudio1_4=${enable_x3daudio1_4:-no}
+  enable_x3daudio1_5=${enable_x3daudio1_5:-no}
+  enable_x3daudio1_6=${enable_x3daudio1_6:-no}
+  enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+fi
+
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
   [wine_cv_toolsdir="$with_wine_tools"
    if test -z "$with_wine_tools"; then
@@ -1743,7 +1755,6 @@ then
         [AC_CHECK_HEADERS([FAudio.h],
             [WINE_CHECK_SONAME(FAudio,FAudioCreate,,,[$FAUDIO_LIBS],[[libFAudio*]])])
              WINE_CHECK_LIB_FUNCS([FAudio_CommitOperationSet \
-                                   F3DAudioInitialize8 \
                                    FAudioLinkedVersion \
                                    FAudioCreateReverb9WithCustomAllocatorEXT], [$FAUDIO_LIBS])
             ])
@@ -1931,14 +1942,6 @@ WINE_NOTICE_WITH(openal,[test "x$ac_cv_lib_openal" != xyes],
 
 if test "x$ac_cv_lib_soname_FAudio" = "x"
 then
-    enable_x3daudio1_0=${enable_x3daudio1_0:-no}
-    enable_x3daudio1_1=${enable_x3daudio1_1:-no}
-    enable_x3daudio1_2=${enable_x3daudio1_2:-no}
-    enable_x3daudio1_3=${enable_x3daudio1_3:-no}
-    enable_x3daudio1_4=${enable_x3daudio1_4:-no}
-    enable_x3daudio1_5=${enable_x3daudio1_5:-no}
-    enable_x3daudio1_6=${enable_x3daudio1_6:-no}
-    enable_x3daudio1_7=${enable_x3daudio1_7:-no}
     enable_xactengine2_0=${enable_xactengine2_0:-no}
     enable_xactengine2_4=${enable_xactengine2_4:-no}
     enable_xactengine2_7=${enable_xactengine2_7:-no}
