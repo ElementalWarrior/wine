@@ -1,7 +1,7 @@
 MODULE    = libwinefreetype.a
 PARENTSRC = $(EXTSRCDIR)/freetype2
-EXTRAINCL = -I$(EXTSRCDIR)/freetype2/include -I$(EXTSRCDIR)/freetype2/include/freetype -I$(EXTSRCDIR)/zlib -I$(EXTSRCDIR)/libpng
-EXTRADEFS = -D_UCRT -DFT2_BUILD_LIBRARY=1 -DFT_CONFIG_OPTION_SYSTEM_ZLIB=1 -DFT_CONFIG_OPTION_USE_PNG=1
+EXTRAINCL = -I$(EXTSRCDIR)/freetype2/include -I$(EXTSRCDIR)/freetype2/include/freetype -I$(EXTSRCDIR)/zlib -I$(EXTSRCDIR)/libpng -I$(EXTSRCDIR)/brotli/c/include
+EXTRADEFS = -D_UCRT -DFT2_BUILD_LIBRARY=1 -DFT_CONFIG_OPTION_SYSTEM_ZLIB=1 -DFT_CONFIG_OPTION_USE_PNG=1 -DFT_CONFIG_OPTION_USE_BROTLI=1
 
 C_SRCS = \
 	builds/windows/ftdebug.c \
