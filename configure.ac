@@ -12,7 +12,7 @@ AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
 
 libwine_version="1.0"
-wineext_version=3
+wineext_version=4
 
 dnl autoconf versions before 2.63b don't have AS_VAR_APPEND or AS_VAR_IF
 m4_ifdef([AS_VAR_APPEND],,[as_fn_append () { eval $[1]=\$$[1]\$[2]; }
@@ -270,6 +270,7 @@ if test "${extdir_version:-0}" -ne $wineext_version; then
 fi
 if test -z "$wine_cv_extdir"; then
   enable_winefaudio=${enable_winefaudio:-no}
+  enable_winefreetype=${enable_winefreetype:-no}
   enable_winepng=${enable_winepng:-no}
   enable_winezlib=${enable_winezlib:-no}
 else
@@ -321,6 +322,7 @@ then
   enable_dbghelp=${enable_dbghelp:-no}
   enable_gdi32=${enable_gdi32:-no}
   enable_opcservices=${enable_opcservices:-no}
+  enable_winefreetype=${enable_winefreetype:-no}
   enable_winepng=${enable_winepng:-no}
   enable_wininet=${enable_wininet:-no}
 fi
@@ -328,6 +330,7 @@ fi
 if test "x$enable_winepng" = "xno"
 then
   enable_user32=${enable_user32:-no}
+  enable_winefreetype=${enable_winefreetype:-no}
 fi
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
@@ -3935,6 +3938,7 @@ WINE_CONFIG_MAKEFILE(dlls/xolehlp)
 WINE_CONFIG_MAKEFILE(dlls/xpsprint)
 WINE_CONFIG_MAKEFILE(dlls/xpssvcs)
 WINE_CONFIG_MAKEFILE(external/winefaudio)
+WINE_CONFIG_MAKEFILE(external/winefreetype)
 WINE_CONFIG_MAKEFILE(external/winepng)
 WINE_CONFIG_MAKEFILE(external/winezlib)
 WINE_CONFIG_MAKEFILE(fonts)
