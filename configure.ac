@@ -64,7 +64,6 @@ AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerbero
 AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
             [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
 AC_ARG_WITH(mingw,     AS_HELP_STRING([--without-mingw],[do not use the MinGW cross-compiler]))
-AC_ARG_WITH(mpg123,    AS_HELP_STRING([--without-mpg123],[do not use the mpg123 library]))
 AC_ARG_WITH(netapi,    AS_HELP_STRING([--without-netapi],[do not use the Samba NetAPI library]))
 AC_ARG_WITH(openal,    AS_HELP_STRING([--without-openal],[do not use OpenAL]),
             [if test "x$withval" = "xno"; then ac_cv_header_AL_al_h=no; ac_cv_header_OpenAL_al_h=no; fi])
@@ -331,6 +330,7 @@ fi
 if test "x$enable_winempg123" = "xno"
 then
   enable_l3codeca_acm=${enable_l3codeca_acm:-no}
+  enable_mp3dmod=${enable_mp3dmod:-no}
 fi
 
 if test "x$enable_winepng" = "xno"
@@ -1954,23 +1954,6 @@ then
 fi
 WINE_NOTICE_WITH(tiff,[test "x$ac_cv_lib_soname_tiff" = "x"],
                  [libtiff ${notice_platform}development files not found, TIFF won't be supported.])
-
-dnl **** Check for mpg123 ****
-if test "x$with_mpg123" != "xno"
-then
-    WINE_PACKAGE_FLAGS(MPG123,[libmpg123],[-lmpg123],,,
-        [AC_CHECK_HEADERS([mpg123.h])
-        if test "$ac_cv_header_mpg123_h" = "yes"
-        then
-            AC_CHECK_LIB(mpg123,mpg123_feed,[:],[MPG123_LIBS=""],[$MPG123_LIBS])
-        else
-            MPG123_CFLAGS=""
-            MPG123_LIBS=""
-        fi])
-fi
-WINE_NOTICE_WITH(mpg123,[test "x$ac_cv_lib_mpg123_mpg123_feed" != xyes],
-                 [libmpg123 ${notice_platform}development files not found (or too old), mp3 codec won't be supported.])
-test "x$ac_cv_lib_mpg123_mpg123_feed" = xyes || enable_mp3dmod=${enable_mp3dmod:-no}
 
 dnl **** Check for OpenAL 1.1 ****
 if test "$ac_cv_header_AL_al_h" = "yes"
