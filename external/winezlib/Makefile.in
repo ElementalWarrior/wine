@@ -1,0 +1,17 @@
+MODULE    = libwinezlib.a
+PARENTSRC = $(EXTSRCDIR)/zlib
+EXTRAINCL = -I$(EXTSRCDIR)/zlib
+EXTRADEFS = -DFAR=
+
+C_SRCS = \
+	adler32.c \
+	compress.c \
+	crc32.c \
+	deflate.c \
+	infback.c \
+	inffast.c \
+	inflate.c \
+	inftrees.c \
+	trees.c \
+	uncompr.c \
+	zutil.c

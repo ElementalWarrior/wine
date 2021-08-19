@@ -12,7 +12,7 @@ AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
 
 libwine_version="1.0"
-wineext_version=1
+wineext_version=2
 
 dnl autoconf versions before 2.63b don't have AS_VAR_APPEND or AS_VAR_IF
 m4_ifdef([AS_VAR_APPEND],,[as_fn_append () { eval $[1]=\$$[1]\$[2]; }
@@ -270,6 +270,7 @@ if test "${extdir_version:-0}" -ne $wineext_version; then
 fi
 if test -z "$wine_cv_extdir"; then
   enable_winefaudio=${enable_winefaudio:-no}
+  enable_winezlib=${enable_winezlib:-no}
 else
   AC_SUBST(EXTSRCDIR,$wine_cv_extdir)
 fi
@@ -3918,6 +3919,7 @@ WINE_CONFIG_MAKEFILE(dlls/xolehlp)
 WINE_CONFIG_MAKEFILE(dlls/xpsprint)
 WINE_CONFIG_MAKEFILE(dlls/xpssvcs)
 WINE_CONFIG_MAKEFILE(external/winefaudio)
+WINE_CONFIG_MAKEFILE(external/winezlib)
 WINE_CONFIG_MAKEFILE(fonts)
 WINE_CONFIG_MAKEFILE(include)
 WINE_CONFIG_MAKEFILE(libs/port)
