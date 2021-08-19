@@ -209,6 +209,7 @@ struct makefile
     const char     *importlib;
     int             disabled;
     int             use_msvcrt;
+    int             is_external;
     int             is_cross;
     int             is_win16;
     int             is_exe;
@@ -4268,6 +4269,7 @@ static void load_sources( struct makefile *make )
 
     if (make->module && strendswith( make->module, ".a" )) make->staticlib = make->module;
 
+    make->is_external = make->src_dir && !strncmp( make->src_dir + strlen( root_src_dir ), "/external/", 6 );
     make->is_win16 = strarray_exists( &make->extradllflags, "-m16" );
     if ((make->module && make->staticlib) || make->testdll || make->is_win16)
         strarray_add_uniq( &make->extradllflags, "-mno-cygwin" );
