@@ -109,6 +109,7 @@ struct incl_file
 #define FLAG_C_IMPLIB       0x020000  /* file is part of an import library */
 #define FLAG_C_UNIX         0x040000  /* file is part of a Unix library */
 #define FLAG_SFD_FONTS      0x080000  /* sfd file generated bitmap fonts */
+#define FLAG_EXTERNAL       0x800000  /* file is in the external source dir */
 
 static const struct
 {
@@ -154,6 +155,7 @@ static struct strarray delay_import_libs;
 static struct strarray top_install_lib;
 static struct strarray top_install_dev;
 static const char *root_src_dir;
+static const char *ext_src_dir;
 static const char *tools_dir;
 static const char *tools_ext;
 static const char *exe_ext;
@@ -1423,6 +1425,22 @@ static struct file *open_global_file( const struct makefile *make, const char *p
     return ret;
 }
 
+/*******************************************************************
+ *         open_external_file
+ *
+ * Open a file in the top-level source directory.
+ */
+static struct file *open_external_file( const struct makefile *make, const char *path, char **filename )
+{
+    char *src_path = concat_paths( ext_src_dir, path );
+    struct file *ret = load_file( src_path );
+    if (!ret) return NULL;
+
+    *filename = src_path;
+    ret->flags |= FLAG_EXTERNAL;
+    return ret;
+}
+
 
 /*******************************************************************
  *         open_global_header
@@ -1553,6 +1571,16 @@ static struct file *open_include_file( const struct makefile *make, struct incl_
     {
         const char *dir = make->include_paths.str[i];
 
+        if (ext_src_dir)
+        {
+            len = strlen( ext_src_dir );
+            if (!strncmp( dir, ext_src_dir, len ) && (!dir[len] || dir[len] == '/'))
+            {
+                while (dir[len] == '/') len++;
+                file = open_external_file( make, concat_paths( dir + len, pFile->name ), &pFile->filename );
+                if (file) return file;
+            }
+        }
         if (root_src_dir)
         {
             len = strlen( root_src_dir );
@@ -4424,6 +4452,7 @@ int main( int argc, char *argv[] )
     top_install_dev = get_expanded_make_var_array( top_makefile, "TOP_INSTALL_DEV" );
 
     root_src_dir = get_expanded_make_variable( top_makefile, "srcdir" );
+    ext_src_dir  = get_expanded_make_variable( top_makefile, "EXTSRCDIR" );
     tools_dir    = get_expanded_make_variable( top_makefile, "TOOLSDIR" );
     tools_ext    = get_expanded_make_variable( top_makefile, "TOOLSEXT" );
     exe_ext      = get_expanded_make_variable( top_makefile, "EXEEXT" );
