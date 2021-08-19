@@ -890,7 +890,7 @@ static void add_dependency( struct file *file, const char *name, enum incl_type 
     if (!memcmp( name, "../", 3 ))
         fatal_error( "#include directive with relative path not allowed\n" );
 
-    if (!strcmp( name, "config.h" ))
+    if (!strcmp( name, "config.h" ) && strncmp( ext_src_dir, file->name, strlen(ext_src_dir) ))
     {
         if (strendswith( file->name, ".h" ))
             fatal_error( "config.h must not be included by a header file\n" );
