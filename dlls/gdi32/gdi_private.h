@@ -208,4 +208,7 @@ extern BOOL EMFDC_StretchDIBits( DC_ATTR *dc_attr, INT x_dst, INT y_dst, INT wid
                                  INT height_src, const void *bits, const BITMAPINFO *info,
                                  UINT coloruse, DWORD rop ) DECLSPEC_HIDDEN;
 
+BOOL xform_has_rotate_and_uniform_scale_and_shear( const XFORM *xform ) DECLSPEC_HIDDEN;
+BOOL xform_decompose_rotation_and_translation( XFORM *xform, XFORM *rotation_and_translation ) DECLSPEC_HIDDEN;
+
 #endif /* __WINE_GDI_PRIVATE_H */

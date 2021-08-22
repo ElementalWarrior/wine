@@ -8891,6 +8891,8 @@ HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **man
 
     TRACE("%p, %p.\n", token, manager);
 
+    return E_NOTIMPL;
+
     if (!token || !manager)
         return E_POINTER;
 
